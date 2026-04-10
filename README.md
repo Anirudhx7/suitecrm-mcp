@@ -275,6 +275,33 @@ curl -H "X-CRM-User: admin" -H "X-CRM-Pass: password" \
 
 ---
 
+## Supported SuiteCRM Versions
+
+Tested on **SuiteCRM 8.8.x**. Should work on any SuiteCRM version that exposes the v4_1 REST API — this has been present since early SuiteCRM releases.
+
+Does not support SugarCRM — the APIs diverged significantly after the SuiteCRM fork.
+
+**Finding your endpoint URL**
+
+The path to the REST API varies depending on how SuiteCRM was installed. Common patterns:
+
+```
+https://crm.example.com/service/v4_1/rest.php
+https://crm.example.com/legacy/service/v4_1/rest.php
+https://crm.example.com/crm/service/v4_1/rest.php
+https://crm.example.com/crm/public/legacy/service/v4_1/rest.php
+```
+
+To find yours: log into SuiteCRM, go to **Admin → Diagnostic Tool** and look at the site URL, or check with whoever manages your server. The endpoint always ends in `/service/v4_1/rest.php` — only the prefix before it varies. Test it with:
+
+```bash
+curl -s -X POST "https://YOUR-PATH/service/v4_1/rest.php" \
+  --data 'method=get_server_info&input_type=JSON&response_type=JSON&rest_data={}}'
+# Should return: {"flavor":"CE","version":"...","gmt_time":"..."}
+```
+
+---
+
 ## Known Limitations
 
 **LDAP / SSO users cannot authenticate via the REST API**
