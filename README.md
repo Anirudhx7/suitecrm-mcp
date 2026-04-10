@@ -275,6 +275,18 @@ curl -H "X-CRM-User: admin" -H "X-CRM-Pass: password" \
 
 ---
 
+## Known Limitations
+
+**LDAP / SSO users cannot authenticate via the REST API**
+
+SuiteCRM's v4_1 REST API only authenticates against local database passwords. If your organisation uses LDAP, Active Directory, or SSO, users who log into the CRM web UI via those providers will not have a local password set — and the gateway will return `CRM login failed: Invalid Login` for them even with correct credentials.
+
+**Workaround:** Create a dedicated local API user directly in the SuiteCRM database (not via LDAP). This user exists only for API access and is not tied to your SSO provider.
+
+This is a SuiteCRM REST API limitation, not specific to this gateway.
+
+---
+
 ## Security Notes
 
 - Credentials travel as HTTP headers — use HTTPS in production (put the gateway behind a reverse proxy with a valid cert)
