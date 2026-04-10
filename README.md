@@ -185,6 +185,18 @@ Only use this on trusted internal networks. Never expose a TLS-skipping gateway 
 
 ---
 
+## Compatible MCP Clients
+
+Any MCP client that supports SSE transport with custom request headers will work. Tested with:
+
+| Client | Works |
+|--------|-------|
+| Claude Desktop | Yes |
+| Claude Code (CLI) | Yes |
+| OpenClaw | Yes |
+
+---
+
 ## Connecting to Claude Desktop
 
 Add to `~/Library/Application\ Support/Claude/claude_desktop_config.json` (Mac) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
@@ -243,6 +255,27 @@ claude mcp add suitecrm-crm1 --transport sse \
   --header "X-CRM-Pass:yourpassword" \
   http://YOUR_SERVER:8080/crm1/sse
 ```
+
+## Connecting to OpenClaw
+
+Add to your OpenClaw MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "suitecrm": {
+      "type": "sse",
+      "url": "http://YOUR_SERVER:3101/sse",
+      "headers": {
+        "X-CRM-User": "your_crm_username",
+        "X-CRM-Pass": "your_crm_password"
+      }
+    }
+  }
+}
+```
+
+For multi-entity, add one entry per CRM using the nginx URL pattern (`http://YOUR_SERVER:8080/<code>/sse`).
 
 ---
 
