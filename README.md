@@ -68,7 +68,7 @@ For one CRM, no nginx. Connects directly to the port.
 **Requirements:** Ubuntu/Debian, Python 3.8+, root access
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/suitecrm-mcp.git
+git clone https://github.com/anirudhx7/suitecrm-mcp.git
 cd suitecrm-mcp
 sudo python3 install-single.py \
   --endpoint https://your-crm.example.com/service/v4_1/rest.php \
