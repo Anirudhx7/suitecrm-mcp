@@ -357,4 +357,4 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 
 ## License
 
-MIT
+<a href="https://github.com/Anirudhx7/suitecrm-mcp/blob/55c7985e1d67dd2fd49f6c793608d2380c107a7e/LICENSE">MIT</a> 
