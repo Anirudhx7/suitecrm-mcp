@@ -51,7 +51,7 @@ def error(m): print(f"{RED}[ERROR]{NC} {m}"); sys.exit(1)
 
 SAFE_DOMAIN_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9.-]+$')
 SAFE_EMAIL_RE  = re.compile(r'^[^@\s,;|&<>]+@[^@\s,;|&<>]+\.[^@\s,;|&<>]+$')
-SAFE_CODE_RE   = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$')
+SAFE_CODE_RE   = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$')
 
 def validate_domain(d):
     if not SAFE_DOMAIN_RE.match(d):
@@ -63,11 +63,13 @@ def validate_email(e):
 
 def validate_code(c):
     if not SAFE_CODE_RE.match(c):
-        error(f"Invalid entity code: {c!r} - must contain only letters, digits, and hyphens")
+        error(f"Invalid entity code: {c!r} - must contain only letters, digits, hyphens, and underscores")
 
-def run(cmd, check=True, capture=False):
+def run(cmd, check=True, capture=False, cwd=None):
+    # String commands are only used for unavoidable shell pipelines (e.g. curl | bash).
+    # All privileged paths use list form to avoid shell injection.
     if isinstance(cmd, str): cmd = ["bash", "-c", cmd]
-    r = subprocess.run(cmd, capture_output=capture, text=True)
+    r = subprocess.run(cmd, capture_output=capture, text=True, cwd=cwd)
     if check and r.returncode != 0:
         error(f"Command failed: {' '.join(cmd)}\n{r.stderr.strip() if capture else ''}")
     return r
@@ -78,8 +80,7 @@ def write_file(path, content, mode=None):
     if mode: run(["chmod", mode, path])
 
 def node_bin():
-    r = run("which node", check=False, capture=True)
-    return r.stdout.strip() if r.returncode == 0 else "/usr/bin/node"
+    return shutil.which("node") or "/usr/bin/node"
 
 def script_dir():
     return Path(__file__).parent.resolve()
@@ -110,16 +111,17 @@ def load_entities(config_path):
 
 def check_deps():
     info("Checking dependencies...")
-    if run("which node", check=False, capture=True).returncode != 0:
+    if not shutil.which("node"):
         info("Installing Node.js LTS...")
-        run("curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -")
-        run("apt-get install -y nodejs")
-        ok(f"Node.js installed: {run('node --version', capture=True).stdout.strip()}")
+        run("curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -")  # shell pipeline - no list form possible
+        run(["apt-get", "install", "-y", "nodejs"])
+        ok(f"Node.js installed: {run(['node', '--version'], capture=True).stdout.strip()}")
     else:
-        ok(f"Node.js: {run('node --version', capture=True).stdout.strip()}")
-    if run("which nginx", check=False, capture=True).returncode != 0:
+        ok(f"Node.js: {run(['node', '--version'], capture=True).stdout.strip()}")
+    if not shutil.which("nginx"):
         info("Installing nginx...")
-        run("apt-get update -qq && apt-get install -y nginx")
+        run(["apt-get", "update", "-qq"])
+        run(["apt-get", "install", "-y", "nginx"])
         ok("nginx installed")
     else:
         ok("nginx: present")
@@ -136,7 +138,7 @@ def install_server():
     shutil.copy(pkg, f"{SERVER_DIR}/package.json")
     if lockfile.exists():
         shutil.copy(lockfile, f"{SERVER_DIR}/package-lock.json")
-    run(f"cd {SERVER_DIR} && npm ci --omit=dev --silent")
+    run(["npm", "ci", "--omit=dev", "--silent"], cwd=SERVER_DIR)
     ok("Server installed")
 
 def install_env_for(code, data):
@@ -184,9 +186,9 @@ def install_service_for(code, label):
     ok(f"  Service: /etc/systemd/system/{svc}.service")
 
 def install_certbot():
-    if run("which certbot", check=False, capture=True).returncode != 0:
+    if not shutil.which("certbot"):
         info("Installing certbot...")
-        run("apt-get install -y certbot python3-certbot-nginx")
+        run(["apt-get", "install", "-y", "certbot", "python3-certbot-nginx"])
         ok("certbot installed")
     else:
         ok("certbot: present")
@@ -245,14 +247,14 @@ server {{
     if Path(default).exists():
         os.remove(default)
         warn("Removed nginx default site")
-    run("nginx -t")
-    run("systemctl enable --now nginx")
-    run("systemctl reload nginx")
+    run(["nginx", "-t"])
+    run(["systemctl", "enable", "--now", "nginx"])
+    run(["systemctl", "reload", "nginx"])
     ok("nginx configured and reloaded")
 
 def get_running_entities():
     """Return list of entity codes with active systemd services."""
-    r = run("systemctl list-units --no-legend --plain 'suitecrm-mcp-*'", capture=True, check=False)
+    r = run(["systemctl", "list-units", "--no-legend", "--plain", "suitecrm-mcp-*"], capture=True, check=False)
     codes = []
     for line in r.stdout.splitlines():
         parts = line.split()
@@ -286,7 +288,7 @@ def show_status(entities=None):
         svc = f"suitecrm-mcp-{code}"
         label = data.get("label", code)
         port = data.get("port")
-        r = run(f"systemctl is-active {svc}", check=False, capture=True)
+        r = run(["systemctl", "is-active", svc], check=False, capture=True)
         active = r.stdout.strip() == "active"
         status_str = f"{GREEN}active{NC}" if active else f"{RED}inactive{NC}"
         print(f"\n  [{code}] {label}")
@@ -315,7 +317,7 @@ def remove_entity(code):
         if Path(path).exists():
             os.remove(path)
             ok(f"  Removed: {path}")
-    run("systemctl daemon-reload")
+    run(["systemctl", "daemon-reload"])
     ok(f"Entity '{code}' removed.")
 
 def main():
@@ -356,7 +358,7 @@ def main():
                 if Path(path).exists():
                     os.remove(path)
                     ok(f"Removed: {path}")
-            run("systemctl reload nginx", check=False)
+            run(["systemctl", "reload", "nginx"], check=False)
         sys.exit(0)
 
     entities = load_entities(args.config)
@@ -368,7 +370,7 @@ def main():
         install_server(); print()
         info("Restarting all services...")
         for code in entities:
-            run(f"systemctl restart suitecrm-mcp-{code}", check=False)
+            run(["systemctl", "restart", f"suitecrm-mcp-{code}"], check=False)
             ok(f"  Restarted: suitecrm-mcp-{code}")
         show_status(entities); sys.exit(0)
 
@@ -393,9 +395,9 @@ def main():
         label = data.get("label", code)
         install_env_for(code, data)
         install_service_for(code, label)
-    run("systemctl daemon-reload")
+    run(["systemctl", "daemon-reload"])
     for code in to_install:
-        run(f"systemctl enable --now suitecrm-mcp-{code}")
+        run(["systemctl", "enable", "--now", f"suitecrm-mcp-{code}"])
         ok(f"  Started: suitecrm-mcp-{code}")
     print()
 

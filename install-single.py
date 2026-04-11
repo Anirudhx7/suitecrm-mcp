@@ -56,9 +56,11 @@ def validate_email(e):
     if not SAFE_EMAIL_RE.match(e):
         error(f"Invalid email address: {e!r}")
 
-def run(cmd, check=True, capture=False):
+def run(cmd, check=True, capture=False, cwd=None):
+    # String commands are only used for unavoidable shell pipelines (e.g. curl | bash).
+    # All privileged paths use list form to avoid shell injection.
     if isinstance(cmd, str): cmd = ["bash", "-c", cmd]
-    r = subprocess.run(cmd, capture_output=capture, text=True)
+    r = subprocess.run(cmd, capture_output=capture, text=True, cwd=cwd)
     if check and r.returncode != 0:
         error(f"Command failed: {' '.join(cmd)}\n{r.stderr.strip() if capture else ''}")
     return r
@@ -69,20 +71,19 @@ def write_file(path, content, mode=None):
     if mode: run(["chmod", mode, path])
 
 def node_bin():
-    r = run("which node", check=False, capture=True)
-    return r.stdout.strip() if r.returncode == 0 else "/usr/bin/node"
+    return shutil.which("node") or "/usr/bin/node"
 
 def script_dir():
     return Path(__file__).parent.resolve()
 
 def check_node():
-    if run("which node", check=False, capture=True).returncode != 0:
+    if not shutil.which("node"):
         info("Installing Node.js LTS...")
-        run("curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -")
-        run("apt-get install -y nodejs")
-        ok(f"Node.js installed: {run('node --version', capture=True).stdout.strip()}")
+        run("curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -")  # shell pipeline - no list form possible
+        run(["apt-get", "install", "-y", "nodejs"])
+        ok(f"Node.js installed: {run(['node', '--version'], capture=True).stdout.strip()}")
     else:
-        ok(f"Node.js: {run('node --version', capture=True).stdout.strip()}")
+        ok(f"Node.js: {run(['node', '--version'], capture=True).stdout.strip()}")
 
 def install_server():
     info(f"Installing server to {SERVER_DIR} ...")
@@ -96,7 +97,7 @@ def install_server():
     shutil.copy(pkg, f"{SERVER_DIR}/package.json")
     if lockfile.exists():
         shutil.copy(lockfile, f"{SERVER_DIR}/package-lock.json")
-    run(f"cd {SERVER_DIR} && npm ci --omit=dev --silent")
+    run(["npm", "ci", "--omit=dev", "--silent"], cwd=SERVER_DIR)
     ok("Server installed")
 
 def install_env(endpoint, port, prefix, label, tls_skip):
@@ -134,13 +135,13 @@ def install_service(port, label):
         f"WantedBy=multi-user.target\n"
     )
     write_file(SVC_FILE, content)
-    run("systemctl daemon-reload")
-    run(f"systemctl enable --now {SVC_NAME}")
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", SVC_NAME])
     ok(f"Service started: {SVC_NAME}")
 
 def show_status():
     import urllib.request
-    r = run(f"systemctl is-active {SVC_NAME}", check=False, capture=True)
+    r = run(["systemctl", "is-active", SVC_NAME], check=False, capture=True)
     active = r.stdout.strip() == "active"
     status_str = f"{GREEN}active{NC}" if active else f"{RED}inactive{NC}"
 
@@ -174,29 +175,30 @@ def uninstall():
     warn("This will stop and remove the SuiteCRM MCP gateway.")
     if input("  Type 'yes' to confirm: ").strip().lower() != "yes":
         info("Aborted."); sys.exit(0)
-    run(f"systemctl stop {SVC_NAME}", check=False)
-    run(f"systemctl disable {SVC_NAME}", check=False)
+    run(["systemctl", "stop", SVC_NAME], check=False)
+    run(["systemctl", "disable", SVC_NAME], check=False)
     for path in [SVC_FILE, ENV_FILE, SERVER_DIR, NGINX_LINK, NGINX_CONF]:
         if Path(path).exists():
             if Path(path).is_dir(): shutil.rmtree(path)
             else: os.remove(path)
             ok(f"Removed: {path}")
-    run("systemctl daemon-reload")
-    run("systemctl reload nginx", check=False)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "reload", "nginx"], check=False)
     ok("Uninstalled.")
 
 def install_nginx_tls(domain, email, port):
     """Install nginx as TLS terminator + obtain Let's Encrypt cert via certbot."""
-    if run("which nginx", check=False, capture=True).returncode != 0:
+    if not shutil.which("nginx"):
         info("Installing nginx...")
-        run("apt-get update -qq && apt-get install -y nginx")
+        run(["apt-get", "update", "-qq"])
+        run(["apt-get", "install", "-y", "nginx"])
         ok("nginx installed")
     else:
-        ok(f"nginx: present")
+        ok("nginx: present")
 
-    if run("which certbot", check=False, capture=True).returncode != 0:
+    if not shutil.which("certbot"):
         info("Installing certbot...")
-        run("apt-get install -y certbot python3-certbot-nginx")
+        run(["apt-get", "install", "-y", "certbot", "python3-certbot-nginx"])
         ok("certbot installed")
     else:
         ok("certbot: present")
@@ -240,9 +242,9 @@ def install_nginx_tls(domain, email, port):
     if Path(default_site).exists():
         os.remove(default_site)
         warn("Removed nginx default site")
-    run("nginx -t")
-    run("systemctl enable --now nginx")
-    run("systemctl reload nginx")
+    run(["nginx", "-t"])
+    run(["systemctl", "enable", "--now", "nginx"])
+    run(["systemctl", "reload", "nginx"])
     ok("nginx configured")
 
     info(f"Obtaining TLS certificate for {domain} ...")
@@ -300,7 +302,7 @@ def main():
     if args.update:
         info("Update mode - reinstalling server code...")
         install_server()
-        run(f"systemctl restart {SVC_NAME}")
+        run(["systemctl", "restart", SVC_NAME])
         ok(f"Restarted: {SVC_NAME}")
         show_status(); sys.exit(0)
 
