@@ -49,10 +49,10 @@ flowchart TB
         OC["OpenClaw"]
     end
 
-    Clients -->|"SSE connection\nX-CRM-User / X-CRM-Pass headers"| NX
+    Clients -->|"HTTPS :443\nX-CRM-User / X-CRM-Pass headers"| NX
 
     subgraph Server["Your Server"]
-        NX["nginx :8080\nmulti-entity routing"]
+        NX["nginx :443\nTLS termination\nmulti-entity routing"]
 
         NX -->|"/crm1/"| N1["Node.js :3101\ntools: suitecrm_crm1_*"]
         NX -->|"/crm2/"| N2["Node.js :3102\ntools: suitecrm_crm2_*"]
@@ -70,6 +70,8 @@ flowchart TB
 flowchart LR
     MC["MCP Client\nClaude / OpenClaw"] -->|"SSE :3101\nX-CRM-User / X-CRM-Pass"| N["Node.js :3101\ntools: suitecrm_*"] -->|"v4_1 REST API"| CRM[("SuiteCRM")]
 ```
+
+*With `--domain`: nginx is added in front for automatic HTTPS termination — the client connects on :443 instead of :3101.*
 
 Each Node.js process is a standalone systemd service. Credentials are never stored — each SSE connection authenticates independently and gets its own CRM session, which auto-renews on expiry and is cleaned up on disconnect.
 
