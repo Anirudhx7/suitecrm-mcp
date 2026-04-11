@@ -18,15 +18,26 @@ Options:
   --prefix     Tool name prefix (default: suitecrm)
   --label      Service description (default: My CRM)
   --tls-skip   Disable TLS verification for self-signed certs (NOT recommended)
+  --domain     Domain name to enable HTTPS via Let's Encrypt (e.g. mcp.example.com)
+  --email      Email for Let's Encrypt certificate (required when --domain is set)
+
+HTTPS notes (--domain):
+  - The domain must already point to this server's public IP
+  - Ports 80 and 443 must be open (80 for the ACME challenge, 443 for HTTPS)
+  - Installs nginx as a TLS-terminating reverse proxy in front of the gateway
+  - Obtains and auto-renews a certificate via certbot
+  - Without --domain, the gateway is reachable over plain HTTP on --port (default 3101)
 """
 
 import os, sys, subprocess, json, argparse, shutil
 from pathlib import Path
 
-SERVER_DIR = "/opt/suitecrm-mcp"
-ENV_FILE   = "/etc/suitecrm-mcp/gateway.env"
-SVC_NAME   = "suitecrm-mcp"
-SVC_FILE   = f"/etc/systemd/system/{SVC_NAME}.service"
+SERVER_DIR  = "/opt/suitecrm-mcp"
+ENV_FILE    = "/etc/suitecrm-mcp/gateway.env"
+SVC_NAME    = "suitecrm-mcp"
+SVC_FILE    = f"/etc/systemd/system/{SVC_NAME}.service"
+NGINX_CONF  = "/etc/nginx/sites-available/suitecrm-mcp"
+NGINX_LINK  = "/etc/nginx/sites-enabled/suitecrm-mcp"
 
 RED = "\033[0;31m"; GREEN = "\033[0;32m"; YELLOW = "\033[1;33m"; CYAN = "\033[0;36m"; NC = "\033[0m"
 def info(m): print(f"{CYAN}[INFO]{NC} {m}")
@@ -158,6 +169,72 @@ def uninstall():
     run("systemctl daemon-reload")
     ok("Uninstalled.")
 
+def install_nginx_tls(domain, email, port):
+    """Install nginx as TLS terminator + obtain Let's Encrypt cert via certbot."""
+    if run("which nginx", check=False, capture=True).returncode != 0:
+        info("Installing nginx...")
+        run("apt-get update -qq && apt-get install -y nginx")
+        ok("nginx installed")
+    else:
+        ok(f"nginx: present")
+
+    if run("which certbot", check=False, capture=True).returncode != 0:
+        info("Installing certbot...")
+        run("apt-get install -y certbot python3-certbot-nginx")
+        ok("certbot installed")
+    else:
+        ok("certbot: present")
+
+    # Write HTTP-only config first; certbot --nginx will add the SSL block
+    conf = (
+        f"server {{\n"
+        f"    listen 80;\n"
+        f"    server_name {domain};\n"
+        f"    large_client_header_buffers 4 32k;\n"
+        f"    client_max_body_size 10m;\n"
+        f"    access_log /var/log/nginx/suitecrm-mcp.access.log;\n"
+        f"    error_log  /var/log/nginx/suitecrm-mcp.error.log;\n\n"
+        f"    location / {{\n"
+        f"        proxy_pass http://127.0.0.1:{port};\n"
+        f"        proxy_http_version 1.1;\n"
+        f"        proxy_set_header Connection '';\n"
+        f"        proxy_set_header Host $host;\n"
+        f"        proxy_pass_request_headers on;\n"
+        f"        proxy_buffering off;\n"
+        f"        proxy_cache off;\n"
+        f"        proxy_read_timeout 3600s;\n"
+        f"    }}\n"
+        f"}}\n"
+    )
+    write_file(NGINX_CONF, conf)
+    if not Path(NGINX_LINK).exists():
+        os.symlink(NGINX_CONF, NGINX_LINK)
+    default_site = "/etc/nginx/sites-enabled/default"
+    if Path(default_site).exists():
+        os.remove(default_site)
+        warn("Removed nginx default site")
+    run("nginx -t")
+    run("systemctl enable --now nginx")
+    run("systemctl reload nginx")
+    ok("nginx configured")
+
+    info(f"Obtaining TLS certificate for {domain} ...")
+    r = run(
+        f"certbot --nginx -d {domain} --non-interactive --agree-tos -m {email} --redirect",
+        check=False, capture=True
+    )
+    if r.returncode != 0:
+        warn(f"certbot failed:\n{r.stderr.strip()}")
+        warn("Gateway is running but HTTPS setup failed. Check that:")
+        warn(f"  - {domain} points to this server's public IP")
+        warn("  - Port 80 is open (needed for the ACME challenge)")
+        warn("  - Port 443 is open")
+        warn(f"  Re-run manually: certbot --nginx -d {domain} -m {email} --agree-tos --redirect")
+    else:
+        ok(f"TLS certificate obtained for {domain}")
+        ok("Auto-renewal configured via certbot systemd timer")
+
+
 def prompt_if_missing(val, prompt_text, default=None):
     if val: return val
     suffix = f" [{default}]" if default else ""
@@ -171,10 +248,15 @@ def main():
     parser.add_argument("--prefix",   default="suitecrm", help="Tool name prefix (default: suitecrm)")
     parser.add_argument("--label",    default="My CRM", help="Service description")
     parser.add_argument("--tls-skip", action="store_true", help="Disable TLS cert verification")
+    parser.add_argument("--domain",   help="Domain for HTTPS via Let's Encrypt (e.g. mcp.example.com)")
+    parser.add_argument("--email",    help="Email for Let's Encrypt cert (required with --domain)")
     parser.add_argument("--update",   action="store_true", help="Update server code and restart")
     parser.add_argument("--status",   action="store_true", help="Show status")
     parser.add_argument("--uninstall",action="store_true", help="Remove everything")
     args = parser.parse_args()
+
+    if args.domain and not args.email:
+        error("--email is required when --domain is set (needed for Let's Encrypt)")
 
     if os.geteuid() != 0: error("Run as root (sudo)")
 
@@ -204,8 +286,14 @@ def main():
     info("Writing env file..."); install_env(endpoint, args.port, args.prefix, args.label, args.tls_skip); print()
     info("Installing systemd service..."); install_service(args.port, args.label); print()
 
+    if args.domain:
+        info("Setting up HTTPS..."); install_nginx_tls(args.domain, args.email, args.port); print()
+
     show_status()
-    print(f"  SSE endpoint : http://YOUR_SERVER_IP:{args.port}/sse")
+    if args.domain:
+        print(f"  SSE endpoint : https://{args.domain}/sse")
+    else:
+        print(f"  SSE endpoint : http://YOUR_SERVER_IP:{args.port}/sse")
     print()
     info("Connect with X-CRM-User and X-CRM-Pass headers.")
     info("See README.md for Claude Desktop / Claude Code config examples.")
