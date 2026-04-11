@@ -103,11 +103,10 @@ For production: create a dedicated API user with only the module permissions you
 
 ## Docker
 
-The fastest way to run the gateway without touching Node.js or system packages.
+The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
 ```bash
-git clone https://github.com/anirudhx7/suitecrm-mcp.git
-cd suitecrm-mcp
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/main/docker-compose.yml
 ```
 
 Edit `docker-compose.yml` and set `SUITECRM_ENDPOINT` to your CRM's REST API URL, then:
@@ -116,7 +115,12 @@ Edit `docker-compose.yml` and set `SUITECRM_ENDPOINT` to your CRM's REST API URL
 docker compose up -d
 ```
 
-The gateway runs at `http://localhost:3101/sse`.
+The gateway runs at `http://localhost:3101/sse`. Docker pulls the image automatically - no clone needed.
+
+To update to the latest version:
+```bash
+docker compose pull && docker compose up -d
+```
 
 For self-signed CRM certificates, add `NODE_TLS_REJECT_UNAUTHORIZED: "0"` to the environment block. For HTTPS termination, put a reverse proxy (nginx, Caddy) in front.
 
