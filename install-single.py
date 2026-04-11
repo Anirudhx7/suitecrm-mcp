@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SuiteCRM MCP Gateway — Single Entity Installer
+SuiteCRM MCP Gateway - Single Entity Installer
 ===============================================
 Installs one MCP gateway instance for one SuiteCRM.
-No nginx required — connect directly to the port.
+No nginx required - connect directly to the port.
 
 Usage:
   sudo python3 install-single.py                  # interactive prompts
@@ -87,7 +87,7 @@ def install_server():
 
 def install_env(endpoint, port, prefix, label, tls_skip):
     lines = [
-        f"# SuiteCRM MCP Gateway — {label}",
+        f"# SuiteCRM MCP Gateway - {label}",
         f"SUITECRM_ENDPOINT={endpoint}",
         f"SUITECRM_PREFIX={prefix}",
         f"PORT={port}",
@@ -105,7 +105,7 @@ def install_service(port, label):
     nb = node_bin()
     content = (
         f"[Unit]\n"
-        f"Description=SuiteCRM MCP Gateway — {label}\n"
+        f"Description=SuiteCRM MCP Gateway - {label}\n"
         f"After=network.target\n\n"
         f"[Service]\n"
         f"Type=simple\n"
@@ -242,7 +242,7 @@ def prompt_if_missing(val, prompt_text, default=None):
     return resp or default
 
 def main():
-    parser = argparse.ArgumentParser(description="SuiteCRM MCP Gateway — Single Entity Installer")
+    parser = argparse.ArgumentParser(description="SuiteCRM MCP Gateway - Single Entity Installer")
     parser.add_argument("--endpoint", help="SuiteCRM REST endpoint URL")
     parser.add_argument("--port",     type=int, default=3101, help="Listen port (default: 3101)")
     parser.add_argument("--prefix",   default="suitecrm", help="Tool name prefix (default: suitecrm)")
@@ -266,10 +266,10 @@ def main():
     if args.uninstall:
         uninstall(); sys.exit(0)
 
-    print(); info("=" * 56); info("SUITECRM MCP GATEWAY — SINGLE ENTITY INSTALLER"); info("=" * 56); print()
+    print(); info("=" * 56); info("SUITECRM MCP GATEWAY - SINGLE ENTITY INSTALLER"); info("=" * 56); print()
 
     if args.update:
-        info("Update mode — reinstalling server code...")
+        info("Update mode - reinstalling server code...")
         install_server()
         run(f"systemctl restart {SVC_NAME}")
         ok(f"Restarted: {SVC_NAME}")

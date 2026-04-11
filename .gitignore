@@ -1,7 +1,7 @@
-# Private source files with client-specific config — never commit
+# Private source files with client-specific config - never commit
 my-files/
 
-# Credentials and config with real values — never commit these
+# Credentials and config with real values - never commit these
 *.env
 !.env.example
 entities.json
@@ -11,7 +11,7 @@ entities.json
 node_modules/
 server/node_modules/
 
-# Internal Claude context — not for public repo
+# Internal Claude context - not for public repo
 CLAUDE.md
 .claude/
 # OS

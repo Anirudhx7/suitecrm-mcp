@@ -4,11 +4,11 @@
  * Transport: HTTP + SSE | Auth: X-CRM-User/Pass headers | SDK: 1.29.0
  *
  * Environment variables:
- *   SUITECRM_ENDPOINT  — required, e.g. https://crm.example.com/service/v4_1/rest.php
- *   SUITECRM_PREFIX    — tool name prefix, default "suitecrm"
- *   PORT               — listen port, default 3101
- *   SUITECRM_CODE      — entity code for multi-entity nginx routing (leave blank for single)
- *   NODE_TLS_REJECT_UNAUTHORIZED — set to "0" only for self-signed certs (with caution)
+ *   SUITECRM_ENDPOINT  - required, e.g. https://crm.example.com/service/v4_1/rest.php
+ *   SUITECRM_PREFIX    - tool name prefix, default "suitecrm"
+ *   PORT               - listen port, default 3101
+ *   SUITECRM_CODE      - entity code for multi-entity nginx routing (leave blank for single)
+ *   NODE_TLS_REJECT_UNAUTHORIZED - set to "0" only for self-signed certs (with caution)
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -104,7 +104,7 @@ async function crmCall(sid, method, params) {
     return await rawCall(method, { session: crmSid, ...params });
   } catch (err) {
     if (err.code === 11) {
-      process.stderr.write(`[${PREFIX}] Session expired — re-logging in\n`);
+      process.stderr.write(`[${PREFIX}] Session expired - re-logging in\n`);
       crmSessions.delete(sid);
       crmSid = await ensureCrmSession(sid);
       return await rawCall(method, { session: crmSid, ...params });
@@ -317,7 +317,7 @@ function createMcpServer(sid) {
       }
       return { content: [{ type:'text', text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
-      const msg = [err.message, err.description].filter(Boolean).join(' — ');
+      const msg = [err.message, err.description].filter(Boolean).join(' - ');
       return { content: [{ type:'text', text:`Error: ${msg}` }], isError: true };
     }
   });
@@ -342,7 +342,7 @@ const authRateLimit = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests — try again in 15 minutes' },
+  message: { error: 'Too many requests - try again in 15 minutes' },
 });
 
 app.get('/test', authRateLimit, async (req, res) => {
@@ -397,7 +397,7 @@ app.post('/messages', async (req, res) => {
 });
 
 process.on('SIGTERM', () => {
-  process.stderr.write(`[${PREFIX}] SIGTERM received — shutting down\n`);
+  process.stderr.write(`[${PREFIX}] SIGTERM received - shutting down\n`);
   for (const [, t] of transports) t.close?.();
   process.exit(0);
 });

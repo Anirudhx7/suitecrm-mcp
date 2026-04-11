@@ -1,17 +1,17 @@
 # suitecrm-mcp
 
-An open-source MCP (Model Context Protocol) gateway for SuiteCRM. Lets AI assistants — Claude, OpenAI, or any MCP-compatible client — read and write your CRM data over a persistent SSE connection.
+An open-source MCP (Model Context Protocol) gateway for SuiteCRM. Lets AI assistants - Claude, OpenAI, or any MCP-compatible client - read and write your CRM data over a persistent SSE connection.
 
 Built from a real production deployment. CData's version is commercial. This one isn't.
 
 ## Features
 
 - **13 tools** covering the full CRUD surface: search, get, create, update, delete, count, relationships, module introspection
-- **SSE transport** — compatible with Claude Desktop, Claude Code, and any MCP client that supports HTTP+SSE
-- **Per-connection header auth** — credentials never stored server-side; each connection supplies its own
-- **Session auto-renewal** — CRM sessions re-authenticate transparently on expiry
-- **Two installers** — single CRM (no nginx) or N CRMs behind nginx, both as systemd services
-- **Entity-prefixed tools** — run multiple CRM instances side-by-side without name collisions
+- **SSE transport** - compatible with Claude Desktop, Claude Code, and any MCP client that supports HTTP+SSE
+- **Per-connection header auth** - credentials never stored server-side; each connection supplies its own
+- **Session auto-renewal** - CRM sessions re-authenticate transparently on expiry
+- **Two installers** - single CRM (no nginx) or N CRMs behind nginx, both as systemd services
+- **Entity-prefixed tools** - run multiple CRM instances side-by-side without name collisions
 
 ## Tools
 
@@ -33,7 +33,7 @@ Built from a real production deployment. CData's version is commercial. This one
 
 Replace `{prefix}` with your configured `SUITECRM_PREFIX` (default: `suitecrm`).
 
-Supported modules include: Accounts, Contacts, Leads, Opportunities, Cases, Calls, Meetings, Tasks, Notes, Emails, Documents, Campaigns, AOS_Quotes, AOS_Invoices, AOS_Products, AOS_Contracts, AOR_Reports, AOW_WorkFlow, SecurityGroups — and any custom modules in your instance.
+Supported modules include: Accounts, Contacts, Leads, Opportunities, Cases, Calls, Meetings, Tasks, Notes, Emails, Documents, Campaigns, AOS_Quotes, AOS_Invoices, AOS_Products, AOS_Contracts, AOR_Reports, AOW_WorkFlow, SecurityGroups - and any custom modules in your instance.
 
 ---
 
@@ -71,9 +71,9 @@ flowchart LR
     MC["MCP Client\nClaude / OpenClaw"] -->|"SSE :3101\nX-CRM-User / X-CRM-Pass"| N["Node.js :3101\ntools: suitecrm_*"] -->|"v4_1 REST API"| CRM[("SuiteCRM")]
 ```
 
-*With `--domain`: nginx is added in front for automatic HTTPS termination — the client connects on :443 instead of :3101.*
+*With `--domain`: nginx is added in front for automatic HTTPS termination - the client connects on :443 instead of :3101.*
 
-Each Node.js process is a standalone systemd service. Credentials are never stored — each SSE connection authenticates independently and gets its own CRM session, which auto-renews on expiry and is cleaned up on disconnect.
+Each Node.js process is a standalone systemd service. Credentials are never stored - each SSE connection authenticates independently and gets its own CRM session, which auto-renews on expiry and is cleaned up on disconnect.
 
 ---
 
@@ -95,13 +95,13 @@ Before connecting, make sure your CRM user has API access enabled:
 3. Check **"Is Admin"** OR set **"API User"** to Yes (the field name varies by SuiteCRM version)
 4. Save
 
-If API access isn't enabled, the gateway returns `CRM login failed: Invalid Login` with no further detail — this is the most common first-run failure.
+If API access isn't enabled, the gateway returns `CRM login failed: Invalid Login` with no further detail - this is the most common first-run failure.
 
 For production: create a dedicated API user with only the module permissions your AI assistant needs. Don't use the admin account.
 
 ---
 
-## Quick Start — Single CRM
+## Quick Start - Single CRM
 
 For one CRM, no nginx. Connects directly to the port.
 
@@ -153,13 +153,13 @@ curl -s -H "X-CRM-User: admin" -H "X-CRM-Pass: yourpassword" \
 
 After adding the MCP server config (see [Connecting to Claude Desktop](#connecting-to-claude-desktop)) and restarting Claude Desktop, click the hammer icon in the bottom-left of the chat window. You should see 13 tools listed: `suitecrm_search`, `suitecrm_get`, etc.
 
-Try a test prompt: `"List the first 5 accounts in the CRM"` — Claude should call `suitecrm_search` automatically.
+Try a test prompt: `"List the first 5 accounts in the CRM"` - Claude should call `suitecrm_search` automatically.
 
 ---
 
 ## Multi-Entity Install
 
-For N CRM instances behind nginx — each gets its own port and path.
+For N CRM instances behind nginx - each gets its own port and path.
 
 **1. Copy and fill in the config:**
 ```bash
@@ -214,18 +214,18 @@ sudo python3 install-multi.py --remove crm2
 
 ## Configuration
 
-### Single entity — environment variables
+### Single entity - environment variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SUITECRM_ENDPOINT` | Yes | — | Full URL to `/service/v4_1/rest.php` |
+| `SUITECRM_ENDPOINT` | Yes | - | Full URL to `/service/v4_1/rest.php` |
 | `SUITECRM_PREFIX` | No | `suitecrm` | Tool name prefix |
 | `PORT` | No | `3101` | Listen port |
-| `SUITECRM_CODE` | No | — | Entity code for multi-entity nginx routing |
-| `NODE_TLS_REJECT_UNAUTHORIZED` | No | — | Set to `0` only for self-signed certs |
-| `NODE_NO_WARNINGS` | No | — | Set to `1` to suppress Node warnings |
+| `SUITECRM_CODE` | No | - | Entity code for multi-entity nginx routing |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | No | - | Set to `0` only for self-signed certs |
+| `NODE_NO_WARNINGS` | No | - | Set to `1` to suppress Node warnings |
 
-### Multi-entity — entities.json
+### Multi-entity - entities.json
 
 ```json
 {
@@ -386,18 +386,18 @@ curl -H "X-CRM-User: admin" -H "X-CRM-Pass: password" \
 ```
 
 **Common issues:**
-- `CRM login failed` — wrong credentials, or the CRM user doesn't have API access enabled in SuiteCRM
-- `Non-JSON response` — wrong endpoint URL, or the CRM is returning an error page; check the URL ends in `/service/v4_1/rest.php`
-- `ECONNREFUSED` — the service isn't running; check `journalctl -u suitecrm-mcp`
-- SSE connection drops — normal for long idle periods; clients reconnect automatically
+- `CRM login failed` - wrong credentials, or the CRM user doesn't have API access enabled in SuiteCRM
+- `Non-JSON response` - wrong endpoint URL, or the CRM is returning an error page; check the URL ends in `/service/v4_1/rest.php`
+- `ECONNREFUSED` - the service isn't running; check `journalctl -u suitecrm-mcp`
+- SSE connection drops - normal for long idle periods; clients reconnect automatically
 
 ---
 
 ## Supported SuiteCRM Versions
 
-Tested on **SuiteCRM 8.8.x**. Should work on any SuiteCRM version that exposes the v4_1 REST API — this has been present since early SuiteCRM releases.
+Tested on **SuiteCRM 8.8.x**. Should work on any SuiteCRM version that exposes the v4_1 REST API - this has been present since early SuiteCRM releases.
 
-Does not support SugarCRM — the APIs diverged significantly after the SuiteCRM fork.
+Does not support SugarCRM - the APIs diverged significantly after the SuiteCRM fork.
 
 **Finding your endpoint URL**
 
@@ -410,7 +410,7 @@ https://crm.example.com/crm/service/v4_1/rest.php
 https://crm.example.com/crm/public/legacy/service/v4_1/rest.php
 ```
 
-To find yours: log into SuiteCRM, go to **Admin → Diagnostic Tool** and look at the site URL, or check with whoever manages your server. The endpoint always ends in `/service/v4_1/rest.php` — only the prefix before it varies. Test it with:
+To find yours: log into SuiteCRM, go to **Admin → Diagnostic Tool** and look at the site URL, or check with whoever manages your server. The endpoint always ends in `/service/v4_1/rest.php` - only the prefix before it varies. Test it with:
 
 ```bash
 curl -s -X POST "https://YOUR-PATH/service/v4_1/rest.php" \
@@ -424,7 +424,7 @@ curl -s -X POST "https://YOUR-PATH/service/v4_1/rest.php" \
 
 **LDAP / SSO users cannot authenticate via the REST API**
 
-SuiteCRM's v4_1 REST API only authenticates against local database passwords. If your organisation uses LDAP, Active Directory, or SSO, users who log into the CRM web UI via those providers will not have a local password set — and the gateway will return `CRM login failed: Invalid Login` for them even with correct credentials.
+SuiteCRM's v4_1 REST API only authenticates against local database passwords. If your organisation uses LDAP, Active Directory, or SSO, users who log into the CRM web UI via those providers will not have a local password set - and the gateway will return `CRM login failed: Invalid Login` for them even with correct credentials.
 
 **Workaround:** Create a dedicated local API user directly in the SuiteCRM database (not via LDAP). This user exists only for API access and is not tied to your SSO provider.
 
@@ -434,9 +434,9 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 
 ## Security Notes
 
-- Credentials travel as HTTP headers — use HTTPS in production (put the gateway behind a reverse proxy with a valid cert)
+- Credentials travel as HTTP headers - use HTTPS in production (put the gateway behind a reverse proxy with a valid cert)
 - Env files are written with mode `600` and the env directory with `700`
-- `entities.json` is in `.gitignore` — never commit it
+- `entities.json` is in `.gitignore` - never commit it
 
 ---
 
