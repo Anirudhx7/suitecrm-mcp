@@ -117,7 +117,25 @@ sudo python3 install-single.py \
 
 After install, the gateway runs at `http://YOUR_SERVER:3101/sse`.
 
-**Open the port** (if using ufw):
+**Enable HTTPS (recommended for production):**
+
+Add `--domain` and `--email` to the install command. The installer will set up nginx as a TLS-terminating reverse proxy and obtain a Let's Encrypt certificate automatically.
+
+```bash
+sudo python3 install-single.py \
+  --endpoint https://your-crm.example.com/service/v4_1/rest.php \
+  --port 3101 \
+  --prefix suitecrm \
+  --label "My CRM" \
+  --domain mcp.yourserver.com \
+  --email you@example.com
+```
+
+Requirements: the domain must already point to this server's public IP, and ports 80 and 443 must be open. The certificate renews automatically via the certbot systemd timer.
+
+After HTTPS install, the gateway runs at `https://mcp.yourserver.com/sse`.
+
+**Open the port** (if using ufw, HTTP-only installs only):
 ```bash
 sudo ufw allow 3101/tcp
 ```
@@ -152,19 +170,31 @@ cp entities.example.json entities.json
 sudo python3 install-multi.py --config entities.json
 ```
 
-**3. Open the nginx port** (if using ufw):
+**3. Enable HTTPS (recommended for production):**
+
+Pass `--domain` and `--email` to the installer. It will update the nginx config with your domain and run certbot automatically.
+
+```bash
+sudo python3 install-multi.py --config entities.json \
+  --domain mcp.yourserver.com \
+  --email you@example.com
+```
+
+The domain must already point to this server's public IP, and ports 80 and 443 must be open. After this step the gateway is available at `https://mcp.yourserver.com/<code>/sse`.
+
+**4. Open the nginx port** (if using ufw, HTTP-only installs only):
 ```bash
 sudo ufw allow 8080/tcp
 ```
 
-**4. Test a specific entity:**
+**5. Test a specific entity:**
 ```bash
 curl -s -H "X-CRM-User: admin" -H "X-CRM-Pass: yourpassword" \
   http://YOUR_SERVER:8080/crm1/test
 # Expected: {"success":true,"crm_user":"admin","prefix":"suitecrm_crm1"}
 ```
 
-**5. Connect at:** `http://YOUR_SERVER:8080/<code>/sse`
+**6. Connect at:** `http://YOUR_SERVER:8080/<code>/sse` (or `https://your-domain/<code>/sse` if HTTPS is enabled)
 
 **Verify it's working in Claude Desktop:** After restarting Claude Desktop, click the hammer icon. You should see 13 tools per entity: `suitecrm_crm1_search`, `suitecrm_crm2_search`, etc.
 
@@ -215,7 +245,22 @@ Keys become the entity code (nginx path prefix, tool prefix suffix, service name
 
 ---
 
-## TLS / Self-Signed Certificates
+## TLS
+
+### Gateway HTTPS (Let's Encrypt)
+
+Pass `--domain` and `--email` to either installer to enable HTTPS on the gateway itself. The installer sets up nginx as a TLS-terminating reverse proxy and runs certbot to obtain and auto-renew a certificate.
+
+Requirements:
+- Domain must already point to this server's public IP
+- Ports 80 (ACME challenge) and 443 (HTTPS) must be open
+
+If certbot fails during install, the gateway still runs over HTTP. Fix DNS/firewall and re-run:
+```bash
+certbot --nginx -d your.domain.com -m you@example.com --agree-tos --redirect
+```
+
+### Self-Signed CRM Certificates
 
 If your SuiteCRM uses a self-signed certificate, add `"tls_skip": true` to the entity config (multi) or pass `--tls-skip` (single). This sets `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 
