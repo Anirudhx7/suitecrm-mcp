@@ -49,6 +49,22 @@ def ok(m):   print(f"{GREEN}[OK]{NC} {m}")
 def warn(m): print(f"{YELLOW}[WARN]{NC} {m}")
 def error(m): print(f"{RED}[ERROR]{NC} {m}"); sys.exit(1)
 
+SAFE_DOMAIN_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9.-]+$')
+SAFE_EMAIL_RE  = re.compile(r'^[^@\s,;|&<>]+@[^@\s,;|&<>]+\.[^@\s,;|&<>]+$')
+SAFE_CODE_RE   = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9-]*$')
+
+def validate_domain(d):
+    if not SAFE_DOMAIN_RE.match(d):
+        error(f"Invalid domain: {d!r} - must contain only letters, digits, hyphens, and dots")
+
+def validate_email(e):
+    if not SAFE_EMAIL_RE.match(e):
+        error(f"Invalid email address: {e!r}")
+
+def validate_code(c):
+    if not SAFE_CODE_RE.match(c):
+        error(f"Invalid entity code: {c!r} - must contain only letters, digits, and hyphens")
+
 def run(cmd, check=True, capture=False):
     if isinstance(cmd, str): cmd = ["bash", "-c", cmd]
     r = subprocess.run(cmd, capture_output=capture, text=True)
@@ -185,6 +201,17 @@ def rebuild_nginx(entities, domain=None):
         label = data.get("label", code)
         locations += f"""
     # {label} ({code})
+    location = /{code}/messages {{
+        access_log off;
+        proxy_pass http://127.0.0.1:{port}/messages;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+    }}
     location /{code}/ {{
         proxy_pass http://127.0.0.1:{port}/;
         proxy_http_version 1.1;
@@ -282,8 +309,8 @@ def show_status(entities=None):
 
 def remove_entity(code):
     svc = f"suitecrm-mcp-{code}"
-    run(f"systemctl stop {svc}", check=False)
-    run(f"systemctl disable {svc}", check=False)
+    run(["systemctl", "stop", svc], check=False)
+    run(["systemctl", "disable", svc], check=False)
     for path in [f"/etc/systemd/system/{svc}.service", f"{ENV_DIR}/{code}.env"]:
         if Path(path).exists():
             os.remove(path)
@@ -304,6 +331,10 @@ def main():
 
     if args.domain and not args.email:
         error("--email is required when --domain is set (needed for Let's Encrypt)")
+    if args.domain: validate_domain(args.domain)
+    if args.email:  validate_email(args.email)
+    if args.remove:
+        for c in args.remove: validate_code(c)
 
     if os.geteuid() != 0: error("Run as root (sudo)")
 
@@ -378,7 +409,7 @@ def main():
         info("Setting up HTTPS...")
         install_certbot()
         r = run(
-            f"certbot --nginx -d {args.domain} --non-interactive --agree-tos -m {args.email} --redirect",
+            ["certbot", "--nginx", "-d", args.domain, "--non-interactive", "--agree-tos", "-m", args.email, "--redirect"],
             check=False, capture=True
         )
         if r.returncode != 0:

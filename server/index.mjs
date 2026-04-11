@@ -371,13 +371,11 @@ function createMcpServer(sid) {
 
 const app = express();
 
-// CORS: deny browser-origin requests by default.
-// MCP clients (Claude Desktop, Claude Code) don't use browsers,
-// so cross-origin access is unnecessary and a security risk.
+// CORS: no Access-Control-Allow-Origin header is set.
+// MCP clients (Claude Desktop, Claude Code) are not browsers and don't require CORS.
+// Omitting the header means browsers enforce the same-origin policy by default,
+// blocking cross-origin requests including those from Origin: null contexts.
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', 'null');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CRM-User, X-CRM-Pass, Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });

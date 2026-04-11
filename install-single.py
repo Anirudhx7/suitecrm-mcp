@@ -29,7 +29,7 @@ HTTPS notes (--domain):
   - Without --domain, the gateway is reachable over plain HTTP on --port (default 3101)
 """
 
-import os, sys, subprocess, json, argparse, shutil
+import os, sys, subprocess, json, argparse, shutil, re
 from pathlib import Path
 
 SERVER_DIR  = "/opt/suitecrm-mcp"
@@ -44,6 +44,17 @@ def info(m): print(f"{CYAN}[INFO]{NC} {m}")
 def ok(m):   print(f"{GREEN}[OK]{NC} {m}")
 def warn(m): print(f"{YELLOW}[WARN]{NC} {m}")
 def error(m): print(f"{RED}[ERROR]{NC} {m}"); sys.exit(1)
+
+SAFE_DOMAIN_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9.-]+$')
+SAFE_EMAIL_RE  = re.compile(r'^[^@\s,;|&<>]+@[^@\s,;|&<>]+\.[^@\s,;|&<>]+$')
+
+def validate_domain(d):
+    if not SAFE_DOMAIN_RE.match(d):
+        error(f"Invalid domain: {d!r} - must contain only letters, digits, hyphens, and dots")
+
+def validate_email(e):
+    if not SAFE_EMAIL_RE.match(e):
+        error(f"Invalid email address: {e!r}")
 
 def run(cmd, check=True, capture=False):
     if isinstance(cmd, str): cmd = ["bash", "-c", cmd]
@@ -199,6 +210,17 @@ def install_nginx_tls(domain, email, port):
         f"    client_max_body_size 10m;\n"
         f"    access_log /var/log/nginx/suitecrm-mcp.access.log;\n"
         f"    error_log  /var/log/nginx/suitecrm-mcp.error.log;\n\n"
+        f"    location = /messages {{\n"
+        f"        access_log off;\n"
+        f"        proxy_pass http://127.0.0.1:{port}/messages;\n"
+        f"        proxy_http_version 1.1;\n"
+        f"        proxy_set_header Connection '';\n"
+        f"        proxy_set_header Host $host;\n"
+        f"        proxy_pass_request_headers on;\n"
+        f"        proxy_buffering off;\n"
+        f"        proxy_cache off;\n"
+        f"        proxy_read_timeout 3600s;\n"
+        f"    }}\n"
         f"    location / {{\n"
         f"        proxy_pass http://127.0.0.1:{port};\n"
         f"        proxy_http_version 1.1;\n"
@@ -225,7 +247,7 @@ def install_nginx_tls(domain, email, port):
 
     info(f"Obtaining TLS certificate for {domain} ...")
     r = run(
-        f"certbot --nginx -d {domain} --non-interactive --agree-tos -m {email} --redirect",
+        ["certbot", "--nginx", "-d", domain, "--non-interactive", "--agree-tos", "-m", email, "--redirect"],
         check=False, capture=True
     )
     if r.returncode != 0:
@@ -262,6 +284,8 @@ def main():
 
     if args.domain and not args.email:
         error("--email is required when --domain is set (needed for Let's Encrypt)")
+    if args.domain: validate_domain(args.domain)
+    if args.email:  validate_email(args.email)
 
     if os.geteuid() != 0: error("Run as root (sudo)")
 
