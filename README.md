@@ -37,6 +37,44 @@ Supported modules include: Accounts, Contacts, Leads, Opportunities, Cases, Call
 
 ---
 
+## Architecture
+
+**Multi-entity** (N CRMs behind nginx):
+
+```mermaid
+flowchart TB
+    subgraph Clients["MCP Clients"]
+        CD["Claude Desktop"]
+        CC["Claude Code"]
+        OC["OpenClaw"]
+    end
+
+    Clients -->|"SSE connection\nX-CRM-User / X-CRM-Pass headers"| NX
+
+    subgraph Server["Your Server"]
+        NX["nginx :8080\nmulti-entity routing"]
+
+        NX -->|"/crm1/"| N1["Node.js :3101\ntools: suitecrm_crm1_*"]
+        NX -->|"/crm2/"| N2["Node.js :3102\ntools: suitecrm_crm2_*"]
+        NX -->|"/crm3/"| N3["Node.js :3103\ntools: suitecrm_crm3_*"]
+    end
+
+    N1 -->|"v4_1 REST API"| S1[("SuiteCRM A")]
+    N2 -->|"v4_1 REST API"| S2[("SuiteCRM B")]
+    N3 -->|"v4_1 REST API"| S3[("SuiteCRM C")]
+```
+
+**Single-entity** (direct port, no nginx):
+
+```mermaid
+flowchart LR
+    MC["MCP Client\nClaude / OpenClaw"] -->|"SSE :3101\nX-CRM-User / X-CRM-Pass"| N["Node.js :3101\ntools: suitecrm_*"] -->|"v4_1 REST API"| CRM[("SuiteCRM")]
+```
+
+Each Node.js process is a standalone systemd service. Credentials are never stored — each SSE connection authenticates independently and gets its own CRM session, which auto-renews on expiry and is cleaned up on disconnect.
+
+---
+
 ## Prerequisites
 
 - Ubuntu 20.04+ or Debian 11+ (the installers use `apt`, `systemd`, and `nginx`)

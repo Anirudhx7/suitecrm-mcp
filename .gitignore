@@ -13,7 +13,7 @@ server/node_modules/
 
 # Internal Claude context — not for public repo
 CLAUDE.md
-
+.claude/
 # OS
 .DS_Store
 Thumbs.db
