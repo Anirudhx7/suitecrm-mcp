@@ -195,6 +195,10 @@ def install_certbot():
 
 
 def rebuild_nginx(entities, domain=None):
+    # DOMAIN_FILE is written by the --domain install path and lives in ENV_DIR.
+    # If ENV_DIR is manually deleted between runs, domain will be None here and
+    # nginx will be (re)built with plain HTTP. Low risk in practice, but if HTTPS
+    # silently disappears after a manual cleanup, this is why.
     if domain is None and Path(DOMAIN_FILE).exists():
         domain = Path(DOMAIN_FILE).read_text().strip() or None
     locations = ""
