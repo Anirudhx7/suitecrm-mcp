@@ -1,7 +1,7 @@
-# Private source files with client-specific config - never commit
-my-files/
+# Local development files - never commit
+.local/
 
-# Credentials and config with real values - never commit these
+# Credentials and config
 *.env
 !.env.example
 entities.json
@@ -11,9 +11,10 @@ entities.json
 node_modules/
 server/node_modules/
 
-# Internal Claude context - not for public repo
+# IDE and tooling
 CLAUDE.md
 .claude/
+
 # OS
 .DS_Store
 Thumbs.db
