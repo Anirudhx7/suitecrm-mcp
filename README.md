@@ -95,7 +95,7 @@ Before connecting, make sure your CRM user has API access enabled:
 3. Check **"Is Admin"** OR set **"API User"** to Yes (the field name varies by SuiteCRM version)
 4. Save
 
-If API access isn't enabled, the gateway returns `CRM login failed: Invalid Login` with no further detail - this is the most common first-run failure.
+If API access isn't enabled, the gateway returns HTTP 401 with `CRM authentication failed: Invalid Login` immediately on connection - this is the most common first-run failure.
 
 For production: create a dedicated API user with only the module permissions your AI assistant needs. Don't use the admin account.
 
@@ -215,6 +215,8 @@ sudo python3 install-multi.py --config entities.json \
 ```
 
 The domain must already point to this server's public IP, and ports 80 and 443 must be open. After this step the gateway is available at `https://mcp.yourserver.com/<code>/sse`.
+
+Once configured, the domain is saved automatically. Later `--add` and `--remove` runs preserve HTTPS without needing `--domain` again.
 
 **4. Open the nginx port** (if using ufw, HTTP-only installs only):
 ```bash
