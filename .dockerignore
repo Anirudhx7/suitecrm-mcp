@@ -1,16 +1,9 @@
 .git
 .github
-.claude
-my-files
+.local
 *.env
 !.env.example
 entities.json
-CLAUDE.md
-README.md
-LICENSE
-install-single.py
-install-multi.py
-entities.example.json
 node_modules
 server/node_modules
 .DS_Store
