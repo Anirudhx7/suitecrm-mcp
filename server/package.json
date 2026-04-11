@@ -1,7 +1,7 @@
 {
   "name": "suitecrm-mcp-gateway",
   "version": "1.0.0",
-  "description": "SuiteCRM MCP Gateway — SSE transport, header auth, 13 tools",
+  "description": "SuiteCRM MCP Gateway - SSE transport, header auth, 13 tools",
   "type": "module",
   "main": "index.mjs",
   "dependencies": {
