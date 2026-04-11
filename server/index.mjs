@@ -16,6 +16,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } fr
 import { createHash } from 'crypto';
 import express from 'express';
 import bodyParser from 'body-parser';
+import { rateLimit } from 'express-rate-limit';
 import https from 'https';
 import http from 'http';
 
@@ -336,7 +337,15 @@ app.get('/health', (_req, res) => res.json({
   status: 'ok', prefix: PREFIX, port: PORT, active_connections: transports.size,
 }));
 
-app.get('/test', async (req, res) => {
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests — try again in 15 minutes' },
+});
+
+app.get('/test', authRateLimit, async (req, res) => {
   const user = (req.headers['x-crm-user'] || '').trim();
   const pass = (req.headers['x-crm-pass'] || '').trim();
   if (!user || !pass) {
@@ -350,7 +359,7 @@ app.get('/test', async (req, res) => {
   }
 });
 
-app.get('/sse', async (req, res) => {
+app.get('/sse', authRateLimit, async (req, res) => {
   const user = (req.headers['x-crm-user'] || '').trim();
   const pass = (req.headers['x-crm-pass'] || '').trim();
   if (!user || !pass) {
