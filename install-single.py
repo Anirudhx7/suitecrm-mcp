@@ -80,9 +80,12 @@ def install_server():
     pkg = script_dir() / "server" / "package.json"
     if not src.exists():
         error(f"server/index.mjs not found. Run from the repo root directory.")
+    lockfile = script_dir() / "server" / "package-lock.json"
     shutil.copy(src, f"{SERVER_DIR}/index.mjs")
     shutil.copy(pkg, f"{SERVER_DIR}/package.json")
-    run(f"cd {SERVER_DIR} && npm install --silent")
+    if lockfile.exists():
+        shutil.copy(lockfile, f"{SERVER_DIR}/package-lock.json")
+    run(f"cd {SERVER_DIR} && npm ci --omit=dev --silent")
     ok("Server installed")
 
 def install_env(endpoint, port, prefix, label, tls_skip):

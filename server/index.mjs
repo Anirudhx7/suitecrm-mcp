@@ -428,12 +428,16 @@ app.get('/sse', authRateLimit, async (req, res) => {
   const msgPath = CODE ? `/${CODE}/messages` : '/messages';
   const transport = new SSEServerTransport(msgPath, res);
   const sid = transport.sessionId;
-  const srv = createMcpServer(sid);
   connCreds.set(sid, { user, pass });
-  transports.set(sid, transport);
-  ensureCrmSession(sid).catch(err => {
+  try {
+    await ensureCrmSession(sid);
+  } catch (err) {
+    connCreds.delete(sid);
     process.stderr.write(`[${PREFIX}] CRM login failed for "${user}": ${err.message}\n`);
-  });
+    return res.status(401).json({ error: `CRM authentication failed: ${err.message}` });
+  }
+  const srv = createMcpServer(sid);
+  transports.set(sid, transport);
   res.on('close', () => {
     transports.delete(sid);
     crmSessions.delete(sid);

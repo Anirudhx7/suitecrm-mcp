@@ -38,6 +38,7 @@ from pathlib import Path
 
 SERVER_DIR   = "/opt/suitecrm-mcp"
 ENV_DIR      = "/etc/suitecrm-mcp"
+DOMAIN_FILE  = "/etc/suitecrm-mcp/domain"
 NGINX_CONF   = "/etc/nginx/sites-available/suitecrm-mcp"
 NGINX_LINK   = "/etc/nginx/sites-enabled/suitecrm-mcp"
 NGINX_PORT   = 8080
@@ -114,9 +115,12 @@ def install_server():
     pkg = script_dir() / "server" / "package.json"
     if not src.exists():
         error(f"server/index.mjs not found. Run from the repo root directory.")
+    lockfile = script_dir() / "server" / "package-lock.json"
     shutil.copy(src, f"{SERVER_DIR}/index.mjs")
     shutil.copy(pkg, f"{SERVER_DIR}/package.json")
-    run(f"cd {SERVER_DIR} && npm install --silent")
+    if lockfile.exists():
+        shutil.copy(lockfile, f"{SERVER_DIR}/package-lock.json")
+    run(f"cd {SERVER_DIR} && npm ci --omit=dev --silent")
     ok("Server installed")
 
 def install_env_for(code, data):
@@ -173,6 +177,8 @@ def install_certbot():
 
 
 def rebuild_nginx(entities, domain=None):
+    if domain is None and Path(DOMAIN_FILE).exists():
+        domain = Path(DOMAIN_FILE).read_text().strip() or None
     locations = ""
     for code, data in entities.items():
         port  = data["port"]
@@ -356,6 +362,8 @@ def main():
     rebuild_nginx(entities, domain=args.domain); print()
 
     if args.domain:
+        os.makedirs(ENV_DIR, exist_ok=True)
+        Path(DOMAIN_FILE).write_text(args.domain)
         info("Setting up HTTPS...")
         install_certbot()
         r = run(
