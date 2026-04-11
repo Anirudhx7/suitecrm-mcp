@@ -15,6 +15,10 @@ server/node_modules/
 CLAUDE.md
 .claude/
 
+# Python
+__pycache__/
+*.pyc
+
 # OS
 .DS_Store
 Thumbs.db

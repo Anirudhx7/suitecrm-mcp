@@ -266,7 +266,11 @@ def show_status(entities=None):
         print(f"  status   : {status_str}")
         if port:
             print(f"  local    : http://127.0.0.1:{port}/health")
-            print(f"  external : http://YOUR_SERVER:{NGINX_PORT}/{code}/sse")
+            saved_domain = Path(DOMAIN_FILE).read_text().strip() if Path(DOMAIN_FILE).exists() else None
+            if saved_domain:
+                print(f"  external : https://{saved_domain}/{code}/sse")
+            else:
+                print(f"  external : http://YOUR_SERVER:{NGINX_PORT}/{code}/sse")
             if active:
                 try:
                     with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
@@ -315,6 +319,13 @@ def main():
         if remaining:
             info("Rebuilding nginx for remaining entities...")
             rebuild_nginx(remaining)
+        else:
+            info("No entities remain - removing nginx config...")
+            for path in [NGINX_LINK, NGINX_CONF]:
+                if Path(path).exists():
+                    os.remove(path)
+                    ok(f"Removed: {path}")
+            run("systemctl reload nginx", check=False)
         sys.exit(0)
 
     entities = load_entities(args.config)
