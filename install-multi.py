@@ -279,7 +279,7 @@ def remove_entity(code):
             os.remove(path)
             ok(f"  Removed: {path}")
     run("systemctl daemon-reload")
-    ok(f"Entity '{code}' removed. Rebuild nginx config manually or re-run --add.")
+    ok(f"Entity '{code}' removed.")
 
 def main():
     parser = argparse.ArgumentParser(description="SuiteCRM MCP Gateway - Multi-Entity Installer")
@@ -305,6 +305,10 @@ def main():
         if input("  Type 'yes' to confirm: ").strip().lower() != "yes":
             info("Aborted."); sys.exit(0)
         for code in args.remove: remove_entity(code)
+        remaining = {c: d for c, d in load_entities(args.config).items() if c not in args.remove}
+        if remaining:
+            info("Rebuilding nginx for remaining entities...")
+            rebuild_nginx(remaining)
         sys.exit(0)
 
     entities = load_entities(args.config)

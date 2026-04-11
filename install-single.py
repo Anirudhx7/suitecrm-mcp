@@ -162,12 +162,13 @@ def uninstall():
         info("Aborted."); sys.exit(0)
     run(f"systemctl stop {SVC_NAME}", check=False)
     run(f"systemctl disable {SVC_NAME}", check=False)
-    for path in [SVC_FILE, ENV_FILE, SERVER_DIR]:
+    for path in [SVC_FILE, ENV_FILE, SERVER_DIR, NGINX_LINK, NGINX_CONF]:
         if Path(path).exists():
             if Path(path).is_dir(): shutil.rmtree(path)
             else: os.remove(path)
             ok(f"Removed: {path}")
     run("systemctl daemon-reload")
+    run("systemctl reload nginx", check=False)
     ok("Uninstalled.")
 
 def install_nginx_tls(domain, email, port):

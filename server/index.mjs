@@ -151,7 +151,7 @@ function validateModule(m) {
 }
 
 // SuiteCRM uses UUID-format IDs (lowercase hex with hyphens).
-const UUID_RE = /^[0-9a-f\-]{36}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function validateId(id) {
   if (!id || !UUID_RE.test(id))
     throw new McpError(ErrorCode.InvalidParams, `Invalid record ID format: ${String(id).slice(0, 40)}`);
@@ -160,6 +160,7 @@ function validateId(id) {
 async function searchRecords(sid, { module, query='', fields=[], max_results=20, offset=0, order_by='' }) {
   validateModule(module);
   sanitizeQuery(query);
+  if (order_by) sanitizeQuery(order_by);
   const r = await crmCall(sid, 'get_entry_list', {
     module_name: module, query, order_by, offset, select_fields: fields,
     link_name_to_fields_array: [], max_results: Math.min(max_results, 100),
@@ -285,7 +286,7 @@ async function listModules(sid) {
 async function serverInfo(sid) {
   const creds = connCreds.get(sid) || {};
   return {
-    prefix: PREFIX, port: PORT, endpoint: ENDPOINT,
+    prefix: PREFIX, port: PORT, endpoint: ENDPOINT.replace(/^(https?:\/\/[^/]+).*/, '$1'),
     crm_user: creds.user || '?',
     session_active: crmSessions.has(sid),
     active_connections: transports.size,
