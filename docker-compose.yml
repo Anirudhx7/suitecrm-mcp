@@ -1,6 +1,6 @@
 services:
   suitecrm-mcp:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:latest
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v1.2.3
     ports:
       - "3101:3101"
     environment:
