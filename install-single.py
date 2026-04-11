@@ -133,10 +133,11 @@ def show_status():
     # Read port from env
     port = 3101
     if Path(ENV_FILE).exists():
-        for line in open(ENV_FILE):
-            if line.startswith("PORT="):
-                try: port = int(line.split("=")[1].strip())
-                except: pass
+        with open(ENV_FILE) as f:
+            for line in f:
+                if line.startswith("PORT="):
+                    try: port = int(line.split("=")[1].strip())
+                    except: pass
 
     print()
     info("=" * 56)

@@ -19,6 +19,9 @@ import bodyParser from 'body-parser';
 import { rateLimit } from 'express-rate-limit';
 import https from 'https';
 import http from 'http';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { version: PKG_VERSION } = require('./package.json');
 
 const ENDPOINT = (process.env.SUITECRM_ENDPOINT || '').trim();
 const PREFIX = (process.env.SUITECRM_PREFIX || 'suitecrm').trim();
@@ -84,7 +87,7 @@ async function crmLogin(user, pass) {
     name_value_list: [],
   });
   if (!r.id || r.id === 0 || r.id === '0')
-    throw new Error(`CRM login failed for "${user}": ${r.description || JSON.stringify(r)}`);
+    throw new Error(`CRM login failed for "${user}": ${r.description || r.name || 'Invalid Login'}`);
   return r.id;
 }
 
@@ -125,7 +128,38 @@ function flatNvl(nvl) {
 function flatList(el) { return (el || []).map(e => flatNvl(e.name_value_list || e)); }
 function toNvl(obj) { return Object.entries(obj).map(([n, v]) => ({ name: n, value: String(v ?? '') })); }
 
+// Defense-in-depth: reject queries containing destructive SQL keywords.
+// SuiteCRM's API expects a raw WHERE clause, so we allow SELECT-style predicates
+// but block anything that could mutate data or schema.
+const BLOCKED_SQL = /\b(DROP|ALTER|TRUNCATE|INSERT|UPDATE|DELETE|EXEC|EXECUTE|CREATE|GRANT|REVOKE|UNION\s+SELECT|INTO\s+OUTFILE|LOAD_FILE|BENCHMARK|SLEEP)\b/i;
+const BLOCKED_PATTERNS = /;|--|\/\*|\*\//;
+function sanitizeQuery(q) {
+  if (!q) return q;
+  if (BLOCKED_SQL.test(q))
+    throw new McpError(ErrorCode.InvalidParams, 'Query contains blocked SQL keyword');
+  if (BLOCKED_PATTERNS.test(q))
+    throw new McpError(ErrorCode.InvalidParams, 'Query contains disallowed characters (;, --, or block comments)');
+  return q;
+}
+
+// Module names in SuiteCRM are PascalCase identifiers (e.g. Accounts, AOS_Quotes).
+// Block anything that isn't a safe identifier to prevent injection via module_name.
+const SAFE_MODULE = /^[A-Za-z][A-Za-z0-9_]{0,99}$/;
+function validateModule(m) {
+  if (!m || !SAFE_MODULE.test(m))
+    throw new McpError(ErrorCode.InvalidParams, `Invalid module name: ${String(m).slice(0, 40)}`);
+}
+
+// SuiteCRM uses UUID-format IDs (lowercase hex with hyphens).
+const UUID_RE = /^[0-9a-f\-]{36}$/i;
+function validateId(id) {
+  if (!id || !UUID_RE.test(id))
+    throw new McpError(ErrorCode.InvalidParams, `Invalid record ID format: ${String(id).slice(0, 40)}`);
+}
+
 async function searchRecords(sid, { module, query='', fields=[], max_results=20, offset=0, order_by='' }) {
+  validateModule(module);
+  sanitizeQuery(query);
   const r = await crmCall(sid, 'get_entry_list', {
     module_name: module, query, order_by, offset, select_fields: fields,
     link_name_to_fields_array: [], max_results: Math.min(max_results, 100),
@@ -159,6 +193,7 @@ async function searchText(sid, { search_string, modules=['Accounts','Contacts','
 }
 
 async function getRecord(sid, { module, id, fields=[] }) {
+  validateModule(module); validateId(id);
   const r = await crmCall(sid, 'get_entry', {
     module_name: module, id, select_fields: fields,
     link_name_to_fields_array: [], track_view: false,
@@ -168,11 +203,13 @@ async function getRecord(sid, { module, id, fields=[] }) {
 }
 
 async function createRecord(sid, { module, fields }) {
+  validateModule(module);
   const r = await crmCall(sid, 'set_entry', { module_name: module, name_value_list: toNvl(fields) });
   return { id: r.id, module, created: true };
 }
 
 async function updateRecord(sid, { module, id, fields }) {
+  validateModule(module); validateId(id);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: [{ name: 'id', value: id }, ...toNvl(fields)],
@@ -181,6 +218,7 @@ async function updateRecord(sid, { module, id, fields }) {
 }
 
 async function deleteRecord(sid, { module, id }) {
+  validateModule(module); validateId(id);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: [{ name: 'id', value: id }, { name: 'deleted', value: '1' }],
@@ -189,11 +227,14 @@ async function deleteRecord(sid, { module, id }) {
 }
 
 async function countRecords(sid, { module, query='' }) {
+  validateModule(module);
+  sanitizeQuery(query);
   const r = await crmCall(sid, 'get_entries_count', { module_name: module, query, deleted: 0 });
   return { module, count: parseInt(r.result_count || '0', 10) };
 }
 
 async function getRelationships(sid, { module, id, link_field, related_fields=[], max_results=20, offset=0 }) {
+  validateModule(module); validateId(id);
   const r = await crmCall(sid, 'get_relationships', {
     module_name: module, module_id: id, link_field_name: link_field,
     related_module_query: '', related_fields,
@@ -204,6 +245,7 @@ async function getRelationships(sid, { module, id, link_field, related_fields=[]
 }
 
 async function linkRecords(sid, { module, id, link_field, related_ids }) {
+  validateModule(module); validateId(id);
   const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
   const r = await crmCall(sid, 'set_relationship', {
     module_name: module, module_id: id, link_field_name: link_field,
@@ -213,6 +255,7 @@ async function linkRecords(sid, { module, id, link_field, related_ids }) {
 }
 
 async function unlinkRecords(sid, { module, id, link_field, related_ids }) {
+  validateModule(module); validateId(id);
   const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
   const r = await crmCall(sid, 'set_relationship', {
     module_name: module, module_id: id, link_field_name: link_field,
@@ -222,6 +265,7 @@ async function unlinkRecords(sid, { module, id, link_field, related_ids }) {
 }
 
 async function getModuleFields(sid, { module }) {
+  validateModule(module);
   const r = await crmCall(sid, 'get_module_fields', { module_name: module, fields: [] });
   return {
     module: r.module_name, table: r.table_name,
@@ -293,7 +337,7 @@ const TOOLS = [
 ];
 
 function createMcpServer(sid) {
-  const srv = new Server({name:`suitecrm-gateway-${PREFIX}`, version:'1.0.0'}, {capabilities:{tools:{}}});
+  const srv = new Server({name:`suitecrm-gateway-${PREFIX}`, version: PKG_VERSION}, {capabilities:{tools:{}}});
   srv.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
   srv.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args = {} } = req.params;
@@ -325,6 +369,18 @@ function createMcpServer(sid) {
 }
 
 const app = express();
+
+// CORS: deny browser-origin requests by default.
+// MCP clients (Claude Desktop, Claude Code) don't use browsers,
+// so cross-origin access is unnecessary and a security risk.
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', 'null');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CRM-User, X-CRM-Pass, Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 app.use((req, res, next) => {
   if (req.path === '/messages') {
     next();
@@ -387,7 +443,15 @@ app.get('/sse', authRateLimit, async (req, res) => {
   process.stderr.write(`[${PREFIX}] Connected: "${user}" (sid=${sid.slice(0,8)})\n`);
 });
 
-app.post('/messages', async (req, res) => {
+const messagesRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many tool calls - slow down' },
+});
+
+app.post('/messages', messagesRateLimit, async (req, res) => {
   const sid = req.query.sessionId;
   const t = transports.get(sid);
   if (!t) {
@@ -406,4 +470,6 @@ app.listen(PORT, '0.0.0.0', () => {
   process.stderr.write(`[${PREFIX}] Gateway listening on 0.0.0.0:${PORT}\n`);
   process.stderr.write(`[${PREFIX}] CRM endpoint: ${ENDPOINT}\n`);
   if (!TLS_OK) process.stderr.write(`[${PREFIX}] WARNING: TLS verification disabled\n`);
+  if (!ENDPOINT.startsWith('https://'))
+    process.stderr.write(`[${PREFIX}] WARNING: CRM endpoint is not HTTPS - passwords are sent as MD5 hashes over plaintext\n`);
 });

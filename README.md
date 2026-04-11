@@ -466,7 +466,8 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 
 ## Security Notes
 
-- Credentials travel as HTTP headers - use HTTPS in production (put the gateway behind a reverse proxy with a valid cert)
+- **HTTPS is required for production.** Credentials travel as HTTP headers, and the SuiteCRM v4_1 REST API requires passwords to be sent as MD5 hashes. MD5 is cryptographically broken - without HTTPS, credentials are trivially interceptable. Use `--domain` to enable Let's Encrypt, or put the gateway behind a reverse proxy with a valid TLS certificate.
+- **Query sanitisation.** The `search` and `count` tools accept a SQL WHERE clause. The gateway blocks destructive SQL keywords (DROP, ALTER, DELETE, etc.) and comment/statement-chaining patterns as a defense-in-depth measure. SuiteCRM's own API layer provides additional protection.
 - Env files are written with mode `600` and the env directory with `700`
 - `entities.json` is in `.gitignore` - never commit it
 

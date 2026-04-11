@@ -243,10 +243,11 @@ def show_status(entities=None):
         for code in running:
             env_path = Path(f"{ENV_DIR}/{code}.env")
             if env_path.exists():
-                for line in open(env_path):
-                    if line.startswith("PORT="):
-                        try: entities[code]["port"] = int(line.split("=")[1].strip())
-                        except: pass
+                with open(env_path) as f:
+                    for line in f:
+                        if line.startswith("PORT="):
+                            try: entities[code]["port"] = int(line.split("=")[1].strip())
+                            except: pass
 
     for code, data in entities.items():
         svc = f"suitecrm-mcp-{code}"
