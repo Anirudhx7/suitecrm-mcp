@@ -466,7 +466,11 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', (err) => {
+  if (err) {
+    process.stderr.write(`[${PREFIX}] FATAL: Failed to start server: ${err.message}\n`);
+    process.exit(1);
+  }
   process.stderr.write(`[${PREFIX}] Gateway listening on 0.0.0.0:${PORT}\n`);
   process.stderr.write(`[${PREFIX}] CRM endpoint: ${ENDPOINT}\n`);
   if (!TLS_OK) process.stderr.write(`[${PREFIX}] WARNING: TLS verification disabled\n`);
