@@ -1,0 +1,11 @@
+services:
+  suitecrm-mcp:
+    build: .
+    ports:
+      - "3101:3101"
+    environment:
+      SUITECRM_ENDPOINT: https://crm.example.com/service/v4_1/rest.php
+      SUITECRM_PREFIX: suitecrm
+      PORT: "3101"
+      # NODE_TLS_REJECT_UNAUTHORIZED: "0"  # only for self-signed certs
+    restart: unless-stopped
