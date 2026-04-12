@@ -105,7 +105,7 @@ For production: create a dedicated API user with only the module permissions you
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v1.3.0` instead of floating on `latest`.
+For production, pin to a release tag such as `v1.4.3` instead of floating on `latest`.
 
 ```bash
 curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v1.4.3/docker-compose.yml

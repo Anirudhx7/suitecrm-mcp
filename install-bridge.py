@@ -130,6 +130,8 @@ def load_entities(args):
 def list_candidate_users():
     candidates = []
     for username in sorted(os.listdir("/home")):
+        if not SAFE_USER_RE.match(username):
+            continue
         home = f"/home/{username}"
         config_path = f"{home}/.openclaw/openclaw.json"
         if os.path.isdir(home) and os.path.exists(config_path):
@@ -893,9 +895,6 @@ def main():
         users = prompt_for_users(users)
     if not users:
         error("No target users selected")
-
-    if attach_spec and attach_spec["mode"] == "selected" and len(users) != 1:
-        error("--attach agent1,agent2 requires exactly one target user. Use --attach all or select one user.")
 
     selections = {}
     for username in users:
