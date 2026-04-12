@@ -49,6 +49,11 @@ Note the gateway URL — you will need it in Step 2:
 - Multi: `http://YOUR_GATEWAY_IP:8080`
 - With HTTPS: `https://mcp.yourserver.com`
 
+**The gateway URL must be a bare origin — no path component.** The bridge constructs
+its own paths (`/sse`, `/{code}/sse`, `/test`). If your gateway is behind a
+subdirectory proxy (e.g. `https://myserver.com/suitecrm-mcp/`), that setup is not
+supported — the gateway must be at the root of the host or a dedicated subdomain.
+
 ---
 
 ## Step 2 - Install the bridge (OpenClaw machine)

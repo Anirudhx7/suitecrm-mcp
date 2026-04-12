@@ -371,6 +371,10 @@ def _install_bridge_plugin(username, openclaw_dir, code, label, gateway_url, is_
 
     npm_path = shutil.which("npm") or "/usr/bin/npm"
     run(["runuser", "-u", username, "--", npm_path, "install", "--silent"], cwd=bridge_dir)
+    # chown -R after npm install so that any files written by a previous root-owned
+    # install (e.g. on --update) are corrected. The pre-install chown above only
+    # covers the directory itself, not existing node_modules contents.
+    run(["chown", "-R", f"{username}:{username}", bridge_dir])
     ok(f"  Plugin suitecrm-{code} installed for {username}")
 
 
