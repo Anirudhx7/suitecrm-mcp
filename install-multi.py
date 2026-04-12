@@ -281,6 +281,40 @@ def get_running_entities():
             codes.append(svc)
     return codes
 
+def apply_update_hardening(entities):
+    """Migrate existing entity installs to v1.4 hardening without full reinstall."""
+    ensure_service_user()
+
+    # Patch env dir ownership (multi always runs behind nginx)
+    if Path(ENV_DIR).exists():
+        run(["chmod", "700", ENV_DIR])
+        run(["chown", f"{SVC_USER}:{SVC_USER}", ENV_DIR])
+
+    for code in entities:
+        env_path = Path(f"{ENV_DIR}/{code}.env")
+        svc_file = Path(f"/etc/systemd/system/suitecrm-mcp-{code}.service")
+
+        # Patch env file: add TRUST_PROXY=1 if missing (always needed in multi)
+        if env_path.exists():
+            content = env_path.read_text()
+            if "TRUST_PROXY" not in content:
+                env_path.write_text(content.rstrip("\n") + "\nTRUST_PROXY=1\n")
+                run(["chown", f"{SVC_USER}:{SVC_USER}", str(env_path)])
+                run(["chmod", "600", str(env_path)])
+                ok(f"  [{code}] Added TRUST_PROXY=1 to env file")
+            else:
+                ok(f"  [{code}] Env file: no changes needed")
+
+        # Patch unit file: inject User=/Group= after [Service] if not already present
+        if svc_file.exists():
+            unit = svc_file.read_text()
+            if f"User={SVC_USER}" not in unit:
+                unit = unit.replace("[Service]\n", f"[Service]\nUser={SVC_USER}\nGroup={SVC_USER}\n")
+                svc_file.write_text(unit)
+                ok(f"  [{code}] Added User={SVC_USER} to unit file")
+            else:
+                ok(f"  [{code}] Unit file: no changes needed")
+
 def show_status(entities=None):
     import urllib.request
     print()
@@ -384,8 +418,11 @@ def main():
     info(f"Entities: {', '.join(entities.keys())}"); print()
 
     if args.update:
-        info("Update mode - reinstalling server code...")
+        info("Update mode - reinstalling server code and applying hardening...")
         install_server(); print()
+        info("Applying v1.4 hardening to existing installs...")
+        apply_update_hardening(entities); print()
+        run(["systemctl", "daemon-reload"])
         info("Restarting all services...")
         for code in entities:
             run(["systemctl", "restart", f"suitecrm-mcp-{code}"], check=False)

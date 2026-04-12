@@ -155,6 +155,37 @@ def install_service(port, label):
     run(["systemctl", "enable", "--now", SVC_NAME])
     ok(f"Service started: {SVC_NAME}")
 
+def apply_update_hardening():
+    """Migrate an existing install to v1.4 hardening without full reinstall."""
+    ensure_service_user()
+
+    # Patch env file: add TRUST_PROXY=1 if nginx is present and it is not set yet
+    env_path = Path(ENV_FILE)
+    if env_path.exists():
+        content = env_path.read_text()
+        has_nginx = Path(NGINX_CONF).exists()
+        if has_nginx and "TRUST_PROXY" not in content:
+            env_path.write_text(content.rstrip("\n") + "\nTRUST_PROXY=1\n")
+            run(["chown", f"{SVC_USER}:{SVC_USER}", ENV_FILE])
+            run(["chmod", "600", ENV_FILE])
+            ok("Added TRUST_PROXY=1 to env file")
+        else:
+            ok("Env file: no changes needed")
+        env_dir = str(env_path.parent)
+        run(["chmod", "700", env_dir])
+        run(["chown", f"{SVC_USER}:{SVC_USER}", env_dir])
+
+    # Patch unit file: inject User=/Group= after [Service] if not already present
+    unit_path = Path(SVC_FILE)
+    if unit_path.exists():
+        unit = unit_path.read_text()
+        if f"User={SVC_USER}" not in unit:
+            unit = unit.replace("[Service]\n", f"[Service]\nUser={SVC_USER}\nGroup={SVC_USER}\n")
+            unit_path.write_text(unit)
+            ok(f"Added User={SVC_USER} to unit file")
+        else:
+            ok("Unit file: no changes needed")
+
 def show_status():
     import urllib.request
     r = run(["systemctl", "is-active", SVC_NAME], check=False, capture=True)
@@ -316,8 +347,11 @@ def main():
     print(); info("=" * 56); info("SUITECRM MCP GATEWAY - SINGLE ENTITY INSTALLER"); info("=" * 56); print()
 
     if args.update:
-        info("Update mode - reinstalling server code...")
+        info("Update mode - reinstalling server code and applying hardening...")
         install_server()
+        info("Applying v1.4 hardening to existing install...")
+        apply_update_hardening()
+        run(["systemctl", "daemon-reload"])
         run(["systemctl", "restart", SVC_NAME])
         ok(f"Restarted: {SVC_NAME}")
         show_status(); sys.exit(0)

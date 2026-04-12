@@ -30,7 +30,9 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 - **Input validation:** `--domain`, `--email`, and `--remove` entity codes are validated with strict regexes before any command is executed.
 - **No shell injection:** All privileged subprocess calls use list form (`subprocess.run([...])`) so arguments are never interpreted by a shell. The only exception is the NodeSource setup bootstrap (`curl | bash`), which is a shell pipeline by design and is explicitly commented as such.
 - **Session IDs excluded from nginx logs:** The `/messages` endpoint has `access_log off` in the generated nginx config. Session IDs passed as query parameters are not written to access logs.
-- **Env files protected:** Written with mode `600`; the env directory is `700`.
+- **Env files protected:** Written with mode `600`; the env directory is `700`. Both are owned by the `suitecrm-mcp` service user so root access is not required at runtime.
+- **Unprivileged service user:** Both installers create a `suitecrm-mcp` system user (no shell, no home directory) and set `User=`/`Group=` in the generated systemd unit. The gateway process does not run as root.
+- **Proxy trust is conditional:** `X-Forwarded-For` is only trusted for rate limiting when `TRUST_PROXY=1` is set in the env file. The installers set this only where nginx is actually in front: always for multi-entity, only when `--domain` is used for single-entity. Direct port access leaves the header untrusted so clients cannot spoof their IP to shard rate limits.
 
 ## Known Security Limitations
 
