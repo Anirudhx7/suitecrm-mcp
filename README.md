@@ -382,7 +382,7 @@ To find yours: log into SuiteCRM, go to **Admin → Diagnostic Tool** and look a
 
 ```bash
 curl -s -X POST "https://YOUR-PATH/service/v4_1/rest.php" \
-  --data 'method=get_server_info&input_type=JSON&response_type=JSON&rest_data={}}'
+  --data 'method=get_server_info&input_type=JSON&response_type=JSON&rest_data={}'
 # Should return: {"flavor":"CE","version":"...","gmt_time":"..."}
 ```
 

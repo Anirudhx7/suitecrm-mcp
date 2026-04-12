@@ -157,6 +157,13 @@ function validateId(id) {
     throw new McpError(ErrorCode.InvalidParams, `Invalid record ID format: ${String(id).slice(0, 40)}`);
 }
 
+// SuiteCRM link field names are snake_case identifiers (e.g. contacts, member_of).
+const SAFE_LINK_FIELD = /^[A-Za-z][A-Za-z0-9_]{0,99}$/;
+function validateLinkField(f) {
+  if (!f || !SAFE_LINK_FIELD.test(f))
+    throw new McpError(ErrorCode.InvalidParams, `Invalid link_field: ${String(f).slice(0, 40)}`);
+}
+
 async function searchRecords(sid, { module, query='', fields=[], max_results=20, offset=0, order_by='' }) {
   validateModule(module);
   sanitizeQuery(query);
@@ -175,6 +182,7 @@ async function searchRecords(sid, { module, query='', fields=[], max_results=20,
 }
 
 async function searchText(sid, { search_string, modules=['Accounts','Contacts','Leads'], max_results=10 }) {
+  for (const m of modules) validateModule(m);
   const r = await crmCall(sid, 'search_by_module', {
     search_string, modules, offset: 0, max_results, assigned_user_id: '',
     select_fields: [], unified_search_only: false, favorites: false,
@@ -235,7 +243,7 @@ async function countRecords(sid, { module, query='' }) {
 }
 
 async function getRelationships(sid, { module, id, link_field, related_fields=[], max_results=20, offset=0 }) {
-  validateModule(module); validateId(id);
+  validateModule(module); validateId(id); validateLinkField(link_field);
   const r = await crmCall(sid, 'get_relationships', {
     module_name: module, module_id: id, link_field_name: link_field,
     related_module_query: '', related_fields,
@@ -246,8 +254,9 @@ async function getRelationships(sid, { module, id, link_field, related_fields=[]
 }
 
 async function linkRecords(sid, { module, id, link_field, related_ids }) {
-  validateModule(module); validateId(id);
+  validateModule(module); validateId(id); validateLinkField(link_field);
   const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
+  for (const rid of ids) validateId(rid);
   const r = await crmCall(sid, 'set_relationship', {
     module_name: module, module_id: id, link_field_name: link_field,
     related_ids: ids, name_value_list: [], delete: 0,
@@ -256,8 +265,9 @@ async function linkRecords(sid, { module, id, link_field, related_ids }) {
 }
 
 async function unlinkRecords(sid, { module, id, link_field, related_ids }) {
-  validateModule(module); validateId(id);
+  validateModule(module); validateId(id); validateLinkField(link_field);
   const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
+  for (const rid of ids) validateId(rid);
   const r = await crmCall(sid, 'set_relationship', {
     module_name: module, module_id: id, link_field_name: link_field,
     related_ids: ids, name_value_list: [], delete: 1,
@@ -370,6 +380,11 @@ function createMcpServer(sid) {
 }
 
 const app = express();
+
+// Trust one level of reverse proxy (nginx) so that req.ip resolves to the
+// real client IP from X-Forwarded-For instead of 127.0.0.1.
+// Without this, all proxied users share a single rate-limit bucket per gateway.
+app.set('trust proxy', 1);
 
 // CORS: no Access-Control-Allow-Origin header is set.
 // MCP clients (Claude Desktop, Claude Code) are not browsers and don't require CORS.
