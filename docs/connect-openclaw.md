@@ -81,6 +81,20 @@ To install for specific users only (default is all users in /home):
 sudo python3 install-bridge.py --gateway ... --entities entities.json alice bob
 ```
 
+**Agent scoping (optional):**
+
+By default the bridge registers the plugin but does not restrict which agents can call SuiteCRM tools. Use `--attach` to scope tool access to specific agents:
+
+```bash
+# All agents in OpenClaw get access
+sudo python3 install-bridge.py --gateway ... --code mycrm --attach all
+
+# Only specific agents get access (comma-separated names or IDs)
+sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Support Agent"
+```
+
+Without `--attach`, the plugin loads and credentials work - but agent-level `tools.allow` lists are not modified. If your OpenClaw agents already have restrictive `tools.allow` lists, use `--attach` to add the SuiteCRM tools to the right ones.
+
 ---
 
 ## Step 3 - Configure credentials (per user, on OpenClaw machine)
