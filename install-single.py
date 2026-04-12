@@ -38,6 +38,7 @@ SVC_NAME    = "suitecrm-mcp"
 SVC_FILE    = f"/etc/systemd/system/{SVC_NAME}.service"
 NGINX_CONF  = "/etc/nginx/sites-available/suitecrm-mcp"
 NGINX_LINK  = "/etc/nginx/sites-enabled/suitecrm-mcp"
+SVC_USER    = "suitecrm-mcp"  # unprivileged system user the gateway runs as
 
 RED = "\033[0;31m"; GREEN = "\033[0;32m"; YELLOW = "\033[1;33m"; CYAN = "\033[0;36m"; NC = "\033[0m"
 def info(m): print(f"{CYAN}[INFO]{NC} {m}")
@@ -55,6 +56,14 @@ def validate_domain(d):
 def validate_email(e):
     if not SAFE_EMAIL_RE.match(e):
         error(f"Invalid email address: {e!r}")
+
+def ensure_service_user():
+    r = run(["id", SVC_USER], check=False, capture=True)
+    if r.returncode != 0:
+        run(["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", SVC_USER])
+        ok(f"Created system user: {SVC_USER}")
+    else:
+        ok(f"Service user exists: {SVC_USER}")
 
 def run(cmd, check=True, capture=False, cwd=None):
     # String commands are only used for unavoidable shell pipelines (e.g. curl | bash).
@@ -100,7 +109,7 @@ def install_server():
     run(["npm", "ci", "--omit=dev", "--silent"], cwd=SERVER_DIR)
     ok("Server installed")
 
-def install_env(endpoint, port, prefix, label, tls_skip):
+def install_env(endpoint, port, prefix, label, tls_skip, behind_proxy=False):
     lines = [
         f"# SuiteCRM MCP Gateway - {label}",
         f"SUITECRM_ENDPOINT={endpoint}",
@@ -111,9 +120,14 @@ def install_env(endpoint, port, prefix, label, tls_skip):
     if tls_skip:
         warn("TLS verification disabled. Only use this for self-signed certificates on trusted networks.")
         lines.append("NODE_TLS_REJECT_UNAUTHORIZED=0")
+    if behind_proxy:
+        lines.append("TRUST_PROXY=1")
     lines.append("")
     write_file(ENV_FILE, "\n".join(lines), mode="600")
-    run(["chmod", "700", str(Path(ENV_FILE).parent)])
+    run(["chown", f"{SVC_USER}:{SVC_USER}", ENV_FILE])
+    env_dir = str(Path(ENV_FILE).parent)
+    run(["chmod", "700", env_dir])
+    run(["chown", f"{SVC_USER}:{SVC_USER}", env_dir])
     ok(f"Env file: {ENV_FILE}")
 
 def install_service(port, label):
@@ -124,6 +138,8 @@ def install_service(port, label):
         f"After=network.target\n\n"
         f"[Service]\n"
         f"Type=simple\n"
+        f"User={SVC_USER}\n"
+        f"Group={SVC_USER}\n"
         f"EnvironmentFile={ENV_FILE}\n"
         f"ExecStart={nb} {SERVER_DIR}/index.mjs\n"
         f"Restart=always\n"
@@ -313,8 +329,9 @@ def main():
         error("--endpoint is required")
 
     info("Checking Node.js..."); check_node(); print()
+    info("Ensuring service user..."); ensure_service_user(); print()
     info("Installing server..."); install_server(); print()
-    info("Writing env file..."); install_env(endpoint, args.port, args.prefix, args.label, args.tls_skip); print()
+    info("Writing env file..."); install_env(endpoint, args.port, args.prefix, args.label, args.tls_skip, behind_proxy=bool(args.domain)); print()
     info("Installing systemd service..."); install_service(args.port, args.label); print()
 
     if args.domain:

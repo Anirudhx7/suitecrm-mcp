@@ -569,6 +569,8 @@ def remove_for_user(username, entities):
                 if pid in allow: allow.remove(pid)
                 entries.pop(pid, None)
             with open(config_path, "w") as f: json.dump(config, f, indent=2)
+            run(["chown", f"{username}:{username}", config_path])
+            run(["chmod", "600", config_path])
             ok("  Updated openclaw.json")
         except Exception as e:
             warn(f"  Could not patch openclaw.json: {e}")

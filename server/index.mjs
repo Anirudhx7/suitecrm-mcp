@@ -383,8 +383,10 @@ const app = express();
 
 // Trust one level of reverse proxy (nginx) so that req.ip resolves to the
 // real client IP from X-Forwarded-For instead of 127.0.0.1.
-// Without this, all proxied users share a single rate-limit bucket per gateway.
-app.set('trust proxy', 1);
+// Only enabled when TRUST_PROXY=1 is set by the installer — which it sets only
+// when nginx is actually in front (--domain on single, always on multi).
+// Direct single-port access leaves this unset so clients cannot spoof their IP.
+if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 
 // CORS: no Access-Control-Allow-Origin header is set.
 // MCP clients (Claude Desktop, Claude Code) are not browsers and don't require CORS.

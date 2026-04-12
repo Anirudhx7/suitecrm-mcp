@@ -42,6 +42,7 @@ DOMAIN_FILE  = "/etc/suitecrm-mcp/domain"
 NGINX_CONF   = "/etc/nginx/sites-available/suitecrm-mcp"
 NGINX_LINK   = "/etc/nginx/sites-enabled/suitecrm-mcp"
 NGINX_PORT   = 8080
+SVC_USER     = "suitecrm-mcp"  # unprivileged system user each gateway service runs as
 
 RED = "\033[0;31m"; GREEN = "\033[0;32m"; YELLOW = "\033[1;33m"; CYAN = "\033[0;36m"; NC = "\033[0m"
 def info(m): print(f"{CYAN}[INFO]{NC} {m}")
@@ -64,6 +65,14 @@ def validate_email(e):
 def validate_code(c):
     if not SAFE_CODE_RE.match(c):
         error(f"Invalid entity code: {c!r} - must contain only letters, digits, hyphens, and underscores")
+
+def ensure_service_user():
+    r = run(["id", SVC_USER], check=False, capture=True)
+    if r.returncode != 0:
+        run(["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", SVC_USER])
+        ok(f"Created system user: {SVC_USER}")
+    else:
+        ok(f"Service user exists: {SVC_USER}")
 
 def run(cmd, check=True, capture=False, cwd=None):
     # String commands are only used for unavoidable shell pipelines (e.g. curl | bash).
@@ -158,9 +167,12 @@ def install_env_for(code, data):
     if tls_skip:
         warn(f"  [{code}] TLS verification disabled - only for self-signed certs on trusted networks")
         lines.append("NODE_TLS_REJECT_UNAUTHORIZED=0")
+    # Multi-entity always runs behind nginx, so trust X-Forwarded-For for rate limiting.
+    lines.append("TRUST_PROXY=1")
     lines.append("")
     path = f"{ENV_DIR}/{code}.env"
     write_file(path, "\n".join(lines), mode="600")
+    run(["chown", f"{SVC_USER}:{SVC_USER}", path])
     ok(f"  Env: {path}")
 
 def install_service_for(code, label):
@@ -172,6 +184,8 @@ def install_service_for(code, label):
         f"After=network.target\n\n"
         f"[Service]\n"
         f"Type=simple\n"
+        f"User={SVC_USER}\n"
+        f"Group={SVC_USER}\n"
         f"EnvironmentFile={ENV_DIR}/{code}.env\n"
         f"ExecStart={nb} {SERVER_DIR}/index.mjs\n"
         f"Restart=always\n"
@@ -388,10 +402,12 @@ def main():
         to_install = set(new_entities.keys())
 
     check_deps(); print()
+    info("Ensuring service user..."); ensure_service_user(); print()
     info("Installing shared server..."); install_server(); print()
 
     os.makedirs(ENV_DIR, exist_ok=True)
     run(["chmod", "700", ENV_DIR])
+    run(["chown", f"{SVC_USER}:{SVC_USER}", ENV_DIR])
 
     info("Installing env files and services...")
     for code in to_install:
