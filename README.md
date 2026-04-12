@@ -308,97 +308,27 @@ Only use this on trusted internal networks. Never expose a TLS-skipping gateway 
 
 ---
 
-## Compatible MCP Clients
+## Connecting a Client
 
-Any MCP client that supports SSE transport with custom request headers will work. Tested with:
+Any MCP client that supports SSE transport with custom request headers will work.
+Each client has a different setup process - see the dedicated guide for your client:
 
-| Client | Works |
-|--------|-------|
-| Claude Desktop | Yes |
-| Claude Code (CLI) | Yes |
-| OpenClaw | Yes |
+| Client | How it connects | Setup guide |
+|--------|----------------|-------------|
+| Claude Desktop | SSE direct - no bridge needed | [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md) |
+| Claude Code (CLI) | SSE direct - no bridge needed | [docs/connect-claude-code.md](docs/connect-claude-code.md) |
+| OpenClaw | Bridge installer required | [docs/connect-openclaw.md](docs/connect-openclaw.md) |
 
----
+**Claude Desktop and Claude Code** connect directly to the gateway URL over SSE.
+After installing the gateway, add the SSE endpoint and your CRM credentials to
+your client config. Full steps including single/multi entity configs, HTTPS
+variants, and verification are in the guides above.
 
-## Connecting to Claude Desktop
-
-Add to `~/Library/Application\ Support/Claude/claude_desktop_config.json` (Mac) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
-
-```json
-{
-  "mcpServers": {
-    "suitecrm": {
-      "type": "sse",
-      "url": "http://YOUR_SERVER:3101/sse",
-      "headers": {
-        "X-CRM-User": "your_crm_username",
-        "X-CRM-Pass": "your_crm_password"
-      }
-    }
-  }
-}
-```
-
-For multi-entity, add one entry per CRM:
-```json
-{
-  "mcpServers": {
-    "suitecrm-crm1": {
-      "type": "sse",
-      "url": "http://YOUR_SERVER:8080/crm1/sse",
-      "headers": {
-        "X-CRM-User": "admin",
-        "X-CRM-Pass": "password"
-      }
-    },
-    "suitecrm-crm2": {
-      "type": "sse",
-      "url": "http://YOUR_SERVER:8080/crm2/sse",
-      "headers": {
-        "X-CRM-User": "admin",
-        "X-CRM-Pass": "password"
-      }
-    }
-  }
-}
-```
-
-## Connecting to Claude Code
-
-```bash
-# Single entity
-claude mcp add suitecrm --transport sse \
-  --header "X-CRM-User:admin" \
-  --header "X-CRM-Pass:yourpassword" \
-  http://YOUR_SERVER:3101/sse
-
-# Multi-entity
-claude mcp add suitecrm-crm1 --transport sse \
-  --header "X-CRM-User:admin" \
-  --header "X-CRM-Pass:yourpassword" \
-  http://YOUR_SERVER:8080/crm1/sse
-```
-
-## Connecting to OpenClaw
-
-Add to your OpenClaw MCP server config:
-
-```json
-{
-  "mcpServers": {
-    "suitecrm": {
-      "type": "sse",
-      "url": "http://YOUR_SERVER:3101/sse",
-      "headers": {
-        "X-CRM-User": "your_crm_username",
-        "X-CRM-Pass": "your_crm_password"
-      }
-    }
-  }
-}
-```
-
-For multi-entity, add one entry per CRM using the nginx URL pattern (`http://YOUR_SERVER:8080/<code>/sse`).
+**OpenClaw** uses a two-component setup: the gateway runs on a remote server
+(installed via `install-multi.py` or `install-single.py`) and a bridge plugin
+runs locally on the OpenClaw machine (installed via `install-bridge.py`). The
+bridge proxies all 13 SuiteCRM tools through to the gateway. The OpenClaw guide
+covers both components end to end.
 
 ---
 
