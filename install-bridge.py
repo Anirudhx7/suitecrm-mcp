@@ -267,7 +267,8 @@ def resolve_agent_selection(username, config, attach_spec):
 
         if invalid:
             valid = ", ".join(agent["primary"] for agent in agents)
-            error(f"Unknown agent(s) for {username}: {', '.join(invalid)}. Valid agents: {valid}")
+            warn(f"  Unknown agent(s) for {username}: {', '.join(invalid)}. Valid: {valid} — installing plugin only")
+            return {"mode": "plugin-only", "agents": [], "labels": []}
         if ambiguous:
             error(f"Ambiguous agent identifier(s) for {username}: {', '.join(ambiguous)}")
 
@@ -631,28 +632,40 @@ def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection):
     selected_indexes = {agent["index"] for agent in agent_selection["agents"]}
 
     if agent_selection["mode"] == "all":
-        _merge_unique(global_allow, plugin_ids)
+        # Only add to global allow if it is already non-empty (already
+        # restrictive). An empty list means "all tools allowed" — adding to it
+        # would unintentionally restrict access to every non-bridge tool.
+        if global_allow:
+            _merge_unique(global_allow, plugin_ids)
+        # For agents with an existing restrictive per-agent allowlist, add
+        # bridge tool ids so the agent-level filter does not block them.
         for agent in agent_list:
             if not isinstance(agent, dict):
                 continue
             agent_tools = agent.setdefault("tools", {})
             allow = agent_tools.setdefault("allow", [])
-            agent_tools["allow"] = _remove_values(allow, plugin_ids + tool_names)
+            if allow:
+                _merge_unique(allow, plugin_ids)
         ok("  Bridge tools enabled for all agents")
     elif agent_selection["mode"] == "selected":
-        tools_cfg["allow"] = _remove_values(global_allow, plugin_ids + tool_names)
+        # Do not touch global_allow — narrowing it here risks making it empty
+        # (permissive), which would give all agents access instead of fewer.
+        # For selected agents: only add to per-agent allowlist if it is already
+        # non-empty. An empty list means the agent already inherits all tools.
+        # For non-selected agents: remove bridge ids from their per-agent list.
         for idx, agent in enumerate(agent_list):
             if not isinstance(agent, dict):
                 continue
             agent_tools = agent.setdefault("tools", {})
             allow = agent_tools.setdefault("allow", [])
             if idx in selected_indexes:
-                _merge_unique(allow, plugin_ids)
+                if allow:
+                    _merge_unique(allow, plugin_ids)
             else:
                 agent_tools["allow"] = _remove_values(allow, plugin_ids + tool_names)
-        ok(f"  Bridge tools enabled for agents: {', '.join(agent_selection['labels'])}")
+        ok(f"  Bridge tools scoped to agents: {', '.join(agent_selection['labels'])}")
     else:
-        tools_cfg["allow"] = _remove_values(global_allow, plugin_ids + tool_names)
+        # plugin-only: plugin registered but no tools.allow changes.
         ok("  Plugin registered without agent-specific attachment")
 
     save_openclaw_config(username, config_path, config)
