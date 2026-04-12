@@ -146,7 +146,12 @@ def install_service(port, label):
         f"RestartSec=5\n"
         f"StandardOutput=journal\n"
         f"StandardError=journal\n"
-        f"SyslogIdentifier={SVC_NAME}\n\n"
+        f"SyslogIdentifier={SVC_NAME}\n"
+        f"NoNewPrivileges=yes\n"
+        f"PrivateTmp=yes\n"
+        f"ProtectSystem=strict\n"
+        f"ProtectHome=yes\n"
+        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp\n\n"
         f"[Install]\n"
         f"WantedBy=multi-user.target\n"
     )
@@ -175,14 +180,25 @@ def apply_update_hardening():
         run(["chmod", "700", env_dir])
         run(["chown", f"{SVC_USER}:{SVC_USER}", env_dir])
 
-    # Patch unit file: inject User=/Group= after [Service] if not already present
+    # Patch unit file: inject User=/Group= and systemd hardening flags if not already present
     unit_path = Path(SVC_FILE)
     if unit_path.exists():
         unit = unit_path.read_text()
+        changed = False
         if f"User={SVC_USER}" not in unit:
             unit = unit.replace("[Service]\n", f"[Service]\nUser={SVC_USER}\nGroup={SVC_USER}\n")
+            changed = True
+        if "NoNewPrivileges=yes" not in unit:
+            unit = unit.replace(
+                "SyslogIdentifier=",
+                "NoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\n"
+                "ProtectHome=yes\nReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp\n"
+                "SyslogIdentifier=",
+            )
+            changed = True
+        if changed:
             unit_path.write_text(unit)
-            ok(f"Added User={SVC_USER} to unit file")
+            ok("Patched unit file with hardening directives")
         else:
             ok("Unit file: no changes needed")
 

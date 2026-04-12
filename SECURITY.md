@@ -32,6 +32,7 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 - **Session IDs excluded from nginx logs:** The `/messages` endpoint has `access_log off` in the generated nginx config. Session IDs passed as query parameters are not written to access logs.
 - **Env files protected:** Written with mode `600`; the env directory is `700`. Both are owned by the `suitecrm-mcp` service user so root access is not required at runtime.
 - **Unprivileged service user:** Both installers create a `suitecrm-mcp` system user (no shell, no home directory) and set `User=`/`Group=` in the generated systemd unit. The gateway process does not run as root.
+- **Systemd sandboxing:** Generated units include `NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, and `ReadWritePaths` limited to `/etc/suitecrm-mcp` and `/opt/suitecrm-mcp`. This restricts what a compromised process can reach on the host.
 - **Proxy trust is conditional:** `X-Forwarded-For` is only trusted for rate limiting when `TRUST_PROXY=1` is set in the env file. The installers set this only where nginx is actually in front: always for multi-entity, only when `--domain` is used for single-entity. Direct port access leaves the header untrusted so clients cannot spoof their IP to shard rate limits.
 
 ## Known Security Limitations
