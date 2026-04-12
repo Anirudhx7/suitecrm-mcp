@@ -108,7 +108,7 @@ The fastest way to run the gateway without touching Node.js or system packages. 
 For production, pin to a release tag such as `v1.3.0` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v1.4.0/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v1.4.2/docker-compose.yml
 ```
 
 Edit `docker-compose.yml` and set `SUITECRM_ENDPOINT` to your CRM's REST API URL, then:
