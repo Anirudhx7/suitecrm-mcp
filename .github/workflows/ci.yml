@@ -24,7 +24,7 @@ jobs:
       - name: Check server syntax
         run: node --check server/index.mjs
       - name: Check installer syntax
-        run: python3 -m py_compile install-single.py install-multi.py
+        run: python3 -m py_compile install.py install-bridge.py
 
   publish:
     runs-on: ubuntu-latest
