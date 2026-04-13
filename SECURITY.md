@@ -25,7 +25,7 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 - **No CORS header:** `Access-Control-Allow-Origin` is not set. Browser same-origin policy blocks cross-origin requests by default, including `Origin: null` contexts.
 - **Credentials never stored:** Each SSE connection supplies its own credentials per request. Nothing is written to disk or held in memory beyond the session lifetime.
 
-### Installers (install-single.py, install-multi.py)
+### Installer (install.py)
 
 - **Input validation:** `--domain`, `--email`, and `--remove` entity codes are validated with strict regexes before any command is executed.
 - **No shell injection:** All privileged subprocess calls use list form (`subprocess.run([...])`) so arguments are never interpreted by a shell. The only exception is the NodeSource setup bootstrap (`curl | bash`), which is a shell pipeline by design and is explicitly commented as such.

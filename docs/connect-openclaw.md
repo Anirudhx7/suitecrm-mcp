@@ -25,9 +25,7 @@ gateway on first tool use and proxies all 13 SuiteCRM tools through.
 **Single entity** (one CRM, direct port access):
 
 ```bash
-sudo python3 install-single.py \
-  --endpoint https://crm.example.com/service/v4_1/rest.php \
-  --port 3101
+sudo python3 install.py --url https://crm.example.com --port 3101
 ```
 
 **Multi entity** (multiple CRMs, nginx routing):
@@ -38,11 +36,11 @@ cp entities.example.json entities.json
 # Edit entities.json with your CRM codes, labels, ports, and endpoints
 
 # 2. Install
-sudo python3 install-multi.py --config entities.json
+sudo python3 install.py --config entities.json
 ```
 
-Add `--domain mcp.yourserver.com --email you@example.com` to either installer
-to enable automatic HTTPS via Let's Encrypt.
+Add `--domain mcp.yourserver.com --email you@example.com` to enable automatic
+HTTPS via Let's Encrypt.
 
 Note the gateway URL — you will need it in Step 2:
 - Single: `http://YOUR_GATEWAY_IP:3101`

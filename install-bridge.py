@@ -11,7 +11,7 @@ Usage:
   # Single entity
   sudo python3 install-bridge.py --gateway http://GATEWAY_HOST:3101 --code mycrm --label "My CRM"
 
-  # Multi entity (reads entities.json — same format as install-multi.py)
+  # Multi entity (reads entities.json — same format as install.py)
   sudo python3 install-bridge.py --gateway http://GATEWAY_HOST:8080 --entities entities.json
 
   # Target specific users (default: all users in /home)

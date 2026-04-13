@@ -1,7 +1,7 @@
 services:
 
   # ── Gateway (single-entity Docker usage) ────────────────────────────────────
-  # For multi-entity deployments use install-multi.py (systemd) instead.
+  # For multi-entity deployments use install.py --config entities.json (systemd) instead.
   # This service is kept for single-CRM / dev use.
   suitecrm-mcp:
     image: ghcr.io/anirudhx7/suitecrm-mcp:v2.0.0
