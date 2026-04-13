@@ -105,10 +105,10 @@ For production: create a dedicated API user with only the module permissions you
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v1.4.3` instead of floating on `latest`.
+For production, pin to a release tag such as `v1.5.0` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v1.4.3/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v1.5.0/docker-compose.yml
 ```
 
 Edit `docker-compose.yml` and set `SUITECRM_ENDPOINT` to your CRM's REST API URL, then:
@@ -259,7 +259,11 @@ sudo python3 install-multi.py --remove crm2
 | `SUITECRM_ENDPOINT` | Yes | - | Full URL to `/service/v4_1/rest.php` |
 | `SUITECRM_PREFIX` | No | `suitecrm` | Tool name prefix |
 | `PORT` | No | `3101` | Listen port |
+| `METRICS_PORT` | No | `9090` | Prometheus metrics port (localhost only) |
 | `SUITECRM_CODE` | No | - | Entity code for multi-entity nginx routing |
+| `CRM_TIMEOUT_MS` | No | `30000` | CRM API request timeout in ms |
+| `CIRCUIT_BREAKER_THRESHOLD` | No | `5` | Consecutive failures before circuit opens |
+| `CIRCUIT_BREAKER_RESET_MS` | No | `60000` | ms before circuit tests recovery |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | No | - | Set to `0` only for self-signed certs |
 | `NODE_NO_WARNINGS` | No | - | Set to `1` to suppress Node warnings |
 
@@ -282,6 +286,56 @@ sudo python3 install-multi.py --remove crm2
 ```
 
 Keys become the entity code (nginx path prefix, tool prefix suffix, service name). Ports must be unique.
+
+---
+
+## Health Checks and Monitoring
+
+### Health endpoints
+
+| Endpoint | Use for | Response time |
+|----------|---------|---------------|
+| `GET /health` | Liveness probe, quick status | <1ms, no external calls |
+| `GET /health/deep` | Readiness probe, CRM connectivity | 100-500ms, calls CRM API |
+
+```bash
+curl http://YOUR_SERVER:3101/health
+# {"status":"ok","version":"1.5.0","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
+
+curl http://YOUR_SERVER:3101/health/deep
+# {"status":"healthy","checks":{"endpoint":{"status":"ok"},"api":{"status":"ok","latency_ms":142},...}}
+```
+
+`/health/deep` returns HTTP 503 with `"status":"unhealthy"` if the CRM is unreachable, and 200 with `"status":"degraded"` if the endpoint is reachable but the API is not responding.
+
+### Prometheus metrics
+
+The gateway exposes 9 metrics on a separate server at `127.0.0.1:METRICS_PORT/metrics` (default port 9090). This port is never routed through nginx and is only reachable by a local Prometheus instance.
+
+```bash
+curl http://127.0.0.1:9090/metrics | grep suitecrm_mcp
+```
+
+### Grafana dashboard
+
+The `monitoring/` directory contains a ready-to-use Prometheus + Grafana stack. To start it alongside the gateway:
+
+```bash
+# Set Grafana admin password (optional - defaults to "changeme")
+echo "GRAFANA_PASSWORD=yourpassword" > .env
+
+docker compose up -d
+```
+
+Grafana runs at `http://localhost:3000`. The pre-built dashboard includes panels for active connections, tool call rate, error rate, auth failures, tool latency percentiles (p50/p95/p99), CRM API latency by method, and circuit breaker state.
+
+For systemd installs (non-Docker), install Prometheus separately and point it at `127.0.0.1:METRICS_PORT`. See `monitoring/prometheus.yml` for a multi-entity config example.
+
+### Circuit breaker
+
+The gateway has a built-in circuit breaker. After `CIRCUIT_BREAKER_THRESHOLD` consecutive CRM failures (default 5), it switches to OPEN state and fails fast instead of waiting for each timeout. After `CIRCUIT_BREAKER_RESET_MS` (default 60s) it allows one test request through to check recovery.
+
+The current state is visible in `/health`, `/health/deep`, `{prefix}_server_info`, and the `suitecrm_mcp_circuit_breaker_state` metric.
 
 ---
 

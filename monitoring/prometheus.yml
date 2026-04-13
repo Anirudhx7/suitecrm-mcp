@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Single-entity Docker setup - scrapes the suitecrm-mcp container
+  # METRICS_BIND must be set to 0.0.0.0 in docker-compose.yml for this to work
+  - job_name: suitecrm-mcp
+    static_configs:
+      - targets: ['suitecrm-mcp:9090']
+        labels:
+          entity: default
+
+  # Multi-entity example (systemd installs - Prometheus runs on same host)
+  # Uncomment and adjust targets/labels for your entity codes and ports
+  #
+  # - job_name: suitecrm-mcp-entity1
+  #   static_configs:
+  #     - targets: ['127.0.0.1:9091']
+  #       labels:
+  #         entity: entity1
+  #
+  # - job_name: suitecrm-mcp-entity2
+  #   static_configs:
+  #     - targets: ['127.0.0.1:9092']
+  #       labels:
+  #         entity: entity2

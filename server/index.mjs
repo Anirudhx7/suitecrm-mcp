@@ -4,10 +4,14 @@
  * Transport: HTTP + SSE | Auth: X-CRM-User/Pass headers | SDK: 1.29.0
  *
  * Environment variables:
- *   SUITECRM_ENDPOINT  - required, e.g. https://crm.example.com/service/v4_1/rest.php
- *   SUITECRM_PREFIX    - tool name prefix, default "suitecrm"
- *   PORT               - listen port, default 3101
- *   SUITECRM_CODE      - entity code for multi-entity nginx routing (leave blank for single)
+ *   SUITECRM_ENDPOINT          - required, e.g. https://crm.example.com/service/v4_1/rest.php
+ *   SUITECRM_PREFIX            - tool name prefix, default "suitecrm"
+ *   PORT                       - listen port, default 3101
+ *   METRICS_PORT               - Prometheus metrics port, default 9090 (localhost only)
+ *   SUITECRM_CODE              - entity code for multi-entity nginx routing (leave blank for single)
+ *   CRM_TIMEOUT_MS             - CRM API request timeout in ms, default 30000
+ *   CIRCUIT_BREAKER_THRESHOLD  - consecutive failures before circuit opens, default 5
+ *   CIRCUIT_BREAKER_RESET_MS   - ms before circuit tests recovery, default 60000
  *   NODE_TLS_REJECT_UNAUTHORIZED - set to "0" only for self-signed certs (with caution)
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -19,24 +23,157 @@ import bodyParser from 'body-parser';
 import { rateLimit } from 'express-rate-limit';
 import https from 'https';
 import http from 'http';
+import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { version: PKG_VERSION } = require('./package.json');
 
-const ENDPOINT = (process.env.SUITECRM_ENDPOINT || '').trim();
-const PREFIX = (process.env.SUITECRM_PREFIX || 'suitecrm').trim();
-const PORT = parseInt(process.env.PORT || '3101', 10);
-const TLS_OK = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
+// ---------------------------------------------------------------------------
+// Configuration constants  (must come before metrics so PREFIX is defined)
+// ---------------------------------------------------------------------------
+const ENDPOINT  = (process.env.SUITECRM_ENDPOINT || '').trim();
+const PREFIX    = (process.env.SUITECRM_PREFIX || 'suitecrm').trim();
+const PORT      = parseInt(process.env.PORT || '3101', 10);
+const METRICS_PORT = parseInt(process.env.METRICS_PORT || '9090', 10);
+const TLS_OK    = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
+
+const CRM_REQUEST_TIMEOUT_MS    = parseInt(process.env.CRM_TIMEOUT_MS || '30000', 10);
+const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_RATE_LIMIT_MAX       = 20;
+const TOOL_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const TOOL_RATE_LIMIT_MAX       = 100;
+const MAX_SEARCH_RESULTS        = 100;
+const TOOL_LATENCY_BUCKETS      = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+const CRM_API_LATENCY_BUCKETS   = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30];
+const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD || '5', 10);
+const CIRCUIT_BREAKER_RESET_MS  = parseInt(process.env.CIRCUIT_BREAKER_RESET_MS || '60000', 10);
 
 if (!ENDPOINT) {
   process.stderr.write('FATAL: SUITECRM_ENDPOINT is required\n');
   process.exit(1);
 }
 
-const transports = new Map();
-const crmSessions = new Map();
-const connCreds = new Map();
+// ---------------------------------------------------------------------------
+// Prometheus metrics
+// ---------------------------------------------------------------------------
+const metricsRegistry = new Registry();
+metricsRegistry.setDefaultLabels({ entity: PREFIX });
+collectDefaultMetrics({ register: metricsRegistry });
 
+const metricActiveConnections = new Gauge({
+  name: 'suitecrm_mcp_active_connections',
+  help: 'Number of active SSE connections',
+  labelNames: ['entity'],
+  registers: [metricsRegistry],
+});
+
+const metricConnections = new Counter({
+  name: 'suitecrm_mcp_connections_total',
+  help: 'Total SSE connections established',
+  labelNames: ['entity'],
+  registers: [metricsRegistry],
+});
+
+const metricToolCalls = new Counter({
+  name: 'suitecrm_mcp_tool_calls_total',
+  help: 'Total number of tool calls',
+  labelNames: ['entity', 'tool', 'status'],
+  registers: [metricsRegistry],
+});
+
+const metricToolDuration = new Histogram({
+  name: 'suitecrm_mcp_tool_duration_seconds',
+  help: 'Tool call duration in seconds',
+  labelNames: ['entity', 'tool'],
+  buckets: TOOL_LATENCY_BUCKETS,
+  registers: [metricsRegistry],
+});
+
+const metricCrmApiDuration = new Histogram({
+  name: 'suitecrm_mcp_crm_api_duration_seconds',
+  help: 'CRM REST API call duration in seconds',
+  labelNames: ['entity', 'method'],
+  buckets: CRM_API_LATENCY_BUCKETS,
+  registers: [metricsRegistry],
+});
+
+const metricSessionRenewals = new Counter({
+  name: 'suitecrm_mcp_session_renewals_total',
+  help: 'Total number of CRM session renewals',
+  labelNames: ['entity'],
+  registers: [metricsRegistry],
+});
+
+const metricAuthFailures = new Counter({
+  name: 'suitecrm_mcp_auth_failures_total',
+  help: 'Total number of CRM authentication failures',
+  labelNames: ['entity'],
+  registers: [metricsRegistry],
+});
+
+const metricCircuitBreakerState = new Gauge({
+  name: 'suitecrm_mcp_circuit_breaker_state',
+  help: 'Circuit breaker state (0=closed, 1=half-open, 2=open)',
+  labelNames: ['entity'],
+  registers: [metricsRegistry],
+});
+
+const metricCircuitBreakerOpenings = new Counter({
+  name: 'suitecrm_mcp_circuit_breaker_openings_total',
+  help: 'Total number of times circuit breaker opened',
+  labelNames: ['entity'],
+  registers: [metricsRegistry],
+});
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+const transports  = new Map();
+const crmSessions = new Map();
+const connCreds   = new Map();
+
+// ---------------------------------------------------------------------------
+// Circuit breaker
+// ---------------------------------------------------------------------------
+const circuitBreaker = {
+  state: 'CLOSED',
+  failures: 0,
+  lastFailure: 0,
+
+  isOpen() {
+    if (this.state === 'CLOSED') return false;
+    if (Date.now() - this.lastFailure > CIRCUIT_BREAKER_RESET_MS) {
+      this.state = 'HALF_OPEN';
+      metricCircuitBreakerState.set({ entity: PREFIX }, 1);
+      process.stderr.write(`[${PREFIX}] Circuit breaker HALF_OPEN - testing recovery\n`);
+      return false;
+    }
+    return true;
+  },
+
+  recordSuccess() {
+    if (this.state !== 'CLOSED')
+      process.stderr.write(`[${PREFIX}] Circuit breaker CLOSED - recovery successful\n`);
+    this.state = 'CLOSED';
+    this.failures = 0;
+    metricCircuitBreakerState.set({ entity: PREFIX }, 0);
+  },
+
+  recordFailure() {
+    this.failures++;
+    this.lastFailure = Date.now();
+    if (this.failures >= CIRCUIT_BREAKER_THRESHOLD && this.state !== 'OPEN') {
+      this.state = 'OPEN';
+      metricCircuitBreakerState.set({ entity: PREFIX }, 2);
+      metricCircuitBreakerOpenings.inc({ entity: PREFIX });
+      process.stderr.write(`[${PREFIX}] Circuit breaker OPEN after ${this.failures} consecutive failures - failing fast for ${CIRCUIT_BREAKER_RESET_MS}ms\n`);
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// CRM communication
+// ---------------------------------------------------------------------------
 function postForm(url, params) {
   return new Promise((resolve, reject) => {
     const body = new URLSearchParams(params).toString();
@@ -60,7 +197,7 @@ function postForm(url, params) {
         catch { reject(new Error(`Non-JSON (HTTP ${res.statusCode}): ${raw.slice(0, 300)}`)); }
       });
     });
-    req.setTimeout(30_000, () => req.destroy(new Error('Request timed out')));
+    req.setTimeout(CRM_REQUEST_TIMEOUT_MS, () => req.destroy(new Error('Request timed out')));
     req.on('error', reject);
     req.write(body);
     req.end();
@@ -68,16 +205,23 @@ function postForm(url, params) {
 }
 
 async function rawCall(method, restData) {
-  const r = await postForm(ENDPOINT, {
-    method, input_type: 'JSON', response_type: 'JSON',
-    rest_data: JSON.stringify(restData),
-  });
-  if (r && typeof r.number === 'number' && r.number !== 0) {
-    const e = new Error(r.name || r.description || `CRM API error ${r.number}`);
-    e.code = r.number;
-    throw e;
+  const end = metricCrmApiDuration.startTimer({ entity: PREFIX, method });
+  try {
+    const r = await postForm(ENDPOINT, {
+      method, input_type: 'JSON', response_type: 'JSON',
+      rest_data: JSON.stringify(restData),
+    });
+    if (r && typeof r.number === 'number' && r.number !== 0) {
+      const e = new Error(r.name || r.description || `CRM API error ${r.number}`);
+      e.code = r.number;
+      throw e;
+    }
+    end();
+    return r;
+  } catch (err) {
+    end();
+    throw err;
   }
-  return r;
 }
 
 async function crmLogin(user, pass) {
@@ -102,20 +246,33 @@ async function ensureCrmSession(sid) {
 }
 
 async function crmCall(sid, method, params) {
+  if (circuitBreaker.isOpen())
+    throw new Error(`Circuit breaker open - CRM unavailable (${circuitBreaker.failures} consecutive failures)`);
+
   let crmSid = await ensureCrmSession(sid);
   try {
-    return await rawCall(method, { session: crmSid, ...params });
+    const result = await rawCall(method, { session: crmSid, ...params });
+    circuitBreaker.recordSuccess();
+    return result;
   } catch (err) {
+    // Session expiry (code 11) is expected, not a circuit breaker failure
     if (err.code === 11) {
       process.stderr.write(`[${PREFIX}] Session expired - re-logging in\n`);
+      metricSessionRenewals.inc({ entity: PREFIX });
       crmSessions.delete(sid);
       crmSid = await ensureCrmSession(sid);
-      return await rawCall(method, { session: crmSid, ...params });
+      const result = await rawCall(method, { session: crmSid, ...params });
+      circuitBreaker.recordSuccess();
+      return result;
     }
+    circuitBreaker.recordFailure();
     throw err;
   }
 }
 
+// ---------------------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------------------
 function flatNvl(nvl) {
   if (!nvl || typeof nvl !== 'object') return {};
   const out = {};
@@ -143,7 +300,6 @@ function sanitizeQuery(q) {
 }
 
 // Module names in SuiteCRM are PascalCase identifiers (e.g. Accounts, AOS_Quotes).
-// Block anything that isn't a safe identifier to prevent injection via module_name.
 const SAFE_MODULE = /^[A-Za-z][A-Za-z0-9_]{0,99}$/;
 function validateModule(m) {
   if (!m || !SAFE_MODULE.test(m))
@@ -164,13 +320,16 @@ function validateLinkField(f) {
     throw new McpError(ErrorCode.InvalidParams, `Invalid link_field: ${String(f).slice(0, 40)}`);
 }
 
+// ---------------------------------------------------------------------------
+// Tool implementations
+// ---------------------------------------------------------------------------
 async function searchRecords(sid, { module, query='', fields=[], max_results=20, offset=0, order_by='' }) {
   validateModule(module);
   sanitizeQuery(query);
   if (order_by) sanitizeQuery(order_by);
   const r = await crmCall(sid, 'get_entry_list', {
     module_name: module, query, order_by, offset, select_fields: fields,
-    link_name_to_fields_array: [], max_results: Math.min(max_results, 100),
+    link_name_to_fields_array: [], max_results: Math.min(max_results, MAX_SEARCH_RESULTS),
     deleted: 0, favorites: false,
   });
   return {
@@ -300,6 +459,7 @@ async function serverInfo(sid) {
     crm_user: creds.user || '?',
     session_active: crmSessions.has(sid),
     active_connections: transports.size,
+    circuit_breaker: circuitBreaker.state.toLowerCase(),
   };
 }
 
@@ -347,31 +507,39 @@ const TOOLS = [
     inputSchema: { type:'object', properties:{}}},
 ];
 
+// ---------------------------------------------------------------------------
+// MCP server factory
+// ---------------------------------------------------------------------------
 function createMcpServer(sid) {
   const srv = new Server({name:`suitecrm-gateway-${PREFIX}`, version: PKG_VERSION}, {capabilities:{tools:{}}});
   srv.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
   srv.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args = {} } = req.params;
+    const end = metricToolDuration.startTimer({ entity: PREFIX, tool: name });
     try {
       let result;
       switch (name) {
-        case `${PREFIX}_search`: result = await searchRecords(sid, args); break;
-        case `${PREFIX}_search_text`: result = await searchText(sid, args); break;
-        case `${PREFIX}_get`: result = await getRecord(sid, args); break;
-        case `${PREFIX}_create`: result = await createRecord(sid, args); break;
-        case `${PREFIX}_update`: result = await updateRecord(sid, args); break;
-        case `${PREFIX}_delete`: result = await deleteRecord(sid, args); break;
-        case `${PREFIX}_count`: result = await countRecords(sid, args); break;
-        case `${PREFIX}_get_relationships`: result = await getRelationships(sid, args); break;
-        case `${PREFIX}_link_records`: result = await linkRecords(sid, args); break;
-        case `${PREFIX}_unlink_records`: result = await unlinkRecords(sid, args); break;
-        case `${PREFIX}_get_module_fields`: result = await getModuleFields(sid, args); break;
-        case `${PREFIX}_list_modules`: result = await listModules(sid); break;
-        case `${PREFIX}_server_info`: result = await serverInfo(sid); break;
+        case `${PREFIX}_search`:           result = await searchRecords(sid, args); break;
+        case `${PREFIX}_search_text`:      result = await searchText(sid, args); break;
+        case `${PREFIX}_get`:              result = await getRecord(sid, args); break;
+        case `${PREFIX}_create`:           result = await createRecord(sid, args); break;
+        case `${PREFIX}_update`:           result = await updateRecord(sid, args); break;
+        case `${PREFIX}_delete`:           result = await deleteRecord(sid, args); break;
+        case `${PREFIX}_count`:            result = await countRecords(sid, args); break;
+        case `${PREFIX}_get_relationships`:result = await getRelationships(sid, args); break;
+        case `${PREFIX}_link_records`:     result = await linkRecords(sid, args); break;
+        case `${PREFIX}_unlink_records`:   result = await unlinkRecords(sid, args); break;
+        case `${PREFIX}_get_module_fields`:result = await getModuleFields(sid, args); break;
+        case `${PREFIX}_list_modules`:     result = await listModules(sid); break;
+        case `${PREFIX}_server_info`:      result = await serverInfo(sid); break;
         default: throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
       }
+      end();
+      metricToolCalls.inc({ entity: PREFIX, tool: name, status: 'success' });
       return { content: [{ type:'text', text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
+      end();
+      metricToolCalls.inc({ entity: PREFIX, tool: name, status: 'error' });
       const msg = [err.message, err.description].filter(Boolean).join(' - ');
       return { content: [{ type:'text', text:`Error: ${msg}` }], isError: true };
     }
@@ -379,11 +547,14 @@ function createMcpServer(sid) {
   return srv;
 }
 
+// ---------------------------------------------------------------------------
+// Express app
+// ---------------------------------------------------------------------------
 const app = express();
 
 // Trust one level of reverse proxy (nginx) so that req.ip resolves to the
 // real client IP from X-Forwarded-For instead of 127.0.0.1.
-// Only enabled when TRUST_PROXY=1 is set by the installer — which it sets only
+// Only enabled when TRUST_PROXY=1 is set by the installer - which it sets only
 // when nginx is actually in front (--domain on single, always on multi).
 // Direct single-port access leaves this unset so clients cannot spoof their IP.
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -405,16 +576,63 @@ app.use((req, res, next) => {
   }
 });
 
+// Shallow health - fast, no external calls. Use for liveness probes.
 app.get('/health', (_req, res) => res.json({
-  status: 'ok', prefix: PREFIX, port: PORT, active_connections: transports.size,
+  status: 'ok',
+  version: PKG_VERSION,
+  prefix: PREFIX,
+  uptime: Math.floor(process.uptime()),
+  connections: transports.size,
+  circuit_breaker: circuitBreaker.state.toLowerCase(),
 }));
 
+// Deep health - tests actual CRM reachability. Use for readiness probes.
+app.get('/health/deep', async (_req, res) => {
+  const start = Date.now();
+  const checks = {};
+  let status = 'healthy';
+
+  // Check endpoint URL is parseable
+  try {
+    const parsed = new URL(ENDPOINT);
+    checks.endpoint = { status: 'ok', url: `${parsed.protocol}//${parsed.host}` };
+  } catch {
+    checks.endpoint = { status: 'error', message: 'Invalid endpoint URL' };
+    status = 'unhealthy';
+  }
+
+  // Check CRM API responds (get_server_info requires no auth)
+  if (status !== 'unhealthy') {
+    try {
+      const t = Date.now();
+      await rawCall('get_server_info', {});
+      checks.api = { status: 'ok', latency_ms: Date.now() - t };
+    } catch (err) {
+      checks.api = { status: 'error', message: err.message };
+      status = 'degraded';
+    }
+  }
+
+  checks.sessions = { status: 'ok', active: transports.size };
+
+  res.status(status === 'unhealthy' ? 503 : 200).json({
+    status,
+    version: PKG_VERSION,
+    prefix: PREFIX,
+    uptime: Math.floor(process.uptime()),
+    connections: transports.size,
+    circuit_breaker: circuitBreaker.state.toLowerCase(),
+    checks,
+    duration_ms: Date.now() - start,
+  });
+});
+
 const authRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  max: AUTH_RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests - try again in 15 minutes' },
+  message: { error: 'Too many authentication attempts - try again in 15 minutes' },
 });
 
 app.get('/test', authRateLimit, async (req, res) => {
@@ -448,15 +666,19 @@ app.get('/sse', authRateLimit, async (req, res) => {
     await ensureCrmSession(sid);
   } catch (err) {
     connCreds.delete(sid);
+    metricAuthFailures.inc({ entity: PREFIX });
     process.stderr.write(`[${PREFIX}] CRM login failed for "${user}": ${err.message}\n`);
     return res.status(401).json({ error: `CRM authentication failed: ${err.message}` });
   }
   const srv = createMcpServer(sid);
   transports.set(sid, transport);
+  metricActiveConnections.set({ entity: PREFIX }, transports.size);
+  metricConnections.inc({ entity: PREFIX });
   res.on('close', () => {
     transports.delete(sid);
     crmSessions.delete(sid);
     connCreds.delete(sid);
+    metricActiveConnections.set({ entity: PREFIX }, transports.size);
     process.stderr.write(`[${PREFIX}] Disconnected: "${user}" (sid=${sid.slice(0,8)})\n`);
   });
   await srv.connect(transport);
@@ -464,8 +686,8 @@ app.get('/sse', authRateLimit, async (req, res) => {
 });
 
 const messagesRateLimit = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100,
+  windowMs: TOOL_RATE_LIMIT_WINDOW_MS,
+  max: TOOL_RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many tool calls - slow down' },
@@ -496,4 +718,23 @@ app.listen(PORT, '0.0.0.0', (err) => {
   if (!TLS_OK) process.stderr.write(`[${PREFIX}] WARNING: TLS verification disabled\n`);
   if (!ENDPOINT.startsWith('https://'))
     process.stderr.write(`[${PREFIX}] WARNING: CRM endpoint is not HTTPS - passwords are sent as MD5 hashes over plaintext\n`);
+});
+
+// ---------------------------------------------------------------------------
+// Metrics server - separate port, never exposed through nginx
+// Binds to 127.0.0.1 by default (systemd installs). Set METRICS_BIND=0.0.0.0
+// when running in Docker so Prometheus can reach it from another container.
+// ---------------------------------------------------------------------------
+const METRICS_BIND = process.env.METRICS_BIND || '127.0.0.1';
+const metricsServer = http.createServer(async (req, res) => {
+  if (req.url === '/metrics' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': metricsRegistry.contentType });
+    res.end(await metricsRegistry.metrics());
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
+metricsServer.listen(METRICS_PORT, METRICS_BIND, () => {
+  process.stderr.write(`[${PREFIX}] Metrics listening on ${METRICS_BIND}:${METRICS_PORT}/metrics\n`);
 });

@@ -1,11 +1,53 @@
 services:
+
+  # ── Gateway (single-entity Docker usage) ────────────────────────────────────
+  # For multi-entity deployments use install-multi.py (systemd) instead.
+  # This service is kept for single-CRM / dev use.
   suitecrm-mcp:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v1.4.3
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v1.5.0
     ports:
-      - "3101:3101"
+      - "3101:3101"    # MCP SSE gateway
     environment:
       SUITECRM_ENDPOINT: https://crm.example.com/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm
       PORT: "3101"
+      METRICS_PORT: "9090"
+      METRICS_BIND: "0.0.0.0"   # allow Prometheus container to reach metrics
       # NODE_TLS_REJECT_UNAUTHORIZED: "0"  # only for self-signed certs
     restart: unless-stopped
+
+  # ── Prometheus ───────────────────────────────────────────────────────────────
+  # Optional monitoring stack. Remove this and grafana if you don't need metrics.
+  prometheus:
+    image: prom/prometheus:v3.3.1
+    ports:
+      - "127.0.0.1:9090:9090"   # localhost only - do not expose publicly
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    restart: unless-stopped
+
+  # ── Grafana ──────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.6.1
+    ports:
+      - "127.0.0.1:3000:3000"   # localhost only - do not expose publicly
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-changeme}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
