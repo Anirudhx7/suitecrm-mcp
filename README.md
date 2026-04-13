@@ -10,7 +10,7 @@ Built from a real production deployment. CData's version is commercial. This one
 - **SSE transport** - compatible with Claude Desktop, Claude Code, and any MCP client that supports HTTP+SSE
 - **Per-connection header auth** - credentials never stored server-side; each connection supplies its own
 - **Session auto-renewal** - CRM sessions re-authenticate transparently on expiry
-- **Two installers** - single CRM (no nginx) or N CRMs behind nginx, both as systemd services
+- **Unified installer** - one script handles single CRM (no nginx) or N CRMs behind nginx, both as systemd services
 - **Entity-prefixed tools** - run multiple CRM instances side-by-side without name collisions
 
 ## Tools
@@ -105,10 +105,10 @@ For production: create a dedicated API user with only the module permissions you
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v1.5.0` instead of floating on `latest`.
+For production, pin to a release tag such as `v2.0.0` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v1.5.0/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v2.0.0/docker-compose.yml
 ```
 
 Edit `docker-compose.yml` and set `SUITECRM_ENDPOINT` to your CRM's REST API URL, then:
@@ -146,24 +146,25 @@ For one CRM, no nginx. Connects directly to the port.
 ```bash
 git clone https://github.com/anirudhx7/suitecrm-mcp.git
 cd suitecrm-mcp
-sudo python3 install-single.py \
-  --endpoint https://your-crm.example.com/service/v4_1/rest.php \
-  --port 3101 \
-  --prefix suitecrm \
-  --label "My CRM"
+sudo python3 install.py --url https://your-crm.example.com --port 3101 --label "My CRM"
+```
+
+The installer auto-detects the REST API path. If your CRM is on a non-standard path, pass the full `rest.php` URL directly:
+
+```bash
+sudo python3 install.py --url https://your-crm.example.com/legacy/service/v4_1/rest.php
 ```
 
 After install, the gateway runs at `http://YOUR_SERVER:3101/sse`.
 
 **Enable HTTPS (recommended for production):**
 
-Add `--domain` and `--email` to the install command. The installer will set up nginx as a TLS-terminating reverse proxy and obtain a Let's Encrypt certificate automatically.
+Add `--domain` and `--email`. The installer sets up nginx as a TLS-terminating reverse proxy and obtains a Let's Encrypt certificate automatically.
 
 ```bash
-sudo python3 install-single.py \
-  --endpoint https://your-crm.example.com/service/v4_1/rest.php \
+sudo python3 install.py \
+  --url https://your-crm.example.com \
   --port 3101 \
-  --prefix suitecrm \
   --label "My CRM" \
   --domain mcp.yourserver.com \
   --email you@example.com
@@ -205,15 +206,15 @@ cp entities.example.json entities.json
 
 **2. Run the installer:**
 ```bash
-sudo python3 install-multi.py --config entities.json
+sudo python3 install.py --config entities.json
 ```
 
 **3. Enable HTTPS (recommended for production):**
 
-Pass `--domain` and `--email` to the installer. It will update the nginx config with your domain and run certbot automatically.
+Pass `--domain` and `--email`. The installer updates the nginx config with your domain and runs certbot automatically.
 
 ```bash
-sudo python3 install-multi.py --config entities.json \
+sudo python3 install.py --config entities.json \
   --domain mcp.yourserver.com \
   --email you@example.com
 ```
@@ -240,12 +241,12 @@ curl -s -H "X-CRM-User: admin" -H "X-CRM-Pass: yourpassword" \
 
 **Add entities later (no downtime on existing):**
 ```bash
-sudo python3 install-multi.py --add --config entities.json
+sudo python3 install.py --add --config entities.json
 ```
 
 **Remove an entity:**
 ```bash
-sudo python3 install-multi.py --remove crm2
+sudo python3 install.py --remove crm2
 ```
 
 ---
@@ -300,7 +301,7 @@ Keys become the entity code (nginx path prefix, tool prefix suffix, service name
 
 ```bash
 curl http://YOUR_SERVER:3101/health
-# {"status":"ok","version":"1.5.0","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
+# {"status":"ok","version":"2.0.0","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
 
 curl http://YOUR_SERVER:3101/health/deep
 # {"status":"healthy","checks":{"endpoint":{"status":"ok"},"api":{"status":"ok","latency_ms":142},...}}
@@ -343,7 +344,7 @@ The current state is visible in `/health`, `/health/deep`, `{prefix}_server_info
 
 ### Gateway HTTPS (Let's Encrypt)
 
-Pass `--domain` and `--email` to either installer to enable HTTPS on the gateway itself. The installer sets up nginx as a TLS-terminating reverse proxy and runs certbot to obtain and auto-renew a certificate.
+Pass `--domain` and `--email` to the installer to enable HTTPS on the gateway itself. The installer sets up nginx as a TLS-terminating reverse proxy and runs certbot to obtain and auto-renew a certificate.
 
 Requirements:
 - Domain must already point to this server's public IP
@@ -379,10 +380,9 @@ your client config. Full steps including single/multi entity configs, HTTPS
 variants, and verification are in the guides above.
 
 **OpenClaw** uses a two-component setup: the gateway runs on a remote server
-(installed via `install-multi.py` or `install-single.py`) and a bridge plugin
-runs locally on the OpenClaw machine (installed via `install-bridge.py`). The
-bridge proxies all 13 SuiteCRM tools through to the gateway. The OpenClaw guide
-covers both components end to end.
+(installed via `install.py`) and a bridge plugin runs locally on the OpenClaw
+machine (installed via `install-bridge.py`). The bridge proxies all 13 SuiteCRM
+tools through to the gateway. The OpenClaw guide covers both components end to end.
 
 ---
 
@@ -390,9 +390,7 @@ covers both components end to end.
 
 **Check service status:**
 ```bash
-sudo python3 install-single.py --status
-# or
-sudo python3 install-multi.py --status
+sudo python3 install.py --status
 ```
 
 **View logs:**

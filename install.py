@@ -1,0 +1,1051 @@
+#!/usr/bin/env python3
+"""
+SuiteCRM MCP Gateway - Unified Installer
+=========================================
+Replaces install-single.py and install-multi.py.
+Handles single and multi-entity from one script.
+
+Single entity (no nginx unless --domain):
+  sudo python3 install.py                            # interactive
+  sudo python3 install.py --url https://crm.example.com
+  sudo python3 install.py --url https://crm.example.com --domain mcp.example.com --email you@example.com
+
+Multi entity (nginx always):
+  sudo python3 install.py entities.json
+  sudo python3 install.py --config entities.json
+  sudo python3 install.py --add                      # add new entities without touching existing
+  sudo python3 install.py --remove crm1 crm2        # remove specific entities
+  sudo python3 install.py --domain mcp.example.com --email you@example.com  # enable HTTPS
+
+Operations (both modes):
+  sudo python3 install.py --status
+  sudo python3 install.py --update
+  sudo python3 install.py --uninstall                # single only
+
+entities.json format:
+  {
+    "crm1": {"label": "Main CRM", "endpoint": "https://crm.example.com/service/v4_1/rest.php", "port": 3101},
+    "crm2": {"label": "Client B", "endpoint": "https://crm2.example.com/service/v4_1/rest.php", "port": 3102, "tls_skip": true}
+  }
+
+Options:
+  --url        CRM base URL or full rest.php URL (single-entity CLI mode)
+  --code       Entity code for --url mode (default: suitecrm)
+  --label      Service description for --url mode (default: My CRM)
+  --port       Listen port for single entity (default: 3101)
+  --tls-skip   Disable TLS cert verification (self-signed certs only)
+  --domain     Domain for HTTPS via Let's Encrypt
+  --email      Email for Let's Encrypt cert (required with --domain)
+  --config     Path to entities.json (default: entities.json)
+  --add        Add new entities only (no reinstall of existing)
+  --remove     Remove entity codes
+  --status     Show service status
+  --update     Update server code and restart
+  --uninstall  Remove single-entity install (single mode only)
+"""
+
+import os, sys, subprocess, json, argparse, shutil, re, socket, time
+from pathlib import Path
+from urllib.parse import urlparse
+import urllib.request
+import urllib.error
+import urllib.parse
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+SERVER_DIR  = "/opt/suitecrm-mcp"
+ENV_DIR     = "/etc/suitecrm-mcp"
+ENV_FILE    = "/etc/suitecrm-mcp/gateway.env"   # single-entity env
+DOMAIN_FILE = "/etc/suitecrm-mcp/domain"
+NGINX_CONF  = "/etc/nginx/sites-available/suitecrm-mcp"
+NGINX_LINK  = "/etc/nginx/sites-enabled/suitecrm-mcp"
+NGINX_PORT  = 8080   # multi-entity plain HTTP listen port
+SVC_USER    = "suitecrm-mcp"
+SVC_NAME    = "suitecrm-mcp"  # single-entity service name
+
+# Common SuiteCRM REST API path patterns (in order of likelihood)
+API_PATH_PATTERNS = [
+    "/service/v4_1/rest.php",
+    "/legacy/service/v4_1/rest.php",
+    "/crm/service/v4_1/rest.php",
+    "/suitecrm/service/v4_1/rest.php",
+    "/suite/service/v4_1/rest.php",
+    "/service/v4/rest.php",
+    "/legacy/service/v4/rest.php",
+    "/crm/service/v4/rest.php",
+]
+
+API_DETECT_TIMEOUT = 5  # seconds per probe
+
+# ---------------------------------------------------------------------------
+# Validation regexes - all privileged commands use list form, never shell=True
+# ---------------------------------------------------------------------------
+
+SAFE_DOMAIN_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9.-]+$')
+SAFE_EMAIL_RE  = re.compile(r'^[^@\s,;|&<>]+@[^@\s,;|&<>]+\.[^@\s,;|&<>]+$')
+SAFE_CODE_RE   = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$')
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+RED = "\033[0;31m"; GREEN = "\033[0;32m"; YELLOW = "\033[1;33m"; CYAN = "\033[0;36m"; NC = "\033[0m"
+
+def info(m):  print(f"{CYAN}[INFO]{NC} {m}")
+def ok(m):    print(f"{GREEN}[OK]{NC} {m}")
+def warn(m):  print(f"{YELLOW}[WARN]{NC} {m}")
+def error(m): print(f"{RED}[ERROR]{NC} {m}"); sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+def validate_domain(d):
+    if not SAFE_DOMAIN_RE.match(d):
+        error(f"Invalid domain: {d!r} - must contain only letters, digits, hyphens, and dots")
+
+def validate_email(e):
+    if not SAFE_EMAIL_RE.match(e):
+        error(f"Invalid email address: {e!r}")
+
+def validate_code(c):
+    if not SAFE_CODE_RE.match(c):
+        error(f"Invalid entity code: {c!r} - must start with a letter or digit and contain only "
+              "letters, digits, hyphens, and underscores")
+
+# ---------------------------------------------------------------------------
+# Shell helpers
+# ---------------------------------------------------------------------------
+
+def run(cmd, check=True, capture=False, cwd=None):
+    # String commands are only used for the NodeSource curl|bash pipeline
+    # (no list form possible for that specific operation).
+    # All other privileged paths use list form to avoid shell injection.
+    if isinstance(cmd, str):
+        cmd = ["bash", "-c", cmd]
+    r = subprocess.run(cmd, capture_output=capture, text=True, cwd=cwd)
+    if check and r.returncode != 0:
+        error(f"Command failed: {' '.join(cmd)}\n{r.stderr.strip() if capture else ''}")
+    return r
+
+def write_file(path, content, mode=None):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content)
+    if mode:
+        run(["chmod", mode, path])
+
+def node_bin():
+    return shutil.which("node") or "/usr/bin/node"
+
+def script_dir():
+    return Path(__file__).parent.resolve()
+
+# ---------------------------------------------------------------------------
+# Endpoint auto-detection
+# ---------------------------------------------------------------------------
+
+def _test_rest_api(endpoint):
+    """POST get_server_info to endpoint. Returns (True, version) on success."""
+    try:
+        data = urllib.parse.urlencode({
+            "method": "get_server_info",
+            "input_type": "JSON",
+            "response_type": "JSON",
+            "rest_data": json.dumps({}),
+        }).encode("utf-8")
+        req = urllib.request.Request(endpoint, data=data, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        req.add_header("User-Agent", "SuiteCRM-MCP-Installer/1.5")
+        with urllib.request.urlopen(req, timeout=API_DETECT_TIMEOUT) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            if "version" in result or "flavor" in result:
+                return True, result.get("version", "unknown")
+    except Exception:
+        pass
+    return False, None
+
+def auto_detect_endpoint(base_url, verbose=False):
+    """
+    Try each API_PATH_PATTERNS against base_url.
+    Returns (endpoint_url, version_string) or (None, None).
+    """
+    parsed = urlparse(base_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+
+    if verbose:
+        info(f"Auto-detecting REST API endpoint for {base} ...")
+
+    for pattern in API_PATH_PATTERNS:
+        endpoint = base + pattern
+        if verbose:
+            print(f"  Trying {pattern} ...", end=" ", flush=True)
+        valid, version = _test_rest_api(endpoint)
+        if valid:
+            if verbose:
+                print(f"{GREEN}found (SuiteCRM {version}){NC}")
+            return endpoint, version
+        else:
+            if verbose:
+                print("not found")
+
+    return None, None
+
+# ---------------------------------------------------------------------------
+# Interactive setup
+# ---------------------------------------------------------------------------
+
+def _prompt(label, default=None):
+    suffix = f" [{default}]" if default else ""
+    val = input(f"  {label}{suffix}: ").strip()
+    return val or default
+
+def prompt_entity_config(entity_code=None, default_port=3101):
+    """Interactively gather one entity's config. Returns entities.json-style dict plus 'code' key."""
+    print()
+    code = entity_code or _prompt("Entity code (letters, digits, hyphens, underscores)", "main")
+    validate_code(code)
+
+    default_label = code.replace("_", " ").replace("-", " ").title()
+    label = _prompt("Entity label", default_label)
+
+    base_url = _prompt("CRM base URL (e.g. https://crm.example.com)")
+    if not base_url:
+        error("CRM URL is required")
+    if not base_url.startswith(("http://", "https://")):
+        base_url = "https://" + base_url
+
+    # Check if user already provided a full rest.php path
+    if "rest.php" in base_url:
+        endpoint = base_url
+        ok(f"Using provided endpoint: {endpoint}")
+        version = None
+    else:
+        print()
+        info("Auto-detecting REST API endpoint ...")
+        endpoint, version = auto_detect_endpoint(base_url, verbose=True)
+
+        if endpoint:
+            print()
+            ok(f"Detected: {endpoint}")
+            use_it = input("  Use this endpoint? [Y/n]: ").strip().lower()
+            if use_it not in ("", "y", "yes"):
+                endpoint = None
+
+        if not endpoint:
+            warn("Auto-detection failed or declined.")
+            print()
+            print("  Common patterns to try manually:")
+            for p in API_PATH_PATTERNS[:4]:
+                print(f"    {base_url}{p}")
+            print()
+            endpoint = _prompt("Full REST API endpoint (e.g. https://crm.example.com/service/v4_1/rest.php)")
+            if not endpoint:
+                error("Endpoint is required")
+            print("  Testing ...", end=" ", flush=True)
+            valid, version = _test_rest_api(endpoint)
+            if valid:
+                print(f"{GREEN}OK (SuiteCRM {version}){NC}")
+            else:
+                print(f"{YELLOW}could not verify{NC}")
+                if input("  Use anyway? [y/N]: ").strip().lower() not in ("y", "yes"):
+                    error("Endpoint verification failed")
+
+    port_str = _prompt("Listen port", str(default_port))
+    try:
+        port = int(port_str)
+    except (TypeError, ValueError):
+        error(f"Invalid port: {port_str!r}")
+
+    tls_skip_str = input("  Disable TLS verification for self-signed certs? [y/N]: ").strip().lower()
+    tls_skip = tls_skip_str in ("y", "yes")
+
+    return {
+        "code": code,
+        "label": label,
+        "endpoint": endpoint,
+        "port": port,
+        "tls_skip": tls_skip,
+    }
+
+def interactive_setup():
+    """
+    Full interactive wizard. Returns (entities_dict, is_multi) where
+    entities_dict is keyed by code (entities.json format).
+    """
+    print()
+    info("=" * 60)
+    info("SUITECRM MCP GATEWAY - INTERACTIVE SETUP")
+    info("=" * 60)
+    print()
+    print("No configuration provided. Let's set up your gateway.")
+    print()
+
+    num_str = input("  How many CRM instances do you want to connect? [1]: ").strip()
+    try:
+        num = int(num_str) if num_str else 1
+    except ValueError:
+        num = 1
+    if num < 1:
+        error("Must configure at least 1 entity")
+
+    entities = {}
+    for i in range(num):
+        cfg = prompt_entity_config(default_port=3101 + i)
+        entities[cfg["code"]] = {k: v for k, v in cfg.items() if k != "code"}
+
+    # Offer to save
+    print()
+    if input("  Save configuration to entities.json? [Y/n]: ").strip().lower() in ("", "y", "yes"):
+        with open("entities.json", "w") as f:
+            json.dump(entities, f, indent=2)
+        ok("Saved to entities.json")
+
+    return entities
+
+# ---------------------------------------------------------------------------
+# Config loading
+# ---------------------------------------------------------------------------
+
+def load_entities(config_path):
+    """Load and validate entities.json. Returns dict keyed by code."""
+    p = Path(config_path)
+    if not p.exists():
+        error(f"Config file not found: {config_path}\n"
+              "Copy entities.example.json to entities.json and fill it in.")
+    with open(p) as f:
+        try:
+            entities = json.load(f)
+        except json.JSONDecodeError as e:
+            error(f"Invalid JSON in {config_path}: {e}")
+
+    ports_seen = {}
+    for code, data in entities.items():
+        validate_code(code)
+        if "endpoint" not in data and "url" not in data:
+            error(f"Entity '{code}' missing 'endpoint' (or 'url' for auto-detection)")
+        if "endpoint" not in data:
+            # New-format: auto-detect from 'url'
+            info(f"Auto-detecting endpoint for {code} ...")
+            ep, _ = auto_detect_endpoint(data["url"], verbose=True)
+            if not ep:
+                error(f"Could not auto-detect endpoint for '{code}'. "
+                      "Add 'endpoint' key explicitly.")
+            data["endpoint"] = ep
+        if "port" not in data:
+            error(f"Entity '{code}' missing required field: port")
+        port = data["port"]
+        if port in ports_seen:
+            error(f"Port {port} used by both '{code}' and '{ports_seen[port]}' - "
+                  "each entity needs a unique port")
+        ports_seen[port] = code
+
+    return entities
+
+# ---------------------------------------------------------------------------
+# System-level setup
+# ---------------------------------------------------------------------------
+
+def ensure_service_user():
+    r = run(["id", SVC_USER], check=False, capture=True)
+    if r.returncode != 0:
+        run(["useradd", "--system", "--no-create-home",
+             "--shell", "/usr/sbin/nologin", SVC_USER])
+        ok(f"Created system user: {SVC_USER}")
+    else:
+        ok(f"Service user exists: {SVC_USER}")
+
+def install_node():
+    if not shutil.which("node"):
+        info("Installing Node.js LTS ...")
+        # curl | bash is the only accepted shell pipeline - NodeSource provides no alternative
+        run("curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -")
+        run(["apt-get", "install", "-y", "nodejs"])
+        ok(f"Node.js installed: {run(['node', '--version'], capture=True).stdout.strip()}")
+    else:
+        ok(f"Node.js: {run(['node', '--version'], capture=True).stdout.strip()}")
+
+def install_nginx():
+    if not shutil.which("nginx"):
+        info("Installing nginx ...")
+        run(["apt-get", "update", "-qq"])
+        run(["apt-get", "install", "-y", "nginx"])
+        ok("nginx installed")
+    else:
+        ok("nginx: present")
+
+def install_certbot():
+    if not shutil.which("certbot"):
+        info("Installing certbot ...")
+        run(["apt-get", "install", "-y", "certbot", "python3-certbot-nginx"])
+        ok("certbot installed")
+    else:
+        ok("certbot: present")
+
+def install_server():
+    info(f"Installing server to {SERVER_DIR} ...")
+    os.makedirs(SERVER_DIR, exist_ok=True)
+    src  = script_dir() / "server" / "index.mjs"
+    pkg  = script_dir() / "server" / "package.json"
+    lock = script_dir() / "server" / "package-lock.json"
+    if not src.exists():
+        error("server/index.mjs not found. Run from the repo root directory.")
+    shutil.copy(src, f"{SERVER_DIR}/index.mjs")
+    shutil.copy(pkg, f"{SERVER_DIR}/package.json")
+    if lock.exists():
+        shutil.copy(lock, f"{SERVER_DIR}/package-lock.json")
+    run(["npm", "ci", "--omit=dev", "--silent"], cwd=SERVER_DIR)
+    ok("Server installed")
+
+# ---------------------------------------------------------------------------
+# Per-entity install
+# ---------------------------------------------------------------------------
+
+def install_entity(code, data, is_multi):
+    """
+    Install env file + systemd unit for one entity.
+    is_multi=True: writes /etc/suitecrm-mcp/{code}.env, service suitecrm-mcp-{code}
+    is_multi=False: writes /etc/suitecrm-mcp/gateway.env, service suitecrm-mcp
+    """
+    label    = data.get("label", code)
+    endpoint = data["endpoint"]
+    port     = data["port"]
+    tls_skip = data.get("tls_skip", False)
+    behind_proxy = is_multi or data.get("_behind_proxy", False)  # multi always behind nginx; single only when --domain used
+
+    if is_multi:
+        env_path = f"{ENV_DIR}/{code}.env"
+        svc_name = f"suitecrm-mcp-{code}"
+        prefix   = f"suitecrm_{code}"
+        lines = [
+            f"# SuiteCRM MCP Gateway - {label}",
+            f"SUITECRM_ENDPOINT={endpoint}",
+            f"SUITECRM_PREFIX={prefix}",
+            f"SUITECRM_CODE={code}",
+            f"PORT={port}",
+            "NODE_NO_WARNINGS=1",
+        ]
+    else:
+        env_path = ENV_FILE
+        svc_name = SVC_NAME
+        prefix   = data.get("prefix", "suitecrm")
+        lines = [
+            f"# SuiteCRM MCP Gateway - {label}",
+            f"SUITECRM_ENDPOINT={endpoint}",
+            f"SUITECRM_PREFIX={prefix}",
+            f"PORT={port}",
+            "NODE_NO_WARNINGS=1",
+        ]
+
+    if tls_skip:
+        warn(f"  [{code}] TLS verification disabled - only for self-signed certs on trusted networks")
+        lines.append("NODE_TLS_REJECT_UNAUTHORIZED=0")
+    if behind_proxy:
+        lines.append("TRUST_PROXY=1")
+    lines.append("")
+
+    write_file(env_path, "\n".join(lines), mode="600")
+    run(["chown", f"{SVC_USER}:{SVC_USER}", env_path])
+    ok(f"  Env: {env_path}")
+
+    # Env directory permissions
+    env_dir = str(Path(env_path).parent)
+    run(["chmod", "700", env_dir])
+    run(["chown", f"{SVC_USER}:{SVC_USER}", env_dir])
+
+    # Systemd unit
+    nb = node_bin()
+    unit_path = f"/etc/systemd/system/{svc_name}.service"
+    unit = (
+        f"[Unit]\n"
+        f"Description=SuiteCRM MCP Gateway - {label}\n"
+        f"After=network.target\n\n"
+        f"[Service]\n"
+        f"Type=simple\n"
+        f"User={SVC_USER}\n"
+        f"Group={SVC_USER}\n"
+        f"EnvironmentFile={env_path}\n"
+        f"ExecStart={nb} {SERVER_DIR}/index.mjs\n"
+        f"Restart=always\n"
+        f"RestartSec=5\n"
+        f"StandardOutput=journal\n"
+        f"StandardError=journal\n"
+        f"SyslogIdentifier={svc_name}\n"
+        f"NoNewPrivileges=yes\n"
+        f"PrivateTmp=yes\n"
+        f"ProtectSystem=strict\n"
+        f"ProtectHome=yes\n"
+        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp\n\n"
+        f"[Install]\n"
+        f"WantedBy=multi-user.target\n"
+    )
+    write_file(unit_path, unit)
+    ok(f"  Service: {unit_path}")
+    return svc_name
+
+# ---------------------------------------------------------------------------
+# nginx config generation
+# ---------------------------------------------------------------------------
+
+def _rebuild_nginx_multi(entities, domain=None):
+    """
+    Write /etc/nginx/sites-available/suitecrm-mcp for multi-entity.
+    DOMAIN_FILE is read as fallback if domain is None.
+    NOTE: If ENV_DIR is manually deleted between runs, domain falls back to
+    None and nginx is rebuilt with plain HTTP. This is intentional - see
+    DOMAIN_FILE comment in install-multi.py for context.
+    """
+    if domain is None and Path(DOMAIN_FILE).exists():
+        domain = Path(DOMAIN_FILE).read_text().strip() or None
+
+    locations = ""
+    for code, data in entities.items():
+        port  = data["port"]
+        label = data.get("label", code)
+        locations += (
+            f"\n    # {label} ({code})\n"
+            f"    location = /{code}/messages {{\n"
+            f"        access_log off;\n"
+            f"        proxy_pass http://127.0.0.1:{port}/messages;\n"
+            f"        proxy_http_version 1.1;\n"
+            f"        proxy_set_header Connection '';\n"
+            f"        proxy_set_header Host $host;\n"
+            f"        proxy_pass_request_headers on;\n"
+            f"        proxy_buffering off;\n"
+            f"        proxy_cache off;\n"
+            f"        proxy_read_timeout 3600s;\n"
+            f"    }}\n"
+            f"    location /{code}/ {{\n"
+            f"        proxy_pass http://127.0.0.1:{port}/;\n"
+            f"        proxy_http_version 1.1;\n"
+            f"        proxy_set_header Connection '';\n"
+            f"        proxy_set_header Host $host;\n"
+            f"        proxy_pass_request_headers on;\n"
+            f"        proxy_buffering off;\n"
+            f"        proxy_cache off;\n"
+            f"        proxy_read_timeout 3600s;\n"
+            f"    }}\n"
+        )
+
+    listen_line = (
+        f"listen 80;\n    server_name {domain};"
+        if domain else
+        f"listen {NGINX_PORT};\n    server_name _;"
+    )
+    conf = (
+        f"# SuiteCRM MCP Gateway - generated by install.py\n"
+        f"server {{\n"
+        f"    {listen_line}\n"
+        f"    large_client_header_buffers 4 32k;\n"
+        f"    client_max_body_size 10m;\n"
+        f"    access_log /var/log/nginx/suitecrm-mcp.access.log;\n"
+        f"    error_log  /var/log/nginx/suitecrm-mcp.error.log;\n"
+        f"    location /health {{\n"
+        f"        default_type application/json;\n"
+        f"        return 200 '{{\"gateway\":\"ok\",\"entities\":{len(entities)}}}';\n"
+        f"    }}\n"
+        f"{locations}}}\n"
+    )
+    write_file(NGINX_CONF, conf)
+    _nginx_enable_and_reload()
+    ok("nginx configured and reloaded")
+
+def _nginx_single_tls(domain, port):
+    """Write HTTP-only nginx config for single-entity + certbot TLS."""
+    conf = (
+        f"server {{\n"
+        f"    listen 80;\n"
+        f"    server_name {domain};\n"
+        f"    large_client_header_buffers 4 32k;\n"
+        f"    client_max_body_size 10m;\n"
+        f"    access_log /var/log/nginx/suitecrm-mcp.access.log;\n"
+        f"    error_log  /var/log/nginx/suitecrm-mcp.error.log;\n\n"
+        f"    location = /messages {{\n"
+        f"        access_log off;\n"
+        f"        proxy_pass http://127.0.0.1:{port}/messages;\n"
+        f"        proxy_http_version 1.1;\n"
+        f"        proxy_set_header Connection '';\n"
+        f"        proxy_set_header Host $host;\n"
+        f"        proxy_pass_request_headers on;\n"
+        f"        proxy_buffering off;\n"
+        f"        proxy_cache off;\n"
+        f"        proxy_read_timeout 3600s;\n"
+        f"    }}\n"
+        f"    location / {{\n"
+        f"        proxy_pass http://127.0.0.1:{port};\n"
+        f"        proxy_http_version 1.1;\n"
+        f"        proxy_set_header Connection '';\n"
+        f"        proxy_set_header Host $host;\n"
+        f"        proxy_pass_request_headers on;\n"
+        f"        proxy_buffering off;\n"
+        f"        proxy_cache off;\n"
+        f"        proxy_read_timeout 3600s;\n"
+        f"    }}\n"
+        f"}}\n"
+    )
+    write_file(NGINX_CONF, conf)
+    _nginx_enable_and_reload()
+    ok("nginx configured")
+
+def _nginx_enable_and_reload():
+    if not Path(NGINX_LINK).exists():
+        os.symlink(NGINX_CONF, NGINX_LINK)
+    default_site = "/etc/nginx/sites-enabled/default"
+    if Path(default_site).exists():
+        os.remove(default_site)
+        warn("Removed nginx default site")
+    run(["nginx", "-t"])
+    run(["systemctl", "enable", "--now", "nginx"])
+    run(["systemctl", "reload", "nginx"])
+
+def _run_certbot(domain, email):
+    r = run(
+        ["certbot", "--nginx", "-d", domain,
+         "--non-interactive", "--agree-tos", "-m", email, "--redirect"],
+        check=False, capture=True
+    )
+    if r.returncode != 0:
+        warn(f"certbot failed:\n{r.stderr.strip()}")
+        warn("Gateway is running but HTTPS setup failed. Check:")
+        warn(f"  - {domain} points to this server's public IP")
+        warn("  - Port 80 is open (ACME challenge)")
+        warn("  - Port 443 is open")
+        warn(f"  Re-run manually: certbot --nginx -d {domain} -m {email} --agree-tos --redirect")
+    else:
+        ok(f"TLS certificate obtained for {domain}")
+        ok("Auto-renewal configured via certbot systemd timer")
+
+# ---------------------------------------------------------------------------
+# apply_update_hardening - patches existing installs on --update
+# ---------------------------------------------------------------------------
+
+def apply_update_hardening(codes, is_multi):
+    """
+    Migrate existing installs to current hardening standard (User=, sandboxing,
+    TRUST_PROXY, env dir permissions) without full reinstall.
+    codes: iterable of entity codes (single: [SVC_NAME])
+    """
+    ensure_service_user()
+
+    if Path(ENV_DIR).exists():
+        run(["chmod", "700", ENV_DIR])
+        run(["chown", f"{SVC_USER}:{SVC_USER}", ENV_DIR])
+
+    for code in codes:
+        if is_multi:
+            env_path = Path(f"{ENV_DIR}/{code}.env")
+            svc_file = Path(f"/etc/systemd/system/suitecrm-mcp-{code}.service")
+            svc_name = f"suitecrm-mcp-{code}"
+        else:
+            env_path = Path(ENV_FILE)
+            svc_file = Path(f"/etc/systemd/system/{SVC_NAME}.service")
+            svc_name = SVC_NAME
+
+        # Patch env: add TRUST_PROXY=1 if nginx is present and it is missing
+        if env_path.exists():
+            content = env_path.read_text()
+            has_nginx = Path(NGINX_CONF).exists()
+            if has_nginx and "TRUST_PROXY" not in content:
+                env_path.write_text(content.rstrip("\n") + "\nTRUST_PROXY=1\n")
+                run(["chown", f"{SVC_USER}:{SVC_USER}", str(env_path)])
+                run(["chmod", "600", str(env_path)])
+                ok(f"  [{code}] Added TRUST_PROXY=1")
+            else:
+                ok(f"  [{code}] Env: no changes needed")
+
+        # Patch unit: inject User/Group and sandboxing if missing
+        if svc_file.exists():
+            unit = svc_file.read_text()
+            changed = False
+            if f"User={SVC_USER}" not in unit:
+                unit = unit.replace(
+                    "[Service]\n",
+                    f"[Service]\nUser={SVC_USER}\nGroup={SVC_USER}\n"
+                )
+                changed = True
+            if "NoNewPrivileges=yes" not in unit:
+                unit = unit.replace(
+                    "SyslogIdentifier=",
+                    "NoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\n"
+                    "ProtectHome=yes\nReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp\n"
+                    "SyslogIdentifier=",
+                )
+                changed = True
+            if changed:
+                svc_file.write_text(unit)
+                ok(f"  [{code}] Patched unit with hardening directives")
+            else:
+                ok(f"  [{code}] Unit: no changes needed")
+
+# ---------------------------------------------------------------------------
+# Status display
+# ---------------------------------------------------------------------------
+
+def _get_running_entity_codes():
+    r = run(
+        ["systemctl", "list-units", "--no-legend", "--plain", "suitecrm-mcp-*"],
+        capture=True, check=False
+    )
+    codes = []
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if parts:
+            svc = parts[0].replace("suitecrm-mcp-", "").replace(".service", "")
+            codes.append(svc)
+    return codes
+
+def show_status_single(port=None):
+    import urllib.request as _ur
+    # Read port from env if not passed
+    if port is None:
+        port = 3101
+        if Path(ENV_FILE).exists():
+            with open(ENV_FILE) as f:
+                for line in f:
+                    if line.startswith("PORT="):
+                        try: port = int(line.split("=")[1].strip())
+                        except: pass
+
+    r = run(["systemctl", "is-active", SVC_NAME], check=False, capture=True)
+    active = r.stdout.strip() == "active"
+    status_str = f"{GREEN}active{NC}" if active else f"{RED}inactive{NC}"
+
+    print()
+    info("=" * 56)
+    info("SUITECRM MCP GATEWAY STATUS")
+    info("=" * 56)
+    print(f"  service : {status_str}")
+    print(f"  health  : http://127.0.0.1:{port}/health")
+    print(f"  sse     : http://127.0.0.1:{port}/sse")
+    print(f"  test    : http://127.0.0.1:{port}/test")
+    if active:
+        try:
+            with _ur.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
+                d = json.loads(resp.read())
+                print(f"  conns   : {d.get('active_connections', 0)} active")
+        except Exception:
+            print(f"  health  : {YELLOW}unreachable{NC}")
+    print()
+
+def show_status_multi(entities=None):
+    import urllib.request as _ur
+    print()
+    info("=" * 60)
+    info("SUITECRM MCP GATEWAY STATUS")
+    info("=" * 60)
+
+    if entities is None:
+        running = _get_running_entity_codes()
+        entities = {code: {"label": code, "port": None} for code in running}
+        for code in running:
+            env_path = Path(f"{ENV_DIR}/{code}.env")
+            if env_path.exists():
+                with open(env_path) as f:
+                    for line in f:
+                        if line.startswith("PORT="):
+                            try: entities[code]["port"] = int(line.split("=")[1].strip())
+                            except: pass
+
+    saved_domain = Path(DOMAIN_FILE).read_text().strip() if Path(DOMAIN_FILE).exists() else None
+
+    for code, data in entities.items():
+        svc = f"suitecrm-mcp-{code}"
+        label = data.get("label", code)
+        port  = data.get("port")
+        r = run(["systemctl", "is-active", svc], check=False, capture=True)
+        active = r.stdout.strip() == "active"
+        status_str = f"{GREEN}active{NC}" if active else f"{RED}inactive{NC}"
+        print(f"\n  [{code}] {label}")
+        print(f"  status  : {status_str}")
+        if port:
+            print(f"  local   : http://127.0.0.1:{port}/health")
+            if saved_domain:
+                print(f"  external: https://{saved_domain}/{code}/sse")
+            else:
+                print(f"  external: http://YOUR_SERVER:{NGINX_PORT}/{code}/sse")
+            if active:
+                try:
+                    with _ur.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
+                        d = json.loads(resp.read())
+                        print(f"  conns   : {d.get('active_connections', 0)} active")
+                except Exception:
+                    print(f"  health  : {YELLOW}unreachable{NC}")
+    print()
+
+# ---------------------------------------------------------------------------
+# Remove entity (multi)
+# ---------------------------------------------------------------------------
+
+def remove_entity(code):
+    svc = f"suitecrm-mcp-{code}"
+    run(["systemctl", "stop", svc], check=False)
+    run(["systemctl", "disable", svc], check=False)
+    for path in [f"/etc/systemd/system/{svc}.service", f"{ENV_DIR}/{code}.env"]:
+        if Path(path).exists():
+            os.remove(path)
+            ok(f"  Removed: {path}")
+    run(["systemctl", "daemon-reload"])
+    ok(f"Entity '{code}' removed")
+
+# ---------------------------------------------------------------------------
+# Uninstall (single)
+# ---------------------------------------------------------------------------
+
+def uninstall_single():
+    warn("This will stop and remove the SuiteCRM MCP gateway.")
+    if input("  Type 'yes' to confirm: ").strip().lower() != "yes":
+        info("Aborted."); sys.exit(0)
+    run(["systemctl", "stop", SVC_NAME], check=False)
+    run(["systemctl", "disable", SVC_NAME], check=False)
+    for path in [
+        f"/etc/systemd/system/{SVC_NAME}.service",
+        ENV_FILE, ENV_DIR, SERVER_DIR, NGINX_LINK, NGINX_CONF
+    ]:
+        if Path(path).exists():
+            if Path(path).is_dir(): shutil.rmtree(path)
+            else: os.remove(path)
+            ok(f"Removed: {path}")
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "reload", "nginx"], check=False)
+    ok("Uninstalled.")
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="SuiteCRM MCP Gateway - Unified Installer"
+    )
+    # Config source
+    parser.add_argument("config_pos", nargs="?", metavar="CONFIG",
+                        help="Path to entities.json (positional)")
+    parser.add_argument("--config", default="entities.json",
+                        help="Path to entities.json (default: entities.json)")
+    # Single-entity CLI flags
+    parser.add_argument("--url",    help="CRM base URL or full rest.php endpoint (single-entity mode)")
+    parser.add_argument("--code",   default="suitecrm", help="Entity code (with --url, default: suitecrm)")
+    parser.add_argument("--label",  default="My CRM",   help="Service description (with --url)")
+    parser.add_argument("--port",   type=int, default=3101, help="Listen port (single entity, default: 3101)")
+    parser.add_argument("--prefix", default="suitecrm", help="Tool name prefix (single entity, default: suitecrm)")
+    parser.add_argument("--tls-skip", action="store_true", help="Disable TLS cert verification")
+    # HTTPS
+    parser.add_argument("--domain", help="Domain for HTTPS via Let's Encrypt")
+    parser.add_argument("--email",  help="Email for Let's Encrypt cert (required with --domain)")
+    # Operations
+    parser.add_argument("--add",      action="store_true", help="Add new entities only (multi)")
+    parser.add_argument("--remove",   nargs="+", metavar="CODE", help="Remove entity codes (multi)")
+    parser.add_argument("--status",   action="store_true", help="Show status")
+    parser.add_argument("--update",   action="store_true", help="Update server code and restart")
+    parser.add_argument("--uninstall",action="store_true", help="Remove single-entity install")
+    args = parser.parse_args()
+
+    # Validate auth/domain flags before anything else
+    if args.domain and not args.email:
+        error("--email is required when --domain is set (needed for Let's Encrypt)")
+    if args.domain: validate_domain(args.domain)
+    if args.email:  validate_email(args.email)
+    if args.remove:
+        for c in args.remove: validate_code(c)
+    if args.url:
+        validate_code(args.code)
+
+    if os.geteuid() != 0:
+        error("Run as root (sudo)")
+
+    # Determine effective config path (positional wins over --config)
+    config_path = args.config_pos or args.config
+
+    # -----------------------------------------------------------------------
+    # Determine mode: single vs multi
+    # -----------------------------------------------------------------------
+    # --url flag = explicit single-entity CLI mode
+    # positional/--config pointing at a file with 2+ entities = multi
+    # positional/--config with 1 entity = single (no nginx unless --domain)
+    # no args at all + no entities.json = interactive
+
+    if args.status:
+        # Auto-detect mode from running services
+        running = _get_running_entity_codes()
+        if running:
+            show_status_multi()
+        else:
+            show_status_single()
+        sys.exit(0)
+
+    if args.uninstall:
+        uninstall_single(); sys.exit(0)
+
+    # --url: pure single-entity CLI mode
+    if args.url:
+        is_multi = False
+        url = args.url
+        if "rest.php" in url:
+            endpoint = url
+            version  = None
+        else:
+            info("Auto-detecting REST API endpoint ...")
+            endpoint, version = auto_detect_endpoint(url, verbose=True)
+            if not endpoint:
+                error("Could not auto-detect endpoint. "
+                      "Pass the full rest.php URL directly with --url.")
+        entities = {
+            args.code: {
+                "label":    args.label,
+                "endpoint": endpoint,
+                "port":     args.port,
+                "tls_skip": args.tls_skip,
+                "prefix":   args.prefix,
+            }
+        }
+
+    elif Path(config_path).exists():
+        entities = load_entities(config_path)
+        is_multi = len(entities) > 1
+
+    else:
+        # Interactive
+        entities = interactive_setup()
+        is_multi = len(entities) > 1
+
+    # -----------------------------------------------------------------------
+    # --status (late, now we have entities)
+    # -----------------------------------------------------------------------
+
+    if args.update:
+        print(); info("=" * 60); info("UPDATE MODE"); info("=" * 60); print()
+        install_server(); print()
+        info("Applying hardening to existing installs ...")
+        codes = list(entities.keys()) if is_multi else [SVC_NAME]
+        apply_update_hardening(codes, is_multi); print()
+        run(["systemctl", "daemon-reload"])
+        if is_multi:
+            for code in entities:
+                run(["systemctl", "restart", f"suitecrm-mcp-{code}"], check=False)
+                ok(f"  Restarted: suitecrm-mcp-{code}")
+            show_status_multi(entities)
+        else:
+            run(["systemctl", "restart", SVC_NAME])
+            ok(f"Restarted: {SVC_NAME}")
+            show_status_single(args.port)
+        sys.exit(0)
+
+    # -----------------------------------------------------------------------
+    # --remove (multi)
+    # -----------------------------------------------------------------------
+    if args.remove:
+        warn(f"Removing entities: {', '.join(args.remove)}")
+        if input("  Type 'yes' to confirm: ").strip().lower() != "yes":
+            info("Aborted."); sys.exit(0)
+        for code in args.remove:
+            remove_entity(code)
+        remaining = {c: d for c, d in entities.items() if c not in args.remove}
+        if remaining:
+            info("Rebuilding nginx for remaining entities ...")
+            _rebuild_nginx_multi(remaining)
+        else:
+            info("No entities remain - removing nginx config ...")
+            for path in [NGINX_LINK, NGINX_CONF]:
+                if Path(path).exists():
+                    os.remove(path)
+                    ok(f"Removed: {path}")
+            run(["systemctl", "reload", "nginx"], check=False)
+        sys.exit(0)
+
+    # -----------------------------------------------------------------------
+    # Fresh install / --add
+    # -----------------------------------------------------------------------
+    print()
+    if is_multi:
+        info("=" * 60); info("SUITECRM MCP GATEWAY - MULTI-ENTITY INSTALLER"); info("=" * 60)
+        info(f"Entities: {', '.join(entities.keys())}"); print()
+    else:
+        info("=" * 56); info("SUITECRM MCP GATEWAY - SINGLE ENTITY INSTALLER"); info("=" * 56); print()
+
+    # Determine which entities to install (--add skips already-running ones)
+    if is_multi and args.add:
+        running = set(_get_running_entity_codes())
+        to_install = {c: d for c, d in entities.items() if c not in running}
+        if not to_install:
+            info("No new entities to add - all are already installed.")
+            sys.exit(0)
+        info(f"Adding: {', '.join(to_install.keys())}")
+    else:
+        to_install = entities
+
+    # Node.js
+    info("Checking Node.js ..."); install_node(); print()
+
+    # nginx (multi always; single only when --domain)
+    if is_multi or args.domain:
+        info("Checking nginx ..."); install_nginx(); print()
+
+    # Service user
+    info("Ensuring service user ..."); ensure_service_user(); print()
+
+    # Server code
+    info("Installing server ..."); install_server(); print()
+
+    # Env dir
+    os.makedirs(ENV_DIR, exist_ok=True)
+    run(["chmod", "700", ENV_DIR])
+    run(["chown", f"{SVC_USER}:{SVC_USER}", ENV_DIR])
+
+    # Per-entity install
+    info("Installing env files and services ...")
+    svc_names = []
+    for code, data in to_install.items():
+        # Inject behind_proxy flag for single+domain case
+        if not is_multi and args.domain:
+            data = dict(data, _behind_proxy=True)
+        svc_name = install_entity(code, data, is_multi)
+        svc_names.append((code, svc_name))
+
+    run(["systemctl", "daemon-reload"])
+    for code, svc_name in svc_names:
+        run(["systemctl", "enable", "--now", svc_name])
+        ok(f"  Started: {svc_name}")
+    print()
+
+    # nginx config
+    if is_multi:
+        info("Configuring nginx ...")
+        _rebuild_nginx_multi(entities, domain=args.domain); print()
+    elif args.domain:
+        port = list(to_install.values())[0]["port"]
+        info("Configuring nginx (TLS terminator) ...")
+        _nginx_single_tls(args.domain, port); print()
+
+    # certbot
+    if args.domain:
+        os.makedirs(ENV_DIR, exist_ok=True)
+        Path(DOMAIN_FILE).write_text(args.domain)
+        info("Setting up HTTPS ...")
+        install_certbot()
+        _run_certbot(args.domain, args.email); print()
+
+    # Status + connect info
+    if is_multi:
+        show_status_multi(entities)
+        if args.domain:
+            print(f"  Connect at: https://{args.domain}/<code>/sse")
+        else:
+            print(f"  Connect at: http://YOUR_SERVER_IP:{NGINX_PORT}/<code>/sse")
+    else:
+        port = list(to_install.values())[0]["port"]
+        show_status_single(port)
+        if args.domain:
+            print(f"  SSE endpoint: https://{args.domain}/sse")
+        else:
+            print(f"  SSE endpoint: http://YOUR_SERVER_IP:{port}/sse")
+
+    print()
+    info("Connect with X-CRM-User and X-CRM-Pass headers.")
+    info("See README.md for Claude Desktop / Claude Code config examples.")
+    print()
+
+
+if __name__ == "__main__":
+    main()

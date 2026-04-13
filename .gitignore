@@ -1,6 +1,10 @@
 # Local development files - never commit
 .local/
 
+# Old installers (replaced by install.py in v2.0.0 - kept locally for reference)
+install-single.py
+install-multi.py
+
 # Credentials and config
 *.env
 !.env.example
