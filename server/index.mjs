@@ -12,6 +12,7 @@
  *   CRM_TIMEOUT_MS             - CRM API request timeout in ms, default 30000
  *   CIRCUIT_BREAKER_THRESHOLD  - consecutive failures before circuit opens, default 5
  *   CIRCUIT_BREAKER_RESET_MS   - ms before circuit tests recovery, default 60000
+ *   BIND_HOST                  - interface to bind the gateway on, default "0.0.0.0" (use "127.0.0.1" for systemd installs behind nginx)
  *   NODE_TLS_REJECT_UNAUTHORIZED - set to "0" only for self-signed certs (with caution)
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -37,6 +38,7 @@ const PORT      = parseInt(process.env.PORT || '3101', 10);
 const METRICS_PORT = parseInt(process.env.METRICS_PORT || '9090', 10);
 const TLS_OK    = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
 
+const BIND_HOST = (process.env.BIND_HOST || '0.0.0.0').trim();
 const CRM_REQUEST_TIMEOUT_MS    = parseInt(process.env.CRM_TIMEOUT_MS || '30000', 10);
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX       = 20;
@@ -708,12 +710,12 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-app.listen(PORT, '0.0.0.0', (err) => {
+app.listen(PORT, BIND_HOST, (err) => {
   if (err) {
     process.stderr.write(`[${PREFIX}] FATAL: Failed to start server: ${err.message}\n`);
     process.exit(1);
   }
-  process.stderr.write(`[${PREFIX}] Gateway listening on 0.0.0.0:${PORT}\n`);
+  process.stderr.write(`[${PREFIX}] Gateway listening on ${BIND_HOST}:${PORT}\n`);
   process.stderr.write(`[${PREFIX}] CRM endpoint: ${ENDPOINT}\n`);
   if (!TLS_OK) process.stderr.write(`[${PREFIX}] WARNING: TLS verification disabled\n`);
   if (!ENDPOINT.startsWith('https://'))

@@ -425,6 +425,7 @@ def install_entity(code, data, is_multi):
             f"SUITECRM_PREFIX={prefix}",
             f"SUITECRM_CODE={code}",
             f"PORT={port}",
+            "BIND_HOST=127.0.0.1",
             "NODE_NO_WARNINGS=1",
         ]
     else:
@@ -436,6 +437,7 @@ def install_entity(code, data, is_multi):
             f"SUITECRM_ENDPOINT={endpoint}",
             f"SUITECRM_PREFIX={prefix}",
             f"PORT={port}",
+            "BIND_HOST=127.0.0.1",
             "NODE_NO_WARNINGS=1",
         ]
 
