@@ -494,8 +494,8 @@ def _rebuild_nginx_multi(entities, domain=None):
     Write /etc/nginx/sites-available/suitecrm-mcp for multi-entity.
     DOMAIN_FILE is read as fallback if domain is None.
     NOTE: If ENV_DIR is manually deleted between runs, domain falls back to
-    None and nginx is rebuilt with plain HTTP. This is intentional - see
-    DOMAIN_FILE comment in install-multi.py for context.
+    None and nginx is rebuilt with plain HTTP. This is intentional - DOMAIN_FILE
+    persists the domain separately from ENV_DIR so it survives env resets.
     """
     if domain is None and Path(DOMAIN_FILE).exists():
         domain = Path(DOMAIN_FILE).read_text().strip() or None

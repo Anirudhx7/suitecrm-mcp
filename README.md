@@ -108,7 +108,7 @@ The fastest way to run the gateway without touching Node.js or system packages. 
 For production, pin to a release tag such as `v2.0.0` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v2.0.0/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v2.0.1/docker-compose.yml
 ```
 
 Edit `docker-compose.yml` and set `SUITECRM_ENDPOINT` to your CRM's REST API URL, then:
@@ -314,6 +314,7 @@ curl http://YOUR_SERVER:3101/health/deep
 The gateway exposes 9 metrics on a separate server at `127.0.0.1:METRICS_PORT/metrics` (default port 9090). This port is never routed through nginx and is only reachable by a local Prometheus instance.
 
 ```bash
+# systemd installs only - for Docker, query via Prometheus at localhost:9090
 curl http://127.0.0.1:9090/metrics | grep suitecrm_mcp
 ```
 
