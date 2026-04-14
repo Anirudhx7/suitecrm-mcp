@@ -4,7 +4,7 @@ services:
   # For multi-entity deployments use install.py --config entities.json (systemd) instead.
   # This service is kept for single-CRM / dev use.
   suitecrm-mcp:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v2.0.2
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v2.1.0
     ports:
       - "3101:3101"    # MCP SSE gateway
     environment:
@@ -37,7 +37,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"   # localhost only - do not expose publicly
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-changeme}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in your environment or a .env file}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
     volumes:

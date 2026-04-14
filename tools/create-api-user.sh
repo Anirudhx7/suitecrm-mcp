@@ -93,19 +93,28 @@ process_user() {
     local CRM_USER="$1"
     local API_PASS="$2"
 
+    # Pass all credentials via env vars - never interpolate them into PHP source code
     local RESULT
-    RESULT=$(php -r "
+    RESULT=$(DB_HOST="$DB_HOST" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASS="$DB_PASS" \
+             CRM_USER="$CRM_USER" API_PASS="$API_PASS" \
+    php -r '
+$host     = getenv("DB_HOST");
+$dbname   = getenv("DB_NAME");
+$db_user  = getenv("DB_USER");
+$db_pass  = getenv("DB_PASS");
+$crm_user = getenv("CRM_USER");
+$api_pass = getenv("API_PASS");
 try {
-    \$pdo = new PDO('mysql:host=$DB_HOST;dbname=$DB_NAME', '$DB_USER', '$DB_PASS');
-    \$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    \$hash = strtolower(md5('$API_PASS'));
-    \$stmt = \$pdo->prepare(\"UPDATE users SET user_hash = ?, external_auth_only = 0, system_generated_password = 0 WHERE user_name = ?\");
-    \$stmt->execute([\$hash, '$CRM_USER']);
-    echo \$stmt->rowCount();
-} catch (Exception \$e) {
-    echo 'ERROR: ' . \$e->getMessage();
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname", $db_user, $db_pass);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $hash = strtolower(md5($api_pass));
+    $stmt = $pdo->prepare("UPDATE users SET user_hash = ?, external_auth_only = 0, system_generated_password = 0 WHERE user_name = ?");
+    $stmt->execute([$hash, $crm_user]);
+    echo $stmt->rowCount();
+} catch (Exception $e) {
+    echo "ERROR: " . $e->getMessage();
 }
-" 2>/dev/null)
+' 2>/dev/null)
 
     if [[ "$RESULT" == ERROR* ]]; then
         echo "DB_FAIL:$RESULT"; return
@@ -116,12 +125,20 @@ try {
     local MD5_PASS
     MD5_PASS=$(printf '%s' "$API_PASS" | md5sum | cut -d' ' -f1)
 
+    # Build login JSON via python3 - avoids shell/JSON injection from usernames with special chars
+    local REST_DATA
+    REST_DATA=$(python3 -c "
+import json, sys
+print(json.dumps({'user_auth': {'user_name': sys.argv[1], 'password': sys.argv[2]},
+                  'application_name': 'crm-test', 'name_value_list': []}))
+" "$CRM_USER" "$MD5_PASS" 2>/dev/null)
+
     local LOGIN_RESPONSE SESSION_ID
     LOGIN_RESPONSE=$(curl -sk -X POST "$ENDPOINT" \
       --data-urlencode 'method=login' \
       --data-urlencode 'input_type=JSON' \
       --data-urlencode 'response_type=JSON' \
-      --data-urlencode "rest_data={\"user_auth\":{\"user_name\":\"$CRM_USER\",\"password\":\"$MD5_PASS\"},\"application_name\":\"crm-test\",\"name_value_list\":[]}" \
+      --data-urlencode "rest_data=$REST_DATA" \
       2>/dev/null)
 
     SESSION_ID=$(echo "$LOGIN_RESPONSE" | python3 -c "

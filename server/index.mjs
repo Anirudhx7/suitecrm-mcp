@@ -189,11 +189,21 @@ function postForm(url, params) {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': Buffer.byteLength(body),
+        'User-Agent': `SuiteCRM-MCP-Gateway/${PKG_VERSION}`,
       },
       rejectUnauthorized: TLS_OK,
     }, (res) => {
       let raw = '';
-      res.on('data', c => raw += c);
+      let rawLen = 0;
+      const MAX_RESPONSE_BYTES = 10 * 1024 * 1024; // 10 MB
+      res.on('data', c => {
+        rawLen += c.length;
+        if (rawLen > MAX_RESPONSE_BYTES) {
+          req.destroy(new Error('CRM response exceeds 10 MB limit'));
+          return;
+        }
+        raw += c;
+      });
       res.on('end', () => {
         try { resolve(JSON.parse(raw)); }
         catch { reject(new Error(`Non-JSON (HTTP ${res.statusCode}): ${raw.slice(0, 300)}`)); }
@@ -251,23 +261,37 @@ async function crmCall(sid, method, params) {
   if (circuitBreaker.isOpen())
     throw new Error(`Circuit breaker open - CRM unavailable (${circuitBreaker.failures} consecutive failures)`);
 
-  let crmSid = await ensureCrmSession(sid);
+  // Only network/timeout failures (no err.code) trip the circuit breaker.
+  // CRM-layer errors (err.code set, e.g. wrong password) do not - they are user errors, not CRM outages.
+  let crmSid;
+  try {
+    crmSid = await ensureCrmSession(sid);
+  } catch (err) {
+    if (!err.code) circuitBreaker.recordFailure();
+    throw err;
+  }
+
   try {
     const result = await rawCall(method, { session: crmSid, ...params });
     circuitBreaker.recordSuccess();
     return result;
   } catch (err) {
-    // Session expiry (code 11) is expected, not a circuit breaker failure
+    // Session expiry (code 11) is expected - re-authenticate and retry once
     if (err.code === 11) {
       process.stderr.write(`[${PREFIX}] Session expired - re-logging in\n`);
       metricSessionRenewals.inc({ entity: PREFIX });
       crmSessions.delete(sid);
-      crmSid = await ensureCrmSession(sid);
-      const result = await rawCall(method, { session: crmSid, ...params });
-      circuitBreaker.recordSuccess();
-      return result;
+      try {
+        crmSid = await ensureCrmSession(sid);
+        const result = await rawCall(method, { session: crmSid, ...params });
+        circuitBreaker.recordSuccess();
+        return result;
+      } catch (retryErr) {
+        if (!retryErr.code) circuitBreaker.recordFailure();
+        throw retryErr;
+      }
     }
-    circuitBreaker.recordFailure();
+    if (!err.code) circuitBreaker.recordFailure();
     throw err;
   }
 }
@@ -343,6 +367,8 @@ async function searchRecords(sid, { module, query='', fields=[], max_results=20,
 }
 
 async function searchText(sid, { search_string, modules=['Accounts','Contacts','Leads'], max_results=10 }) {
+  if (!search_string || typeof search_string !== 'string' || search_string.length > 500)
+    throw new McpError(ErrorCode.InvalidParams, 'search_string must be a non-empty string of at most 500 characters');
   for (const m of modules) validateModule(m);
   const r = await crmCall(sid, 'search_by_module', {
     search_string, modules, offset: 0, max_results, assigned_user_id: '',
@@ -588,8 +614,16 @@ app.get('/health', (_req, res) => res.json({
   circuit_breaker: circuitBreaker.state.toLowerCase(),
 }));
 
+const deepHealthRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many health check requests - try again in a minute' },
+});
+
 // Deep health - tests actual CRM reachability. Use for readiness probes.
-app.get('/health/deep', async (_req, res) => {
+app.get('/health/deep', deepHealthRateLimit, async (_req, res) => {
   const start = Date.now();
   const checks = {};
   let status = 'healthy';

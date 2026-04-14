@@ -1,9 +1,12 @@
 {
   "name": "suitecrm-mcp-gateway",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "description": "SuiteCRM MCP Gateway - SSE transport, header auth, 13 tools, Prometheus metrics",
   "type": "module",
   "main": "index.mjs",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.2.1",
