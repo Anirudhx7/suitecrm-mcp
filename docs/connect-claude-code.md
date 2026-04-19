@@ -46,6 +46,13 @@ claude mcp add suitecrm_crm2 \
   http://YOUR_SERVER:8080/crm2/sse
 ```
 
+## Credential Security
+
+- **Use HTTPS.** Credentials travel as HTTP headers. Without HTTPS they are visible on the network. Use the `--domain` flag during install, or put the gateway behind a TLS-terminating proxy.
+- **Create a dedicated CRM API user.** Do not use your admin account. In SuiteCRM Admin - User Management, create a user (e.g. `claude-api`) and enable API access. Give it only the module permissions your AI assistant actually needs.
+- **Credentials are stored in Claude Code's MCP config.** Run `claude mcp list` to see the entry. Treat this as a secret - do not share the output, and be aware that removing and re-adding the entry is the way to rotate credentials.
+- **Rotate credentials** by removing and re-adding the MCP server entry with updated credentials.
+
 ## Verify
 
 ```bash

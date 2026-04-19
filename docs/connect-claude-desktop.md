@@ -76,6 +76,13 @@ Add one entry per entity. Each has its own `/{code}/sse` path:
 }
 ```
 
+## Credential Security
+
+- **Use HTTPS.** Credentials travel as HTTP headers. Without HTTPS they are visible on the network. Use the `--domain` flag during install, or put the gateway behind a TLS-terminating proxy.
+- **Create a dedicated CRM API user.** Do not use your admin account. In SuiteCRM Admin - User Management, create a user (e.g. `claude-api`) and enable API access. Give it only the module permissions your AI assistant actually needs.
+- **Treat this config file as a secret.** `claude_desktop_config.json` contains plaintext credentials. Do not check it into version control, do not back it up to unencrypted cloud storage, and restrict file permissions on shared machines.
+- **Rotate credentials by editing this file.** If credentials are compromised, disable the CRM user in SuiteCRM Admin and create a new one. Update this file and restart Claude Desktop.
+
 ## Apply changes
 
 Fully quit and relaunch Claude Desktop (menu bar > Quit, then reopen).
