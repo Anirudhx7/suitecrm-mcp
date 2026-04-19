@@ -44,7 +44,7 @@ Options:
   --uninstall  Remove single-entity install (single mode only)
 """
 
-import os, sys, subprocess, json, argparse, shutil, re, socket, time
+import os, sys, subprocess, json, argparse, shutil, re, socket, time, secrets
 from pathlib import Path
 from urllib.parse import urlparse
 import urllib.request
@@ -55,15 +55,17 @@ import urllib.parse
 # Constants
 # ---------------------------------------------------------------------------
 
-SERVER_DIR  = "/opt/suitecrm-mcp"
-ENV_DIR     = "/etc/suitecrm-mcp"
-ENV_FILE    = "/etc/suitecrm-mcp/gateway.env"   # single-entity env
-DOMAIN_FILE = "/etc/suitecrm-mcp/domain"
-NGINX_CONF  = "/etc/nginx/sites-available/suitecrm-mcp"
-NGINX_LINK  = "/etc/nginx/sites-enabled/suitecrm-mcp"
-NGINX_PORT  = 8080   # multi-entity plain HTTP listen port
-SVC_USER    = "suitecrm-mcp"
-SVC_NAME    = "suitecrm-mcp"  # single-entity service name
+SERVER_DIR    = "/opt/suitecrm-mcp"
+ENV_DIR       = "/etc/suitecrm-mcp"
+ENV_FILE      = "/etc/suitecrm-mcp/gateway.env"   # single-entity env
+ENTITIES_JSON = "/etc/suitecrm-mcp/entities.json"  # runtime entity config for the server
+PROFILES_FILE = "/etc/suitecrm-mcp/user-profiles.json"
+DOMAIN_FILE   = "/etc/suitecrm-mcp/domain"
+NGINX_CONF    = "/etc/nginx/sites-available/suitecrm-mcp"
+NGINX_LINK    = "/etc/nginx/sites-enabled/suitecrm-mcp"
+NGINX_PORT    = 8080   # multi-entity plain HTTP listen port
+SVC_USER      = "suitecrm-mcp"
+SVC_NAME      = "suitecrm-mcp"  # single-entity service name
 
 # Common SuiteCRM REST API path patterns (in order of likelihood)
 API_PATH_PATTERNS = [
@@ -345,6 +347,102 @@ def load_entities(config_path):
     return entities
 
 # ---------------------------------------------------------------------------
+# OAuth / auth config
+# ---------------------------------------------------------------------------
+
+def prompt_oauth_config(args, domain=None):
+    """
+    Gather OAuth2/OIDC configuration interactively or from CLI flags.
+    Returns a dict with all required OAuth env vars.
+    """
+    print()
+    info("=" * 60)
+    info("OAUTH2 CONFIGURATION")
+    info("=" * 60)
+    print()
+    print("  The gateway uses OAuth2/OIDC for user authentication.")
+    print("  You will need an app registration in Auth0, Azure AD, or")
+    print("  any OIDC provider. See docs/auth0-setup.md for guidance.")
+    print()
+
+    issuer = getattr(args, "oauth_issuer", None) or _prompt(
+        "OIDC issuer URL (e.g. https://your-tenant.auth0.com)"
+    )
+    if not issuer:
+        error("OAuth issuer URL is required")
+    issuer = issuer.rstrip("/")
+
+    client_id = getattr(args, "oauth_client_id", None) or _prompt("OAuth client ID")
+    if not client_id:
+        error("OAuth client ID is required")
+
+    client_secret = getattr(args, "oauth_client_secret", None) or _prompt("OAuth client secret")
+    if not client_secret:
+        error("OAuth client secret is required")
+
+    audience = getattr(args, "oauth_audience", None) or _prompt(
+        "OAuth audience (Auth0: your API identifier; Azure AD: client ID; press Enter to skip)", ""
+    ) or ""
+
+    # Derive gateway URL
+    if domain:
+        default_gw = f"https://{domain}"
+    else:
+        default_gw = getattr(args, "gateway_url", None) or ""
+    gateway_url = getattr(args, "gateway_url", None) or _prompt(
+        "Gateway external URL (e.g. https://mcp.yourcompany.com)", default_gw
+    )
+    if not gateway_url:
+        error("Gateway external URL is required (used to build the OAuth redirect URI)")
+    gateway_url = gateway_url.rstrip("/")
+
+    redirect_uri = f"{gateway_url}/auth/callback"
+
+    groups_claim = getattr(args, "oauth_groups_claim", None) or _prompt(
+        "JWT groups claim (default: roles)", "roles"
+    ) or "roles"
+
+    # Generate a new API key secret (one-time, written to env file)
+    api_key_secret = secrets.token_hex(32)
+
+    ok(f"Redirect URI: {redirect_uri}")
+    ok(f"Generated API_KEY_SECRET (save this - needed if you rebuild)")
+    print()
+
+    return {
+        "OAUTH_ISSUER":        issuer,
+        "OAUTH_CLIENT_ID":     client_id,
+        "OAUTH_CLIENT_SECRET": client_secret,
+        "OAUTH_AUDIENCE":      audience,
+        "OAUTH_REDIRECT_URI":  redirect_uri,
+        "GATEWAY_EXTERNAL_URL": gateway_url,
+        "OAUTH_GROUPS_CLAIM":  groups_claim,
+        "API_KEY_SECRET":      api_key_secret,
+    }
+
+
+def write_entities_json(entities):
+    """Write /etc/suitecrm-mcp/entities.json for the gateway to read at runtime."""
+    # Include only the fields the server needs
+    out = {}
+    for code, data in entities.items():
+        entry = {
+            "label":    data.get("label", code),
+            "endpoint": data["endpoint"],
+            "port":     data["port"],
+        }
+        if data.get("tls_skip"):
+            entry["tls_skip"] = True
+        if data.get("group"):
+            entry["group"] = data["group"]
+        out[code] = entry
+
+    write_file(ENTITIES_JSON, json.dumps(out, indent=2), mode="640")
+    run(["chown", f"root:{SVC_USER}", ENTITIES_JSON])
+    ok(f"Entities config: {ENTITIES_JSON}")
+
+
+# ---------------------------------------------------------------------------
 # System-level setup
 # ---------------------------------------------------------------------------
 
@@ -403,17 +501,18 @@ def install_server():
 # Per-entity install
 # ---------------------------------------------------------------------------
 
-def install_entity(code, data, is_multi):
+def install_entity(code, data, is_multi, oauth_cfg=None):
     """
     Install env file + systemd unit for one entity.
     is_multi=True: writes /etc/suitecrm-mcp/{code}.env, service suitecrm-mcp-{code}
     is_multi=False: writes /etc/suitecrm-mcp/gateway.env, service suitecrm-mcp
+    oauth_cfg: dict of OAuth env vars written into the env file.
     """
     label    = data.get("label", code)
     endpoint = data["endpoint"]
     port     = data["port"]
     tls_skip = data.get("tls_skip", False)
-    behind_proxy = is_multi or data.get("_behind_proxy", False)  # multi always behind nginx; single only when --domain used
+    behind_proxy = is_multi or data.get("_behind_proxy", False)
 
     if is_multi:
         env_path = f"{ENV_DIR}/{code}.env"
@@ -428,6 +527,8 @@ def install_entity(code, data, is_multi):
             "BIND_HOST=127.0.0.1",
             "NODE_NO_WARNINGS=1",
         ]
+        if data.get("group"):
+            lines.append(f"REQUIRED_GROUP={data['group']}")
     else:
         env_path = ENV_FILE
         svc_name = SVC_NAME
@@ -440,12 +541,25 @@ def install_entity(code, data, is_multi):
             "BIND_HOST=127.0.0.1",
             "NODE_NO_WARNINGS=1",
         ]
+        if data.get("group"):
+            lines.append(f"REQUIRED_GROUP={data['group']}")
 
     if tls_skip:
         warn(f"  [{code}] TLS verification disabled - only for self-signed certs on trusted networks")
         lines.append("NODE_TLS_REJECT_UNAUTHORIZED=0")
     if behind_proxy:
         lines.append("TRUST_PROXY=1")
+
+    # OAuth2/OIDC vars - same values for every entity (shared identity provider)
+    if oauth_cfg:
+        lines.append("")
+        lines.append("# OAuth2/OIDC")
+        for key, val in oauth_cfg.items():
+            if val:
+                lines.append(f"{key}={val}")
+        lines.append(f"PROFILES_FILE={PROFILES_FILE}")
+        lines.append(f"ENTITIES_CONFIG={ENTITIES_JSON}")
+
     lines.append("")
 
     write_file(env_path, "\n".join(lines), mode="600")
@@ -531,6 +645,25 @@ def _rebuild_nginx_multi(entities, domain=None):
             f"    }}\n"
         )
 
+    # Auth routes served by the primary entity (first in the list)
+    primary_port = next(iter(entities.values()))["port"]
+    auth_block = (
+        f"\n    # OAuth2 auth routes - served by primary entity\n"
+        f"    location /auth/ {{\n"
+        f"        proxy_pass http://127.0.0.1:{primary_port}/auth/;\n"
+        f"        proxy_http_version 1.1;\n"
+        f"        proxy_set_header Connection '';\n"
+        f"        proxy_set_header Host $host;\n"
+        f"        proxy_pass_request_headers on;\n"
+        f"        proxy_buffering off;\n"
+        f"        proxy_cache off;\n"
+        f"        proxy_read_timeout 60s;\n"
+        f"    }}\n"
+        f"    location = / {{\n"
+        f"        return 302 /auth/login;\n"
+        f"    }}\n"
+    )
+
     listen_line = (
         f"listen 80;\n    server_name {domain};"
         if domain else
@@ -548,6 +681,7 @@ def _rebuild_nginx_multi(entities, domain=None):
         f"        default_type application/json;\n"
         f"        return 200 '{{\"gateway\":\"ok\",\"entities\":{len(entities)}}}';\n"
         f"    }}\n"
+        f"{auth_block}"
         f"{locations}}}\n"
     )
     write_file(NGINX_CONF, conf)
@@ -836,6 +970,16 @@ def main():
     # HTTPS
     parser.add_argument("--domain", help="Domain for HTTPS via Let's Encrypt")
     parser.add_argument("--email",  help="Email for Let's Encrypt cert (required with --domain)")
+    # OAuth2/OIDC (non-interactive use; installer will prompt if omitted)
+    parser.add_argument("--oauth-issuer",       dest="oauth_issuer",       help="OIDC issuer URL")
+    parser.add_argument("--oauth-client-id",    dest="oauth_client_id",    help="OAuth client ID")
+    parser.add_argument("--oauth-client-secret",dest="oauth_client_secret",help="OAuth client secret")
+    parser.add_argument("--oauth-audience",     dest="oauth_audience",     help="OAuth audience")
+    parser.add_argument("--oauth-groups-claim", dest="oauth_groups_claim", default="roles",
+                        help="JWT claim for groups (default: roles)")
+    parser.add_argument("--gateway-url",        dest="gateway_url",        help="Gateway external URL (e.g. https://mcp.yourcompany.com)")
+    parser.add_argument("--skip-oauth",         dest="skip_oauth", action="store_true",
+                        help="Skip OAuth setup (for upgrades where OAuth is already configured)")
     # Operations
     parser.add_argument("--add",      action="store_true", help="Add new entities only (multi)")
     parser.add_argument("--remove",   nargs="+", metavar="CODE", help="Remove entity codes (multi)")
@@ -995,6 +1139,16 @@ def main():
     run(["chmod", "700", ENV_DIR])
     run(["chown", f"{SVC_USER}:{SVC_USER}", ENV_DIR])
 
+    # OAuth2 config
+    oauth_cfg = None
+    if not getattr(args, "skip_oauth", False):
+        oauth_cfg = prompt_oauth_config(args, domain=args.domain)
+
+    # Write /etc/suitecrm-mcp/entities.json for the server to read at runtime
+    info("Writing entities config ...")
+    write_entities_json(entities)
+    print()
+
     # Per-entity install
     info("Installing env files and services ...")
     svc_names = []
@@ -1002,7 +1156,7 @@ def main():
         # Inject behind_proxy flag for single+domain case
         if not is_multi and args.domain:
             data = dict(data, _behind_proxy=True)
-        svc_name = install_entity(code, data, is_multi)
+        svc_name = install_entity(code, data, is_multi, oauth_cfg=oauth_cfg)
         svc_names.append((code, svc_name))
 
     run(["systemctl", "daemon-reload"])
@@ -1044,8 +1198,15 @@ def main():
             print(f"  SSE endpoint: http://YOUR_SERVER_IP:{port}/sse")
 
     print()
-    info("Connect with X-CRM-User and X-CRM-Pass headers.")
-    info("See README.md for Claude Desktop / Claude Code config examples.")
+    if oauth_cfg:
+        gw_url = oauth_cfg.get("GATEWAY_EXTERNAL_URL", "https://YOUR_GATEWAY")
+        info("Users authenticate by visiting:")
+        print(f"  {gw_url}/auth/login")
+        print()
+        info("After login they receive an API key to use with Claude Desktop,")
+        info("Claude Code, or OpenClaw. See README.md for connection examples.")
+    else:
+        info("See README.md for connection and authentication instructions.")
     print()
 
 

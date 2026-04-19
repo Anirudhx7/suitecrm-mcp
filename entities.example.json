@@ -2,17 +2,20 @@
   "crm1": {
     "label": "My Company CRM",
     "endpoint": "https://crm.mycompany.com/service/v4_1/rest.php",
-    "port": 3101
+    "port": 3101,
+    "group": "CRM-MyCompany"
   },
   "crm2": {
     "label": "Client B CRM",
     "endpoint": "https://crm.clientb.com/service/v4_1/rest.php",
-    "port": 3102
+    "port": 3102,
+    "group": "CRM-ClientB"
   },
   "crm3": {
     "label": "Client C CRM (self-signed cert)",
     "endpoint": "https://crm.clientc.internal/legacy/service/v4_1/rest.php",
     "port": 3103,
-    "tls_skip": true
+    "tls_skip": true,
+    "group": "CRM-ClientC"
   }
 }

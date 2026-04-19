@@ -5,30 +5,35 @@ SuiteCRM MCP Bridge Installer for OpenClaw
 Runs on the OpenClaw machine. Installs per-user bridge plugins that
 connect OpenClaw to a remote suitecrm-mcp gateway via SSE.
 
-Compatible with suitecrm-mcp gateway v1.2+.
+Compatible with suitecrm-mcp gateway v3.0+.
+
+Auth flow (no CLI required on the OpenClaw machine):
+  1. Bridge plugin starts and checks ~/.suitecrm-mcp/gateway.token.
+  2. If no token, it prints the auth URL and polls the gateway in the background.
+  3. User visits the auth URL in a browser, logs in via the identity provider.
+  4. Gateway delivers a token to the poll endpoint; bridge saves it and connects.
+  5. Future restarts use the saved token automatically.
 
 Usage:
   # Single entity
-  sudo python3 install-bridge.py --gateway http://GATEWAY_HOST:3101 --code mycrm --label "My CRM"
+  sudo python3 install-bridge.py --gateway https://mcp.yourcompany.com --code mycrm --label "My CRM"
 
-  # Multi entity (reads entities.json — same format as install.py)
-  sudo python3 install-bridge.py --gateway http://GATEWAY_HOST:8080 --entities entities.json
+  # Multi entity (reads entities.json -- same format as install.py)
+  sudo python3 install-bridge.py --gateway https://mcp.yourcompany.com --entities entities.json
 
-  # Target specific users (default: all users in /home)
+  # Target specific users (default: all users in /home with ~/.openclaw/openclaw.json)
   sudo python3 install-bridge.py --gateway ... --entities entities.json user1 user2
 
   # Remove bridge from users
   sudo python3 install-bridge.py --remove user1 user2 --gateway ... --entities entities.json
 
-  # Reinstall bridge plugins (preserves credentials)
+  # Reinstall bridge plugins (preserves token)
   sudo python3 install-bridge.py --update --gateway ... --entities entities.json
 """
 
 import os, sys, subprocess, json, argparse, re, shutil
 from pathlib import Path
 from urllib.parse import urlparse
-
-SETUP_SCRIPT = "/usr/local/bin/suitecrm-setup"
 
 RED = "\033[0;31m"; GREEN = "\033[0;32m"; YELLOW = "\033[1;33m"; CYAN = "\033[0;36m"; NC = "\033[0m"
 def info(m): print(f"{CYAN}[INFO]{NC} {m}")
@@ -47,28 +52,27 @@ TOOL_SUFFIXES = [
 
 def validate_code(c):
     if not SAFE_CODE_RE.match(c):
-        error(f"Invalid entity code: {c!r} — use letters, digits, hyphens, underscores only")
+        error(f"Invalid entity code: {c!r} -- use letters, digits, hyphens, underscores only")
 
 def validate_label(l):
     if not SAFE_LABEL_RE.match(l):
-        error(f"Invalid entity label: {l!r} — use letters, digits, spaces, and basic punctuation only")
+        error(f"Invalid entity label: {l!r} -- use letters, digits, spaces, and basic punctuation only")
 
 def validate_username(u):
     if not SAFE_USER_RE.match(u):
-        error(f"Invalid username: {u!r} — use letters, digits, hyphens, underscores only")
+        error(f"Invalid username: {u!r} -- use letters, digits, hyphens, underscores only")
 
 def validate_gateway_url(url):
     url = url.rstrip('/')
     parsed = urlparse(url)
     if parsed.scheme not in ('http', 'https'):
-        error(f"Invalid gateway URL: {url!r} — must start with http:// or https://")
+        error(f"Invalid gateway URL: {url!r} -- must start with http:// or https://")
     if not parsed.netloc:
-        error(f"Invalid gateway URL: {url!r} — missing host")
-    # Reject any path component — the bridge constructs its own paths
+        error(f"Invalid gateway URL: {url!r} -- missing host")
     if parsed.path not in ('', '/'):
         error(
-            f"Invalid gateway URL: {url!r} — must be a bare origin with no path "
-            f"(e.g. http://host:8080, not http://host:8080/some/path)"
+            f"Invalid gateway URL: {url!r} -- must be a bare origin with no path "
+            f"(e.g. https://mcp.yourcompany.com, not https://mcp.yourcompany.com/some/path)"
         )
     return url
 
@@ -82,8 +86,6 @@ def normalize_token(value):
     return value.strip().lower()
 
 def run(cmd, check=True, capture=False, cwd=None):
-    # All privileged subprocess calls must use list form to prevent shell injection.
-    # String commands are never allowed here — use list form for every call.
     if isinstance(cmd, str):
         raise ValueError(f"run() requires a list command, got string: {cmd!r}")
     r = subprocess.run(cmd, capture_output=capture, text=True, cwd=cwd)
@@ -99,7 +101,7 @@ def write_file(path, content, owner=None, mode=None):
 
 def check_node():
     if not shutil.which("node"):
-        error("Node.js not found. Install OpenClaw first — it requires Node.js.")
+        error("Node.js not found. Install OpenClaw first -- it requires Node.js.")
     ok(f"Node.js: {run(['node', '--version'], capture=True).stdout.strip()}")
 
 def load_entities(args):
@@ -236,7 +238,7 @@ def resolve_attach_arg(raw_attach):
 def resolve_agent_selection(username, config, attach_spec):
     agents = discover_agents(config)
     if not agents:
-        info(f"  No configured agents found for {username} — installing plugin only")
+        info(f"  No configured agents found for {username} -- installing plugin only")
         return {"mode": "plugin-only", "agents": [], "labels": []}
 
     if attach_spec:
@@ -267,7 +269,7 @@ def resolve_agent_selection(username, config, attach_spec):
 
         if invalid:
             valid = ", ".join(agent["primary"] for agent in agents)
-            warn(f"  Unknown agent(s) for {username}: {', '.join(invalid)}. Valid: {valid} — installing plugin only")
+            warn(f"  Unknown agent(s) for {username}: {', '.join(invalid)}. Valid: {valid} -- installing plugin only")
             return {"mode": "plugin-only", "agents": [], "labels": []}
         if ambiguous:
             error(f"Ambiguous agent identifier(s) for {username}: {', '.join(ambiguous)}")
@@ -288,7 +290,7 @@ def resolve_agent_selection(username, config, attach_spec):
 
     if len(agents) == 1:
         agent = agents[0]
-        info(f"  One configured agent found for {username} — attaching to {agent['primary']}")
+        info(f"  One configured agent found for {username} -- attaching to {agent['primary']}")
         return {"mode": "selected", "agents": [agent], "labels": [agent["primary"]]}
 
     print()
@@ -322,104 +324,144 @@ def resolve_agent_selection(username, config, attach_spec):
 
 
 def _make_bridge_js(code, label, gateway_url, is_multi):
-    """Generate the OpenClaw plugin JS for one entity."""
+    """Generate the OpenClaw plugin JS for one entity (v3.0 OAuth token auth)."""
     tool_names = json.dumps([f"suitecrm_{code}_{s}" for s in TOOL_SUFFIXES])
-    sse_url = f"{gateway_url}/{code}/sse" if is_multi else f"{gateway_url}/sse"
+    sse_url  = f"{gateway_url}/{code}/sse" if is_multi else f"{gateway_url}/sse"
+    auth_url = f"{gateway_url}/auth/login"
 
     return f"""/**
  * SuiteCRM Bridge Plugin for OpenClaw
  * Entity : {label} ({code})
  * Gateway: {gateway_url}
- * Creds  : ~/.suitecrm-mcp/{code}.json
  *
- * Compatible with suitecrm-mcp gateway v1.2+
+ * Compatible with suitecrm-mcp gateway v3.0+
  *
- * Gateway behaviour this bridge accounts for:
- *   - Fail-fast auth: gateway validates CRM credentials before opening the SSE
- *     stream. Bad credentials return HTTP 401 JSON — not an SSE event. The
- *     bridge detects this and stops retrying (credentials won't self-heal;
- *     the user must re-run suitecrm-setup).
- *   - Rate limit on /sse: 20 requests per 15 minutes. A nextRetryAt timestamp
- *     enforces backoff across all concurrent callTool() invocations so that
- *     multiple simultaneous tool calls do not each fire a reconnect attempt.
- *   - Rate limit on /messages: 100 per minute. Normal tool-call volume is
- *     well within this; no special handling needed.
+ * Auth flow:
+ *   1. Reads ~/.suitecrm-mcp/gateway.token for a gateway-issued API key.
+ *   2. If no token found, prints the auth URL and polls the gateway until
+ *      the user authenticates in their browser (no CLI needed).
+ *   3. All gateway requests carry: Authorization: Bearer <token>
+ *   4. On 401, clears the saved token and restarts the auth flow.
  */
 
 import {{ Client }} from '@modelcontextprotocol/sdk/client/index.js';
 import {{ SSEClientTransport }} from '@modelcontextprotocol/sdk/client/sse.js';
-import {{ readFileSync }} from 'fs';
-import {{ homedir }} from 'os';
+import {{ readFileSync, writeFileSync, unlinkSync, mkdirSync }} from 'fs';
+import {{ homedir, userInfo }} from 'os';
 import {{ join }} from 'path';
 
 const ENTITY_CODE = '{code}';
 const SSE_URL     = '{sse_url}';
-const CREDS_FILE  = join(homedir(), '.suitecrm-mcp', '{code}.json');
+const AUTH_URL    = '{auth_url}';
+const LINUX_USER  = userInfo().username;
+const STATUS_URL  = `{gateway_url}/auth/status/${{LINUX_USER}}`;
+const TOKEN_FILE  = join(homedir(), '.suitecrm-mcp', 'gateway.token');
+const TOKEN_DIR   = join(homedir(), '.suitecrm-mcp');
 const TOOL_NAMES  = {tool_names};
 
-// Backoff delays for reconnect attempts (ms). Caps at 60 s to stay within
-// the gateway's 20-req/15-min rate limit on /sse.
 const BACKOFF_MS = [5_000, 15_000, 30_000, 60_000];
-let backoffIdx   = 0;
-// Timestamp (ms) before which no reconnect attempt should be made.
-// Shared across all concurrent callTool() calls so they all respect the same
-// backoff window instead of each firing their own immediate reconnect.
-let nextRetryAt  = 0;
+let backoffIdx  = 0;
+let nextRetryAt = 0;
+
+let token            = null;
+let authTokenPromise = null; // in-flight poll promise (shared across callers)
+
+function loadToken() {{
+  try {{
+    const raw = readFileSync(TOKEN_FILE, 'utf8').trim();
+    if (raw) {{ token = raw; return true; }}
+  }} catch {{}}
+  return false;
+}}
+
+function saveToken(t) {{
+  mkdirSync(TOKEN_DIR, {{ recursive: true, mode: 0o700 }});
+  writeFileSync(TOKEN_FILE, t, {{ mode: 0o600 }});
+  token = t;
+}}
+
+function clearToken() {{
+  token = null;
+  try {{ unlinkSync(TOKEN_FILE); }} catch {{}}
+}}
+
+function pollForToken() {{
+  if (authTokenPromise) return authTokenPromise;
+
+  process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] No token found.\\n`);
+  process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Authenticate at: ${{AUTH_URL}}\\n`);
+
+  const INTERVAL_MS = 3_000;
+  const TIMEOUT_MS  = 15 * 60 * 1_000; // 15 min matches gateway pending-token TTL
+  const start       = Date.now();
+
+  authTokenPromise = new Promise(resolve => {{
+    const tick = async () => {{
+      if (Date.now() - start > TIMEOUT_MS) {{
+        process.stderr.write(
+          `[SuiteCRM ${{ENTITY_CODE}}] Auth timed out. Restart OpenClaw and authenticate again.\\n`
+        );
+        authTokenPromise = null;
+        return resolve(false);
+      }}
+      try {{
+        const resp = await fetch(STATUS_URL, {{ signal: AbortSignal.timeout(10_000) }});
+        if (resp.ok) {{
+          const data = await resp.json();
+          if (data.token) {{
+            saveToken(data.token);
+            process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received.\\n`);
+            authTokenPromise = null;
+            return resolve(true);
+          }}
+        }}
+      }} catch {{}}
+      setTimeout(tick, INTERVAL_MS);
+    }};
+    setTimeout(tick, INTERVAL_MS);
+  }});
+
+  return authTokenPromise;
+}}
+
+async function requireToken() {{
+  if (token) return true;
+  if (loadToken()) return true;
+  return pollForToken();
+}}
 
 export default {{
   id: 'suitecrm-{code}',
   name: 'SuiteCRM {label}',
 
   register(api) {{
-    let creds;
-    try {{
-      creds = JSON.parse(readFileSync(CREDS_FILE, 'utf8'));
-    }} catch {{
-      process.stderr.write(
-        `[SuiteCRM ${{ENTITY_CODE}}] Credentials not found — run: suitecrm-setup ${{ENTITY_CODE}}\\n`
-      );
-      return;
-    }}
-
-    if (!creds?.user || !creds?.pass) {{
-      process.stderr.write(
-        `[SuiteCRM ${{ENTITY_CODE}}] Incomplete credentials — run: suitecrm-setup ${{ENTITY_CODE}}\\n`
-      );
-      return;
-    }}
-
     let client     = null;
     let ready      = false;
     let connecting = null;
-    let authFailed = false; // permanent flag — stops all retries on 401
 
-    // customFetch injects auth headers on every SSEClientTransport request
-    // (both the GET /sse and the POST /messages calls).
     const customFetch = async (url, init) => {{
       const headers = new Headers(init?.headers);
-      headers.set('x-crm-user', creds.user);
-      headers.set('x-crm-pass', creds.pass);
+      if (token) headers.set('Authorization', `Bearer ${{token}}`);
       const resp = await fetch(url, {{ ...init, headers }});
 
       if (resp.status === 401) {{
-        // Fail-fast auth: gateway rejected CRM credentials before opening the
-        // SSE stream. This is not a transient error — do not retry.
         process.stderr.write(
-          `[SuiteCRM ${{ENTITY_CODE}}] Auth rejected (HTTP 401) — run: suitecrm-setup ${{ENTITY_CODE}}\\n`
+          `[SuiteCRM ${{ENTITY_CODE}}] Token rejected (HTTP 401) -- clearing token, re-auth required\\n`
         );
+        clearToken();
         throw Object.assign(
-          new Error('Gateway returned 401 — invalid CRM credentials'),
-          {{ authFailed: true }}
+          new Error('Gateway returned 401 -- token expired or revoked'),
+          {{ needsReauth: true }}
         );
       }}
 
       if (resp.status === 429) {{
         const retryAfter = parseInt(resp.headers.get('retry-after') || '60', 10);
         process.stderr.write(
-          `[SuiteCRM ${{ENTITY_CODE}}] Rate limited (HTTP 429) — retry after ${{retryAfter}}s\\n`
+          `[SuiteCRM ${{ENTITY_CODE}}] Rate limited (HTTP 429) -- retry after ${{retryAfter}}s\\n`
         );
         throw Object.assign(
-          new Error(`Gateway rate limited — retry after ${{retryAfter}}s`),
+          new Error(`Gateway rate limited -- retry after ${{retryAfter}}s`),
           {{ rateLimited: true, retryAfter }}
         );
       }}
@@ -428,25 +470,17 @@ export default {{
     }};
 
     function connect() {{
-      // Permanent auth failure — nothing will fix this without re-running setup.
-      if (authFailed) return Promise.resolve();
-
-      // If a connect attempt is already in-flight, return its promise so all
-      // concurrent callers wait on the same connection attempt.
       if (connecting) return connecting;
-
-      // Enforce backoff: if we are still within the retry window, return a
-      // promise that waits out the remaining delay then retries. This prevents
-      // concurrent callTool() invocations from each firing an immediate reconnect.
       const wait = nextRetryAt - Date.now();
-      if (wait > 0) {{
-        return new Promise(resolve => setTimeout(() => resolve(connect()), wait));
-      }}
+      if (wait > 0) return new Promise(res => setTimeout(() => res(connect()), wait));
 
       connecting = (async () => {{
+        const hasToken = await requireToken();
+        if (!hasToken) {{ connecting = null; return; }}
+
         const transport = new SSEClientTransport(new URL(SSE_URL), {{
-          eventSourceInit: {{ fetch: customFetch }},  // auth on GET /sse
-          fetch: customFetch,                          // auth on POST /messages
+          eventSourceInit: {{ fetch: customFetch }},
+          fetch: customFetch,
         }});
 
         client = new Client(
@@ -460,9 +494,9 @@ export default {{
         }};
 
         await client.connect(transport);
-        ready      = true;
-        connecting = null;
-        backoffIdx = 0;   // reset backoff on successful connect
+        ready       = true;
+        connecting  = null;
+        backoffIdx  = 0;
         nextRetryAt = 0;
         process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Connected to gateway\\n`);
       }})().catch(err => {{
@@ -470,18 +504,18 @@ export default {{
         ready      = false;
         client     = null;
 
-        if (err.authFailed) {{
-          authFailed = true; // stop all future retries
+        if (err.needsReauth) {{
+          // Restart auth flow, then reconnect once token arrives
+          pollForToken().then(ok => {{ if (ok) {{ backoffIdx = 0; nextRetryAt = 0; connect(); }} }});
           return;
         }}
 
         const delay = err.rateLimited
           ? err.retryAfter * 1_000
           : BACKOFF_MS[Math.min(backoffIdx++, BACKOFF_MS.length - 1)];
-
         nextRetryAt = Date.now() + delay;
         process.stderr.write(
-          `[SuiteCRM ${{ENTITY_CODE}}] Connect failed: ${{err.message}} — retry in ${{delay / 1000}}s\\n`
+          `[SuiteCRM ${{ENTITY_CODE}}] Connect failed: ${{err.message}} -- retry in ${{delay / 1000}}s\\n`
         );
       }});
       return connecting;
@@ -489,9 +523,7 @@ export default {{
 
     async function callTool(toolName, toolArgs) {{
       if (!ready || !client) await connect();
-      if (!client) {{
-        throw new Error(`SuiteCRM ${{ENTITY_CODE}} gateway not available — check logs`);
-      }}
+      if (!client) throw new Error(`SuiteCRM ${{ENTITY_CODE}} gateway not available -- check logs`);
       try {{
         return await client.callTool({{ name: toolName, arguments: toolArgs }});
       }} catch (err) {{
@@ -513,7 +545,7 @@ export default {{
     for (const toolName of TOOL_NAMES) {{
       api.registerTool({{
         name: toolName,
-        description: `SuiteCRM ${{ENTITY_CODE}} — ${{toolName.replace(`suitecrm_${{ENTITY_CODE}}_`, '')}}`,
+        description: `SuiteCRM ${{ENTITY_CODE}} -- ${{toolName.replace(`suitecrm_${{ENTITY_CODE}}_`, '')}}`,
         optional: true,
         parameters: {{ type: 'object', properties: {{}}, additionalProperties: true }},
         async execute(_callId, params) {{
@@ -527,8 +559,8 @@ export default {{
       }});
     }}
 
-    // Lazy connect: first tool call triggers connect(). No background warmup
-    // so the bridge does not consume a rate-limit slot at startup.
+    // Trigger connection at startup so the auth prompt appears immediately.
+    connect().catch(() => {{}});
   }},
 }};
 """
@@ -538,14 +570,12 @@ def _install_bridge_plugin(username, openclaw_dir, code, label, gateway_url, is_
     plugin_id  = f"suitecrm-{code}"
     bridge_dir = f"{openclaw_dir}/extensions/{plugin_id}"
     os.makedirs(bridge_dir, exist_ok=True)
-    # chown the directory before npm install runs as the target user,
-    # otherwise npm cannot write node_modules into a root-owned directory.
     run(["chown", f"{username}:{username}", bridge_dir])
 
     write_file(f"{bridge_dir}/package.json", json.dumps({
         "name": plugin_id,
         "version": "1.0.0",
-        "description": f"OpenClaw bridge — SuiteCRM {label}",
+        "description": f"OpenClaw bridge -- SuiteCRM {label}",
         "type": "module",
         "openclaw": {"extensions": ["./index.js"]},
         "dependencies": {"@modelcontextprotocol/sdk": "^1.29.0"},
@@ -575,9 +605,6 @@ def _install_bridge_plugin(username, openclaw_dir, code, label, gateway_url, is_
 
     npm_path = shutil.which("npm") or "/usr/bin/npm"
     run(["runuser", "-u", username, "--", npm_path, "install", "--silent"], cwd=bridge_dir)
-    # chown -R after npm install so that any files written by a previous root-owned
-    # install (e.g. on --update) are corrected. The pre-install chown above only
-    # covers the directory itself, not existing node_modules contents.
     run(["chown", "-R", f"{username}:{username}", bridge_dir])
     ok(f"  Plugin suitecrm-{code} installed for {username}")
 
@@ -596,7 +623,7 @@ def _remove_values(values, removals):
 def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection):
     config_path = f"{openclaw_dir}/openclaw.json"
     if not os.path.exists(config_path):
-        warn(f"  openclaw.json not found for {username} — skipping config patch")
+        warn(f"  openclaw.json not found for {username} -- skipping config patch")
         return
     try:
         with open(config_path) as f:
@@ -632,13 +659,8 @@ def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection):
     selected_indexes = {agent["index"] for agent in agent_selection["agents"]}
 
     if agent_selection["mode"] == "all":
-        # Only add to global allow if it is already non-empty (already
-        # restrictive). An empty list means "all tools allowed" — adding to it
-        # would unintentionally restrict access to every non-bridge tool.
         if global_allow:
             _merge_unique(global_allow, plugin_ids)
-        # For agents with an existing restrictive per-agent allowlist, add
-        # bridge tool ids so the agent-level filter does not block them.
         for agent in agent_list:
             if not isinstance(agent, dict):
                 continue
@@ -648,11 +670,6 @@ def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection):
                 _merge_unique(allow, plugin_ids)
         ok("  Bridge tools enabled for all agents")
     elif agent_selection["mode"] == "selected":
-        # Do not touch global_allow — narrowing it here risks making it empty
-        # (permissive), which would give all agents access instead of fewer.
-        # For selected agents: only add to per-agent allowlist if it is already
-        # non-empty. An empty list means the agent already inherits all tools.
-        # For non-selected agents: remove bridge ids from their per-agent list.
         for idx, agent in enumerate(agent_list):
             if not isinstance(agent, dict):
                 continue
@@ -665,7 +682,6 @@ def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection):
                 agent_tools["allow"] = _remove_values(allow, plugin_ids + tool_names)
         ok(f"  Bridge tools scoped to agents: {', '.join(agent_selection['labels'])}")
     else:
-        # plugin-only: plugin registered but no tools.allow changes.
         ok("  Plugin registered without agent-specific attachment")
 
     save_openclaw_config(username, config_path, config)
@@ -674,18 +690,17 @@ def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection):
 def install_for_user(username, entities, gateway_url, is_multi, agent_selection):
     home         = f"/home/{username}"
     openclaw_dir = f"{home}/.openclaw"
-    creds_dir    = f"{home}/.suitecrm-mcp"
+    token_dir    = f"{home}/.suitecrm-mcp"
 
     if not os.path.isdir(home):
-        warn(f"Home directory not found for {username} — skipping"); return
+        warn(f"Home directory not found for {username} -- skipping"); return
     if not os.path.isdir(openclaw_dir):
-        warn(f"OpenClaw not installed for {username} (no {openclaw_dir}) — skipping"); return
+        warn(f"OpenClaw not installed for {username} (no {openclaw_dir}) -- skipping"); return
 
-    # Generic credential directory — not OpenClaw-specific so it survives
-    # if the user switches agent runtimes.
-    os.makedirs(creds_dir, exist_ok=True)
-    run(["chown", f"{username}:{username}", creds_dir])
-    run(["chmod", "700", creds_dir])
+    # Token directory: bridge reads/writes ~/.suitecrm-mcp/gateway.token
+    os.makedirs(token_dir, exist_ok=True)
+    run(["chown", f"{username}:{username}", token_dir])
+    run(["chmod", "700", token_dir])
 
     for code, label in entities.items():
         _install_bridge_plugin(username, openclaw_dir, code, label, gateway_url, is_multi)
@@ -694,117 +709,10 @@ def install_for_user(username, entities, gateway_url, is_multi, agent_selection)
     ok(f"Bridge installed for {username}")
 
 
-def install_setup_script(entities, gateway_url, is_multi):
-    """Install /usr/local/bin/suitecrm-setup — credential manager CLI."""
-    entity_cases = "\n".join(
-        f'    {code}) LABEL="{label}" ;;' for code, label in entities.items()
-    )
-    valid_codes  = " ".join(entities.keys())
-    status_block = "\n".join(
-        f'  show_entity_status "{code}" "{label}"' for code, label in entities.items()
-    )
-    test_url_expr = '"$GATEWAY_URL/$CODE/test"' if is_multi else '"$GATEWAY_URL/test"'
-
-    script = f"""#!/usr/bin/env bash
-# suitecrm-setup — configure CRM credentials for the SuiteCRM MCP bridge
-# Generated by install-bridge.py
-set -euo pipefail
-
-GATEWAY_URL="{gateway_url}"
-CREDS_DIR="$HOME/.suitecrm-mcp"
-RED='\\033[0;31m'; GREEN='\\033[0;32m'; YELLOW='\\033[1;33m'; CYAN='\\033[0;36m'; NC='\\033[0m'
-info() {{ echo -e "${{CYAN}}[INFO]${{NC}} $*"; }}
-ok()   {{ echo -e "${{GREEN}}[OK]${{NC}} $*"; }}
-warn() {{ echo -e "${{YELLOW}}[WARN]${{NC}} $*"; }}
-err()  {{ echo -e "${{RED}}[ERROR]${{NC}} $*" >&2; exit 1; }}
-
-show_entity_status() {{
-  local CODE="$1" LABEL="$2" CREDS="$CREDS_DIR/$1.json"
-  if [ -f "$CREDS" ]; then
-    local USER
-    USER=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('user','?'))" "$CREDS" 2>/dev/null || echo "?")
-    ok "  $CODE ($LABEL) — configured as $USER"
-  else
-    warn "  $CODE ($LABEL) — not configured [run: suitecrm-setup $CODE]"
-  fi
-}}
-
-show_status() {{
-  echo; info "Gateway: $GATEWAY_URL"; echo
-{status_block}
-  echo
-}}
-
-setup_entity() {{
-  local CODE="$1" LABEL=""
-  case "$CODE" in
-{entity_cases}
-    *) err "Unknown entity: $CODE. Valid: {valid_codes}" ;;
-  esac
-  echo; info "Configuring $LABEL ($CODE)"; echo
-  read -rp "  CRM username: " CRM_USER
-  read -rsp "  CRM password: " CRM_PASS; echo
-  [ -z "$CRM_USER" ] && err "Username cannot be empty"
-  [ -z "$CRM_PASS" ] && err "Password cannot be empty"
-
-  info "Testing credentials against gateway..."
-  local TEST_URL={test_url_expr}
-  local RESPONSE HTTP_CODE BODY
-  RESPONSE=$(curl -s -w "\\n%{{http_code}}" -m 15 \\
-    -H "X-CRM-User: $CRM_USER" -H "X-CRM-Pass: $CRM_PASS" \\
-    "$TEST_URL" 2>&1) || err "Could not reach gateway at $GATEWAY_URL"
-  HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-  BODY=$(echo "$RESPONSE" | head -n -1)
-
-  case "$HTTP_CODE" in
-    200) ok "CRM credentials verified" ;;
-    400) err "Bad request — check gateway URL and entity code" ;;
-    401) err "CRM login failed — check username and password: $BODY" ;;
-    429) err "Gateway rate limited — wait 15 minutes and try again" ;;
-    *)   err "Gateway error (HTTP $HTTP_CODE): $BODY" ;;
-  esac
-
-  mkdir -p "$CREDS_DIR"; chmod 700 "$CREDS_DIR"
-  # Write credentials via Python to avoid shell quoting issues with special chars.
-  CRM_USER="$CRM_USER" CRM_PASS="$CRM_PASS" python3 -c "
-import json, os, sys
-path = os.path.join(os.path.expanduser('~'), '.suitecrm-mcp', sys.argv[1] + '.json')
-with open(path, 'w') as fh:
-    json.dump({{'user': os.environ['CRM_USER'], 'pass': os.environ['CRM_PASS']}}, fh, indent=2)
-os.chmod(path, 0o600)
-" "$CODE"
-  unset CRM_USER CRM_PASS
-  ok "Credentials saved to ~/.suitecrm-mcp/$CODE.json"; echo
-  warn "Restart OpenClaw to apply: sudo systemctl restart openclaw-$(whoami)"; echo
-}}
-
-remove_entity() {{
-  local CODE="$1" CREDS="$CREDS_DIR/$CODE.json"
-  if [ -f "$CREDS" ]; then
-    rm -f "$CREDS"; ok "Removed credentials for $CODE"
-  else
-    warn "No credentials found for $CODE"
-  fi
-}}
-
-CODE="${{1:-}}" SUBCMD="${{2:-}}"
-case "$CODE" in
-  ""|--status) show_status ;;
-  --help|-h)
-    echo "Usage: suitecrm-setup [code] [--remove]"
-    echo "Valid codes: {valid_codes}"
-    ;;
-  *) [ "$SUBCMD" = "--remove" ] && remove_entity "$CODE" || setup_entity "$CODE" ;;
-esac
-"""
-    write_file(SETUP_SCRIPT, script, mode="755")
-    ok(f"suitecrm-setup installed: {SETUP_SCRIPT}")
-
-
 def remove_for_user(username, entities):
     home         = f"/home/{username}"
     openclaw_dir = f"{home}/.openclaw"
-    creds_dir    = f"{home}/.suitecrm-mcp"
+    token_dir    = f"{home}/.suitecrm-mcp"
 
     info(f"Removing bridge from {username}...")
     for code in entities:
@@ -812,10 +720,12 @@ def remove_for_user(username, entities):
         if os.path.isdir(bridge_dir):
             shutil.rmtree(bridge_dir)
             ok(f"  Removed plugin: suitecrm-{code}")
-        creds = f"{creds_dir}/{code}.json"
-        if os.path.exists(creds):
-            os.remove(creds)
-            ok(f"  Removed credentials: {code}.json")
+
+    # Only remove the token file if all entities are being removed
+    token_file = f"{token_dir}/gateway.token"
+    if os.path.exists(token_file):
+        os.remove(token_file)
+        ok(f"  Removed gateway token")
 
     config_path = f"{openclaw_dir}/openclaw.json"
     if os.path.exists(config_path):
@@ -858,13 +768,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--gateway",  required=True,
-                        help="Gateway base URL, e.g. http://GATEWAY_HOST:8080 (no path)")
+                        help="Gateway base URL, e.g. https://mcp.yourcompany.com (no path)")
     parser.add_argument("--entities", metavar="FILE",
                         help="Path to entities.json (multi-entity mode)")
     parser.add_argument("--code",     help="Entity code for single-entity mode")
     parser.add_argument("--label",    help="Entity label for single-entity mode (default: code)")
     parser.add_argument("--update",   action="store_true",
-                        help="Reinstall bridge plugins without wiping credentials")
+                        help="Reinstall bridge plugins without wiping the saved token")
     parser.add_argument("--attach",
                         help="Attach bridge to 'all' agents or a comma-separated list of agent ids/names")
     parser.add_argument("--remove",   nargs="+", metavar="USER",
@@ -928,10 +838,6 @@ def main():
             info(f"Attach   : {username} -> plugin only")
     print()
 
-    info("Installing suitecrm-setup CLI...")
-    install_setup_script(entities, gateway_url, is_multi)
-    print()
-
     for username in users:
         info("=" * 50)
         info(f"Installing for: {username}")
@@ -944,12 +850,15 @@ def main():
     ok("INSTALL COMPLETE")
     info("=" * 60)
     print()
-    info("Next — configure credentials for each user:")
-    for code in entities:
-        print(f"  suitecrm-setup {code}")
+    info("Next steps:")
+    print(f"  1. Restart OpenClaw for each user:")
+    print(f"     sudo systemctl restart openclaw-USERNAME")
     print()
-    info("Then restart OpenClaw:")
-    print("  sudo systemctl restart openclaw-USERNAME")
+    print(f"  2. Each user authenticates once by visiting:")
+    print(f"     {gateway_url}/auth/login")
+    print()
+    print(f"  The bridge polls the gateway automatically and connects")
+    print(f"  as soon as the user completes login -- no CLI needed.")
     print()
 
 

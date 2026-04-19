@@ -1,79 +1,77 @@
 # Connecting OpenClaw
 
-OpenClaw uses a two-machine architecture: a remote gateway and a local bridge.
+OpenClaw uses a two-machine architecture: a remote gateway and a local bridge plugin.
 
 ```
 [OpenClaw Machine]                    [Gateway Machine]
   OpenClaw runtime
-    suitecrm-{code} plugin  --SSE-->  suitecrm-mcp gateway
-    reads ~/.suitecrm-mcp/                 talks to SuiteCRM REST API
+    suitecrm-{code} plugin  --SSE-->  suitecrm-mcp gateway  -->  SuiteCRM REST API
+    ~/.suitecrm-mcp/
+      gateway.token  (API key, auto-saved after login)
 ```
 
-The bridge is a Node.js plugin that OpenClaw loads. It connects to the remote
-gateway on first tool use and proxies all 13 SuiteCRM tools through.
+The bridge is a Node.js plugin that OpenClaw loads. It handles authentication
+automatically: if no token is found, it prints the auth URL and polls the gateway
+in the background. Once the user logs in via a browser, the token is saved and
+the connection completes - no CLI needed on the OpenClaw machine.
 
 ## Prerequisites
 
-- A dedicated Ubuntu VM or server for the gateway (can be the same machine as SuiteCRM)
+- A dedicated Ubuntu VM or server for the gateway
 - OpenClaw installed on the client machine (Node.js required)
-- A SuiteCRM user with API access enabled
+- Access to the gateway auth URL in a browser
 
 ---
 
 ## Step 1 - Install the gateway (gateway machine)
 
-**Single entity** (one CRM, direct port access):
+**Single entity** (one CRM):
 
 ```bash
-sudo python3 install.py --url https://crm.example.com --port 3101
+sudo python3 install.py --url https://crm.example.com --domain mcp.example.com --email you@example.com
 ```
 
-**Multi entity** (multiple CRMs, nginx routing):
+**Multi entity** (multiple CRMs):
 
 ```bash
-# 1. Create entities.json
 cp entities.example.json entities.json
-# Edit entities.json with your CRM codes, labels, ports, and endpoints
-
-# 2. Install
-sudo python3 install.py --config entities.json
+# Edit entities.json: add your CRM codes, labels, ports, endpoints, and group names
+sudo python3 install.py --config entities.json --domain mcp.example.com --email you@example.com
 ```
 
-Add `--domain mcp.yourserver.com --email you@example.com` to enable automatic
-HTTPS via Let's Encrypt.
+The installer will prompt for OAuth2/OIDC configuration (Auth0/Azure AD).
+See [docs/auth0-setup.md](auth0-setup.md) for how to create the identity provider app.
 
-Note the gateway URL — you will need it in Step 2:
-- Single: `http://YOUR_GATEWAY_IP:3101`
-- Multi: `http://YOUR_GATEWAY_IP:8080`
-- With HTTPS: `https://mcp.yourserver.com`
+Note the gateway URL - you will need it in Step 2:
+- With domain: `https://mcp.example.com`
 
-**The gateway URL must be a bare origin — no path component.** The bridge constructs
-its own paths (`/sse`, `/{code}/sse`, `/test`). If your gateway is behind a
-subdirectory proxy (e.g. `https://myserver.com/suitecrm-mcp/`), that setup is not
-supported — the gateway must be at the root of the host or a dedicated subdomain.
+**HTTPS is strongly recommended.** The `--domain` flag enables automatic TLS via
+Let's Encrypt. Without it, API keys travel unencrypted.
 
 ---
 
 ## Step 2 - Install the bridge (OpenClaw machine)
 
+Copy `install-bridge.py` from the gateway machine to the OpenClaw machine, then run:
+
 **Single entity:**
 
 ```bash
 sudo python3 install-bridge.py \
-  --gateway http://YOUR_GATEWAY_IP:3101 \
+  --gateway https://mcp.example.com \
   --code mycrm \
   --label "My CRM"
 ```
 
-**Multi entity** (uses the same entities.json format):
+**Multi entity** (same `entities.json` format):
 
 ```bash
 sudo python3 install-bridge.py \
-  --gateway http://YOUR_GATEWAY_IP:8080 \
+  --gateway https://mcp.example.com \
   --entities entities.json
 ```
 
-To install for specific users only (default is all users in /home):
+To install for specific users only (default is all users with `~/.openclaw/openclaw.json`):
 
 ```bash
 sudo python3 install-bridge.py --gateway ... --entities entities.json alice bob
@@ -81,41 +79,47 @@ sudo python3 install-bridge.py --gateway ... --entities entities.json alice bob
 
 **Agent scoping (optional):**
 
-By default the bridge registers the plugin but does not restrict which agents can call SuiteCRM tools. Use `--attach` to scope tool access to specific agents:
-
 ```bash
 # All agents in OpenClaw get access
 sudo python3 install-bridge.py --gateway ... --code mycrm --attach all
 
-# Only specific agents get access (comma-separated names or IDs)
+# Only specific agents (comma-separated names or IDs)
 sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Support Agent"
 ```
 
-Without `--attach`, the plugin loads and credentials work - but agent-level `tools.allow` lists are not modified. If your OpenClaw agents already have restrictive `tools.allow` lists, use `--attach` to add the SuiteCRM tools to the right ones.
-
 ---
 
-## Step 3 - Configure credentials (per user, on OpenClaw machine)
-
-Run as the OpenClaw user (not root):
-
-```bash
-suitecrm-setup          # show status for all entities
-suitecrm-setup mycrm    # configure credentials for entity "mycrm"
-```
-
-The setup script will:
-1. Prompt for CRM username and password
-2. Test the credentials against the gateway `/test` endpoint
-3. Save to `~/.suitecrm-mcp/mycrm.json` (mode 600)
-
----
-
-## Step 4 - Restart OpenClaw
+## Step 3 - Restart OpenClaw
 
 ```bash
 sudo systemctl restart openclaw-USERNAME
 ```
+
+---
+
+## Step 4 - Authenticate (per user, on OpenClaw machine)
+
+Each user authenticates once:
+
+1. **OpenClaw starts** - the bridge plugin detects no token and prints to its log:
+   ```
+   [SuiteCRM mycrm] No token found.
+   [SuiteCRM mycrm] Authenticate at: https://mcp.example.com/auth/login
+   ```
+
+2. **User opens the URL** in any browser and logs in with their corporate account
+
+3. **Bridge picks up the token automatically** (polling every 3 seconds) and connects:
+   ```
+   [SuiteCRM mycrm] Token received.
+   [SuiteCRM mycrm] Connected to gateway
+   ```
+
+4. **Token is saved** to `~/.suitecrm-mcp/gateway.token` - future OpenClaw restarts
+   connect immediately without prompting
+
+No CLI setup script, no manual credential entry. The browser login is the only
+user action required.
 
 ---
 
@@ -132,31 +136,23 @@ Test prompt: `"List the first 5 accounts in the CRM"` - OpenClaw should call
 
 ---
 
-## Managing credentials
+## Re-authenticating
 
-```bash
-# Check status of all entities
-suitecrm-setup
+If the token expires (default 90 days) or is revoked by an admin:
 
-# Reconfigure credentials for one entity
-suitecrm-setup mycrm
-
-# Remove credentials for one entity
-suitecrm-setup mycrm --remove
-```
-
-Credentials live in `~/.suitecrm-mcp/` and are never sent to the gateway
-machine — authentication happens per-connection via HTTP headers.
+1. The bridge logs: `[SuiteCRM mycrm] Token rejected (HTTP 401) -- clearing token, re-auth required`
+2. It immediately restarts polling and prints the auth URL again
+3. The user visits the URL and logs in - no restart needed
 
 ---
 
 ## Updating the bridge
 
-To reinstall bridge plugins without wiping credentials (e.g. after a gateway upgrade):
+To reinstall bridge plugins without wiping the saved token (e.g. after a gateway upgrade):
 
 ```bash
 sudo python3 install-bridge.py --update \
-  --gateway http://YOUR_GATEWAY_IP:8080 \
+  --gateway https://mcp.example.com \
   --entities entities.json
 ```
 
@@ -167,11 +163,11 @@ sudo python3 install-bridge.py --update \
 ```bash
 sudo python3 install-bridge.py \
   --remove alice bob \
-  --gateway http://YOUR_GATEWAY_IP:8080 \
+  --gateway https://mcp.example.com \
   --entities entities.json
 ```
 
-This removes the OpenClaw plugins and credentials for the listed users and
+This removes the OpenClaw plugins and the saved token for the listed users and
 deregisters them from `openclaw.json`.
 
 ---
@@ -180,9 +176,11 @@ deregisters them from `openclaw.json`.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Tools not visible in OpenClaw | Credentials not configured | Run `suitecrm-setup <code>` |
-| `Auth rejected (HTTP 401)` in logs | Wrong CRM credentials | Re-run `suitecrm-setup <code>` |
+| Auth URL never appears in logs | Bridge plugin not loaded | Check `openclaw.json` plugins section; re-run installer |
+| Auth polling times out after 15 min | User did not complete login | Re-visit the auth URL and log in |
+| `Token rejected (HTTP 401)` in logs | Token expired or revoked | Bridge restarts auth automatically - user visits URL again |
+| `HTTP 403 Forbidden` | User not in required group for entity | Admin checks group membership in identity provider |
 | `Rate limited (HTTP 429)` in logs | Too many reconnects | Wait 15 min; backoff is automatic |
-| `Gateway connect failed` | Wrong gateway URL or gateway down | Check `--gateway` URL; `systemctl status suitecrm-mcp` on gateway |
+| `Gateway connect failed` | Wrong gateway URL or gateway down | Check `--gateway` URL; `systemctl status suitecrm-mcp-*` on gateway |
 | `OpenClaw not installed for user` | No `~/.openclaw` directory | Install OpenClaw first |
 | TLS error | Self-signed cert on CRM | Add `--tls-skip` during gateway install |

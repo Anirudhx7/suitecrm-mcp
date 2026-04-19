@@ -1,31 +1,35 @@
 # Connecting Claude Code (CLI)
 
-Claude Code connects directly to the gateway via SSE. No bridge needed.
+Claude Code connects directly to the gateway via SSE using a gateway-issued API key.
+No CRM credentials are stored on your machine.
+
+## How authentication works
+
+1. Visit the gateway URL in your browser and log in with your corporate account
+2. The success page shows your personal API key
+3. Run the `claude mcp add` command shown on the success page - or paste the key into the command below
 
 ## Prerequisites
 
-- Gateway installed and running (see [Quick Start](../README.md#quick-start---single-crm))
+- Gateway v3.0+ installed and running (see [setup guide](setup-guide.md))
 - Claude Code CLI installed (`npm install -g @anthropic-ai/claude-code`)
-- A SuiteCRM user with API access enabled
+- Your API key from `https://YOUR_GATEWAY/auth/login`
+
+## Get your API key
+
+1. Visit `https://YOUR_GATEWAY/auth/login` (or just `https://YOUR_GATEWAY` - it redirects)
+2. Log in with your corporate account
+3. On the success page, expand **Claude Code** and copy the ready-to-run command
+
+The success page shows the exact command with your key already embedded.
 
 ## Single entity
 
 ```bash
 claude mcp add suitecrm \
   --transport sse \
-  --header "X-CRM-User:your_crm_username" \
-  --header "X-CRM-Pass:your_crm_password" \
-  http://YOUR_SERVER:3101/sse
-```
-
-With HTTPS (`--domain` was used during install):
-
-```bash
-claude mcp add suitecrm \
-  --transport sse \
-  --header "X-CRM-User:your_crm_username" \
-  --header "X-CRM-Pass:your_crm_password" \
-  https://mcp.yourserver.com/sse
+  --header "Authorization:Bearer smcp_YOUR_API_KEY_HERE" \
+  https://mcp.yourcompany.com/sse
 ```
 
 ## Multi entity
@@ -35,23 +39,16 @@ Run once per entity. Each gets its own MCP server entry:
 ```bash
 claude mcp add suitecrm_crm1 \
   --transport sse \
-  --header "X-CRM-User:your_crm_username" \
-  --header "X-CRM-Pass:your_crm_password" \
-  http://YOUR_SERVER:8080/crm1/sse
+  --header "Authorization:Bearer smcp_YOUR_API_KEY_HERE" \
+  https://mcp.yourcompany.com/crm1/sse
 
 claude mcp add suitecrm_crm2 \
   --transport sse \
-  --header "X-CRM-User:your_crm_username" \
-  --header "X-CRM-Pass:your_crm_password" \
-  http://YOUR_SERVER:8080/crm2/sse
+  --header "Authorization:Bearer smcp_YOUR_API_KEY_HERE" \
+  https://mcp.yourcompany.com/crm2/sse
 ```
 
-## Credential Security
-
-- **Use HTTPS.** Credentials travel as HTTP headers. Without HTTPS they are visible on the network. Use the `--domain` flag during install, or put the gateway behind a TLS-terminating proxy.
-- **Create a dedicated CRM API user.** Do not use your admin account. In SuiteCRM Admin - User Management, create a user (e.g. `claude-api`) and enable API access. Give it only the module permissions your AI assistant actually needs.
-- **Credentials are stored in Claude Code's MCP config.** Run `claude mcp list` to see the entry. Treat this as a secret - do not share the output, and be aware that removing and re-adding the entry is the way to rotate credentials.
-- **Rotate credentials** by removing and re-adding the MCP server entry with updated credentials.
+The same API key works for all entities you have access to.
 
 ## Verify
 
@@ -78,11 +75,27 @@ claude mcp list
 claude mcp remove suitecrm
 ```
 
+## Rotating your API key
+
+If your key is compromised or expired:
+
+```bash
+# Remove the old entry
+claude mcp remove suitecrm
+
+# Re-authenticate at the gateway, then re-add with the new key
+claude mcp add suitecrm \
+  --transport sse \
+  --header "Authorization:Bearer smcp_YOUR_NEW_API_KEY" \
+  https://mcp.yourcompany.com/sse
+```
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `CRM authentication failed` | Wrong credentials or API access not enabled | Enable API access in SuiteCRM Admin > User Management |
-| `Connection refused` | Gateway not running | `systemctl status suitecrm-mcp` |
+| `HTTP 401 Unauthorized` | API key invalid or expired | Re-authenticate at `/auth/login` and re-add the entry |
+| `HTTP 403 Forbidden` | Not in the required group for this entity | Ask your admin to check your group membership |
+| `Connection refused` | Gateway not running | `systemctl status suitecrm-mcp` on the gateway machine |
 | `429 Too Many Requests` | Rate limit hit on /sse (20 req/15 min) | Wait 15 minutes |
 | TLS error with self-signed cert | `NODE_TLS_REJECT_UNAUTHORIZED` not set | Add `--tls-skip` during gateway install |

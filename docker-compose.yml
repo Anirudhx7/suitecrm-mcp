@@ -4,7 +4,7 @@ services:
   # For multi-entity deployments use install.py --config entities.json (systemd) instead.
   # This service is kept for single-CRM / dev use.
   suitecrm-mcp:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v2.1.0
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v3.0.0
     ports:
       - "3101:3101"    # MCP SSE gateway
     environment:
@@ -13,6 +13,14 @@ services:
       PORT: "3101"
       METRICS_PORT: "9090"
       METRICS_BIND: "0.0.0.0"   # allow Prometheus container to reach metrics
+      # OAuth2/OIDC - required for v3.0 auth
+      OAUTH_ISSUER: https://your-tenant.auth0.com
+      OAUTH_CLIENT_ID: your-client-id
+      OAUTH_CLIENT_SECRET: your-client-secret
+      OAUTH_AUDIENCE: https://your-tenant.auth0.com/api/v2/
+      OAUTH_REDIRECT_URI: https://mcp.yourcompany.com/auth/callback
+      GATEWAY_EXTERNAL_URL: https://mcp.yourcompany.com
+      API_KEY_SECRET: change-me-generate-with-node-crypto-randomBytes-32
       # NODE_TLS_REJECT_UNAUTHORIZED: "0"  # only for self-signed certs
     restart: unless-stopped
 

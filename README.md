@@ -7,10 +7,12 @@ Built from a real production deployment. CData's version is commercial. This one
 ## Features
 
 - **13 tools** covering the full CRUD surface: search, get, create, update, delete, count, relationships, module introspection
-- **SSE transport** - compatible with Claude Desktop, Claude Code, and any MCP client that supports HTTP+SSE
-- **Per-connection header auth** - credentials never stored server-side; each connection supplies its own
+- **SSE transport** - compatible with Claude Desktop, Claude Code, OpenClaw, and any MCP client that supports HTTP+SSE
+- **OAuth2/OIDC authentication** - users log in via Auth0, Azure AD, or any OIDC provider; the gateway issues personal, revocable API keys
+- **No credentials on client machines** - MCP clients hold only an opaque API key; CRM passwords live on the gateway
+- **Group-based entity access** - JWT group claims gate which CRM instances each user can reach
 - **Session auto-renewal** - CRM sessions re-authenticate transparently on expiry
-- **Unified installer** - one script handles single CRM (no nginx) or N CRMs behind nginx, both as systemd services
+- **Unified installer** - one script handles single CRM (no nginx) or N CRMs behind nginx, with interactive OAuth setup
 - **Entity-prefixed tools** - run multiple CRM instances side-by-side without name collisions
 
 ## Tools
@@ -43,37 +45,39 @@ Supported modules include: Accounts, Contacts, Leads, Opportunities, Cases, Call
 
 ```mermaid
 flowchart TB
+    IdP["Identity Provider\nAuth0 / Azure AD"]
+
     subgraph Clients["MCP Clients"]
         CD["Claude Desktop"]
         CC["Claude Code"]
         OC["OpenClaw"]
     end
 
-    Clients -->|"HTTPS :443\nX-CRM-User / X-CRM-Pass headers"| NX
+    Clients -->|"HTTPS :443\nAuthorization: Bearer smcp_..."| NX
+    CD & CC -.->|"1. browser login"| IdP
+    IdP -.->|"2. JWT → API key"| NX
 
-    subgraph Server["Your Server"]
-        NX["nginx :443\nTLS termination\nmulti-entity routing"]
+    subgraph Server["Gateway Server"]
+        NX["nginx :443\nTLS termination\nmulti-entity routing\n/auth/ routing"]
 
         NX -->|"/crm1/"| N1["Node.js :3101\ntools: suitecrm_crm1_*"]
         NX -->|"/crm2/"| N2["Node.js :3102\ntools: suitecrm_crm2_*"]
-        NX -->|"/crm3/"| N3["Node.js :3103\ntools: suitecrm_crm3_*"]
+        NX -->|"/auth/"| N1
     end
 
     N1 -->|"v4_1 REST API"| S1[("SuiteCRM A")]
     N2 -->|"v4_1 REST API"| S2[("SuiteCRM B")]
-    N3 -->|"v4_1 REST API"| S3[("SuiteCRM C")]
 ```
 
-**Single-entity** (direct port, no nginx):
+**Single-entity** (direct port or with `--domain`):
 
 ```mermaid
 flowchart LR
-    MC["MCP Client\nClaude / OpenClaw"] -->|"SSE :3101\nX-CRM-User / X-CRM-Pass"| N["Node.js :3101\ntools: suitecrm_*"] -->|"v4_1 REST API"| CRM[("SuiteCRM")]
+    IdP["Identity Provider"] -.->|"JWT → API key"| N
+    MC["MCP Client\nClaude / OpenClaw"] -->|"SSE :443\nBearer token"| N["Node.js :3101\ntools: suitecrm_*"] -->|"v4_1 REST API"| CRM[("SuiteCRM")]
 ```
 
-*With `--domain`: nginx is added in front for automatic HTTPS termination - the client connects on :443 instead of :3101.*
-
-Each Node.js process is a standalone systemd service. Credentials are never stored - each SSE connection authenticates independently and gets its own CRM session, which auto-renews on expiry and is cleaned up on disconnect.
+Each Node.js process is a standalone systemd service. Users authenticate once via their identity provider; the gateway stores per-user CRM credentials in `/etc/suitecrm-mcp/user-profiles.json` and uses them for all subsequent tool calls. CRM sessions auto-renew on expiry and are cleaned up on disconnect.
 
 ---
 
@@ -105,90 +109,61 @@ For production: create a dedicated API user with only the module permissions you
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v2.1.0` instead of floating on `latest`.
+For production, pin to a release tag such as `v3.0.0` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v2.1.0/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v3.0.0/docker-compose.yml
 ```
 
-Edit `docker-compose.yml` and set `SUITECRM_ENDPOINT` to your CRM's REST API URL, then:
+Edit `docker-compose.yml` and fill in `SUITECRM_ENDPOINT`, all `OAUTH_*` vars, and `API_KEY_SECRET`, then:
 
 ```bash
 docker compose up -d
 ```
 
-The gateway runs at `http://localhost:3101/sse`. Docker pulls the image automatically - no clone needed.
+The gateway runs at `http://localhost:3101`. Visit `/auth/login` to authenticate and get an API key.
 
 To update to a newer pinned release, change the image tag in `docker-compose.yml` and redeploy:
 ```bash
 docker compose pull && docker compose up -d
 ```
 
-If you prefer a floating channel for labs or internal testing, change the image tag to `latest`.
+For self-signed CRM certificates, add `NODE_TLS_REJECT_UNAUTHORIZED: "0"` to the environment block. For HTTPS termination (required for OAuth in production), put a reverse proxy (nginx, Caddy) in front.
 
-For self-signed CRM certificates, add `NODE_TLS_REJECT_UNAUTHORIZED: "0"` to the environment block. For HTTPS termination, put a reverse proxy (nginx, Caddy) in front.
-
-**Test it:**
+**Test gateway health:**
 ```bash
-curl -s -H "X-CRM-User: admin" -H "X-CRM-Pass: yourpassword" \
-  http://localhost:3101/test
-# Expected: {"success":true,"crm_user":"admin","prefix":"suitecrm"}
+curl http://localhost:3101/health
 ```
 
 ---
 
 ## Quick Start - Single CRM
 
-For one CRM, no nginx. Connects directly to the port.
+For one CRM with automatic HTTPS and OAuth login.
 
-**Requirements:** Ubuntu/Debian, Python 3.8+, root access
+**Requirements:** Ubuntu/Debian, Python 3.8+, root access, a domain pointing to this server, OAuth app credentials (see [docs/auth0-setup.md](docs/auth0-setup.md))
 
 ```bash
 git clone https://github.com/anirudhx7/suitecrm-mcp.git
 cd suitecrm-mcp
-sudo python3 install.py --url https://your-crm.example.com --port 3101 --label "My CRM"
-```
-
-The installer auto-detects the REST API path. If your CRM is on a non-standard path, pass the full `rest.php` URL directly:
-
-```bash
-sudo python3 install.py --url https://your-crm.example.com/legacy/service/v4_1/rest.php
-```
-
-After install, the gateway runs at `http://YOUR_SERVER:3101/sse`.
-
-**Enable HTTPS (recommended for production):**
-
-Add `--domain` and `--email`. The installer sets up nginx as a TLS-terminating reverse proxy and obtains a Let's Encrypt certificate automatically.
-
-```bash
 sudo python3 install.py \
   --url https://your-crm.example.com \
-  --port 3101 \
-  --label "My CRM" \
   --domain mcp.yourserver.com \
   --email you@example.com
 ```
 
-Requirements: the domain must already point to this server's public IP, and ports 80 and 443 must be open. The certificate renews automatically via the certbot systemd timer.
+The installer will prompt for OAuth configuration (issuer, client ID/secret, audience, gateway URL), then set up nginx, certbot, and systemd automatically.
 
-After HTTPS install, the gateway runs at `https://mcp.yourserver.com/sse`.
+After install, users authenticate at `https://mcp.yourserver.com/auth/login` to get their API key.
 
-**Open the port** (if using ufw, HTTP-only installs only):
+**Test gateway health:**
 ```bash
-sudo ufw allow 3101/tcp
-```
-
-**Test credentials before connecting:**
-```bash
-curl -s -H "X-CRM-User: admin" -H "X-CRM-Pass: yourpassword" \
-  http://YOUR_SERVER:3101/test
-# Expected: {"success":true,"crm_user":"admin","prefix":"suitecrm"}
+curl https://mcp.yourserver.com/health
 ```
 
 **Verify it's working in Claude Desktop:**
 
-After adding the MCP server config (see [Connecting to Claude Desktop](#connecting-to-claude-desktop)) and restarting Claude Desktop, click the hammer icon in the bottom-left of the chat window. You should see 13 tools listed: `suitecrm_search`, `suitecrm_get`, etc.
+After adding the MCP server config (see [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md)) and restarting Claude Desktop, click the hammer icon. You should see 13 tools: `suitecrm_search`, `suitecrm_get`, etc.
 
 Try a test prompt: `"List the first 5 accounts in the CRM"` - Claude should call `suitecrm_search` automatically.
 
@@ -400,16 +375,18 @@ journalctl -u suitecrm-mcp -f          # single
 journalctl -u suitecrm-mcp-crm1 -f     # multi
 ```
 
-**Test auth without MCP:**
+**Test gateway health:**
 ```bash
-curl -H "X-CRM-User: admin" -H "X-CRM-Pass: password" \
-  http://YOUR_SERVER:3101/test
+curl https://mcp.yourserver.com/health
 ```
 
 **Common issues:**
-- `CRM login failed` - wrong credentials, or the CRM user doesn't have API access enabled in SuiteCRM
-- `Non-JSON response` - wrong endpoint URL, or the CRM is returning an error page; check the URL ends in `/service/v4_1/rest.php`
-- `ECONNREFUSED` - the service isn't running; check `journalctl -u suitecrm-mcp`
+- `HTTP 401` on SSE - API key invalid or expired; re-authenticate at `/auth/login`
+- `HTTP 403` on SSE - user not in the required group for this entity; check identity provider group membership
+- OAuth callback error - verify `OAUTH_REDIRECT_URI` matches exactly what is registered in your identity provider
+- `CRM login failed` after OAuth - CRM user not found or API access not enabled; check `user-profiles.json`
+- `Non-JSON response` - wrong CRM endpoint URL; check it ends in `/service/v4_1/rest.php`
+- `ECONNREFUSED` - service isn't running; `journalctl -u suitecrm-mcp`
 - SSE connection drops - normal for long idle periods; clients reconnect automatically
 
 ---
@@ -463,12 +440,15 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 
 ## Security Notes
 
-- **HTTPS is required for production.** Credentials travel as HTTP headers, and the SuiteCRM v4_1 REST API requires passwords to be sent as MD5 hashes. MD5 is cryptographically broken - without HTTPS, credentials are trivially interceptable. Use `--domain` to enable Let's Encrypt, or put the gateway behind a reverse proxy with a valid TLS certificate.
-- **Use a dedicated CRM API user.** Do not connect with your admin account. Create a dedicated user in SuiteCRM Admin - User Management with only the module permissions your AI assistant needs. This limits the blast radius if credentials are ever compromised.
-- **Client config files contain plaintext credentials.** `claude_desktop_config.json` and Claude Code's MCP config store credentials as plaintext. Treat these files as secrets - exclude them from version control and unencrypted backups.
-- **Query sanitisation.** The `search` and `count` tools accept a SQL WHERE clause. The gateway blocks destructive SQL keywords (DROP, ALTER, DELETE, etc.) and comment/statement-chaining patterns as a defense-in-depth measure. SuiteCRM's own API layer provides additional protection.
+- **HTTPS is required for production.** OAuth flows and API keys must not travel over plain HTTP. Use `--domain` to enable Let's Encrypt, or put the gateway behind a TLS-terminating proxy.
+- **API keys are personal and revocable.** Each user gets their own key tied to their identity. Admins can revoke a key instantly with `python3 tools/mcp-profile-admin revoke <sub>`. Compromised keys do not expose other users.
+- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque `smcp_...` API key. CRM credentials are stored in `/etc/suitecrm-mcp/user-profiles.json` (mode 600) on the gateway.
+- **Keep `API_KEY_SECRET` and `OAUTH_CLIENT_SECRET` secret.** These are stored in env files (mode 600). Rotating `API_KEY_SECRET` invalidates all issued API keys.
+- **Query sanitisation.** The `search` and `count` tools accept a SQL WHERE clause. The gateway blocks destructive SQL keywords (DROP, ALTER, DELETE, etc.) and comment/statement-chaining patterns. SuiteCRM's own API layer provides additional protection.
 - Env files are written with mode `600` and the env directory with `700`
-- `entities.json` is in `.gitignore` - never commit it
+- `entities.json` and `user-profiles.json` are in `.gitignore` - never commit them
+
+See [SECURITY.md](SECURITY.md) for full details on controls and known limitations.
 
 ---
 
