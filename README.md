@@ -41,43 +41,37 @@ Supported modules include: Accounts, Contacts, Leads, Opportunities, Cases, Call
 
 ## Architecture
 
-**Multi-entity** (N CRMs behind nginx):
-
 ```mermaid
 flowchart TB
-    IdP["Identity Provider\nAuth0 / Azure AD"]
+    IdP["🔐 Auth0 / Azure AD\nIdentity Provider"]
 
     subgraph Clients["MCP Clients"]
-        CD["Claude Desktop"]
-        CC["Claude Code"]
-        OC["OpenClaw"]
+        CD["Claude Desktop"] ~~~ CC["Claude Code"] ~~~ OC["OpenClaw"]
     end
 
-    Clients -->|"HTTPS :443\nAuthorization: Bearer smcp_..."| NX
-    CD & CC -.->|"1. browser login"| IdP
-    IdP -.->|"2. JWT → API key"| NX
+    GW["⚡ suitecrm-mcp gateway\nOAuth2 · API keys · SSE"]
 
-    subgraph Server["Gateway Server"]
-        NX["nginx :443\nTLS termination\nmulti-entity routing\n/auth/ routing"]
-
-        NX -->|"/crm1/"| N1["Node.js :3101\ntools: suitecrm_crm1_*"]
-        NX -->|"/crm2/"| N2["Node.js :3102\ntools: suitecrm_crm2_*"]
-        NX -->|"/auth/"| N1
+    subgraph CRMs["SuiteCRM Instances"]
+        C1[("CRM A")] ~~~ C2[("CRM B")] ~~~ CX[("CRM X")]
     end
 
-    N1 -->|"v4_1 REST API"| S1[("SuiteCRM A")]
-    N2 -->|"v4_1 REST API"| S2[("SuiteCRM B")]
+    IdP -.->|"issues API key on login"| GW
+    Clients -->|"Bearer token"| GW
+    GW -->|"v4_1 REST API"| CRMs
+
+    style GW fill:#2b6cb0,stroke:#63b3ed,stroke-width:2px,color:#fff
+    style IdP fill:#2d3748,stroke:#718096,color:#e2e8f0
+    style CD fill:#2a4a7f,stroke:#63b3ed,stroke-width:1px,color:#ebf8ff
+    style CC fill:#2a4a7f,stroke:#63b3ed,stroke-width:1px,color:#ebf8ff
+    style OC fill:#2a4a7f,stroke:#63b3ed,stroke-width:1px,color:#ebf8ff
+    style C1 fill:#553c9a,stroke:#b794f4,stroke-width:1px,color:#faf5ff
+    style C2 fill:#553c9a,stroke:#b794f4,stroke-width:1px,color:#faf5ff
+    style CX fill:#553c9a,stroke:#b794f4,stroke-width:1px,color:#faf5ff
+    style Clients fill:#0d1b2e,stroke:#4299e1,stroke-width:1px,color:#90cdf4
+    style CRMs fill:#1a0533,stroke:#9f7aea,stroke-width:1px,color:#d6bcfa
 ```
 
-**Single-entity** (direct port or with `--domain`):
-
-```mermaid
-flowchart LR
-    IdP["Identity Provider"] -.->|"JWT → API key"| N
-    MC["MCP Client\nClaude / OpenClaw"] -->|"SSE :443\nBearer token"| N["Node.js :3101\ntools: suitecrm_*"] -->|"v4_1 REST API"| CRM[("SuiteCRM")]
-```
-
-Each Node.js process is a standalone systemd service. Users authenticate once via their identity provider; the gateway stores per-user CRM credentials in `/etc/suitecrm-mcp/user-profiles.json` and uses them for all subsequent tool calls. CRM sessions auto-renew on expiry and are cleaned up on disconnect.
+Users log in once via Auth0 or Azure AD; the gateway issues a personal API key. MCP clients attach it as `Authorization: Bearer <key>` on every request. CRM credentials never leave the gateway. Multiple CRM instances are supported - each gets its own port and tool namespace (`suitecrm_crm1_*`, `suitecrm_crm2_*`).
 
 ---
 
