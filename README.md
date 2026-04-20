@@ -135,6 +135,63 @@ For self-signed CRM certificates, add `NODE_TLS_REJECT_UNAUTHORIZED: "0"` to the
 curl http://localhost:3101/health
 ```
 
+### Multi-entity with Docker
+
+Each container handles exactly one CRM entity. For N entities, add N service blocks to `docker-compose.yml`, each on its own port.
+
+```yaml
+services:
+
+  suitecrm-mcp-crm1:
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v3.0.0
+    ports:
+      - "3101:3101"
+    environment:
+      SUITECRM_ENDPOINT: https://crm1.example.com/service/v4_1/rest.php
+      SUITECRM_PREFIX: suitecrm
+      SUITECRM_CODE: crm1         # entity code - sets tool names to suitecrm_crm1_*
+      PORT: "3101"
+      OAUTH_ISSUER: https://your-tenant.auth0.com
+      OAUTH_CLIENT_ID: your-client-id
+      OAUTH_CLIENT_SECRET: your-client-secret
+      OAUTH_AUDIENCE: https://your-tenant.auth0.com/api/v2/
+      OAUTH_REDIRECT_URI: https://mcp.yourcompany.com/auth/callback
+      GATEWAY_EXTERNAL_URL: https://mcp.yourcompany.com
+      API_KEY_SECRET: same-secret-for-all-entities
+    restart: unless-stopped
+
+  suitecrm-mcp-crm2:
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v3.0.0
+    ports:
+      - "3102:3102"
+    environment:
+      SUITECRM_ENDPOINT: https://crm2.example.com/legacy/service/v4_1/rest.php
+      SUITECRM_PREFIX: suitecrm
+      SUITECRM_CODE: crm2         # entity code - sets tool names to suitecrm_crm2_*
+      PORT: "3102"
+      OAUTH_ISSUER: https://your-tenant.auth0.com
+      OAUTH_CLIENT_ID: your-client-id
+      OAUTH_CLIENT_SECRET: your-client-secret
+      OAUTH_AUDIENCE: https://your-tenant.auth0.com/api/v2/
+      OAUTH_REDIRECT_URI: https://mcp.yourcompany.com/auth/callback
+      GATEWAY_EXTERNAL_URL: https://mcp.yourcompany.com
+      API_KEY_SECRET: same-secret-for-all-entities
+    restart: unless-stopped
+```
+
+What changes per entity:
+- Service name (`suitecrm-mcp-crm1`, `suitecrm-mcp-crm2`, ...)
+- `SUITECRM_ENDPOINT` - the REST API URL for that specific CRM (the path after the domain varies by SuiteCRM installation)
+- `SUITECRM_CODE` - short identifier used in tool names and URL routing (e.g. `crm1` gives tools named `suitecrm_crm1_search`, `suitecrm_crm1_get`, etc.)
+- `PORT` and the host port mapping - each entity needs its own port (3101, 3102, ...)
+
+What stays the same across all entities:
+- `API_KEY_SECRET` - must be identical so that API keys issued by any entity are valid on all
+- All `OAUTH_*` vars - one OAuth app handles all entities
+- `GATEWAY_EXTERNAL_URL` and `OAUTH_REDIRECT_URI`
+
+Put a reverse proxy (nginx, Caddy) in front to route `/crm1/` to port 3101, `/crm2/` to port 3102, and `/auth/` to any one instance. For production use with multiple CRMs, `install.py --config entities.json` handles all of this automatically on a Linux host.
+
 ---
 
 ## Quick Start - Single CRM

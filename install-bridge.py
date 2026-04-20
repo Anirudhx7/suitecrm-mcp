@@ -325,7 +325,10 @@ def resolve_agent_selection(username, config, attach_spec):
 
 def _make_bridge_js(code, label, gateway_url, is_multi):
     """Generate the OpenClaw plugin JS for one entity (v3.0 OAuth token auth)."""
-    tool_names = json.dumps([f"suitecrm_{code}_{s}" for s in TOOL_SUFFIXES])
+    tool_names = json.dumps(
+        [f"suitecrm_{code}_{s}" for s in TOOL_SUFFIXES] if is_multi
+        else [f"suitecrm_{s}" for s in TOOL_SUFFIXES]
+    )
     sse_url  = f"{gateway_url}/{code}/sse" if is_multi else f"{gateway_url}/sse"
     auth_url = f"{gateway_url}/auth/login"
 
@@ -408,8 +411,8 @@ function pollForToken() {{
         const resp = await fetch(STATUS_URL, {{ signal: AbortSignal.timeout(10_000) }});
         if (resp.ok) {{
           const data = await resp.json();
-          if (data.token) {{
-            saveToken(data.token);
+          if (data.api_key) {{
+            saveToken(data.api_key);
             process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received.\\n`);
             authTokenPromise = null;
             return resolve(true);
