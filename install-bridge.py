@@ -79,8 +79,10 @@ def validate_gateway_url(url):
 def suitecrm_plugin_ids(entities):
     return [f"suitecrm-{code}" for code in entities]
 
-def suitecrm_tool_names(entities):
-    return [f"suitecrm_{code}_{suffix}" for code in entities for suffix in TOOL_SUFFIXES]
+def suitecrm_tool_names(entities, is_multi):
+    if is_multi:
+        return [f"suitecrm_{code}_{suffix}" for code in entities for suffix in TOOL_SUFFIXES]
+    return [f"suitecrm_{suffix}" for suffix in TOOL_SUFFIXES]
 
 def normalize_token(value):
     return value.strip().lower()
@@ -623,7 +625,7 @@ def _remove_values(values, removals):
     return [item for item in values if item not in removal_set]
 
 
-def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection):
+def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection, is_multi):
     config_path = f"{openclaw_dir}/openclaw.json"
     if not os.path.exists(config_path):
         warn(f"  openclaw.json not found for {username} -- skipping config patch")
@@ -636,7 +638,7 @@ def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection):
         return
 
     plugin_ids = suitecrm_plugin_ids(entities)
-    tool_names = suitecrm_tool_names(entities)
+    tool_names = suitecrm_tool_names(entities, is_multi)
 
     plugins = config.setdefault("plugins", {})
     plugin_allow = plugins.setdefault("allow", [])
@@ -708,11 +710,11 @@ def install_for_user(username, entities, gateway_url, is_multi, agent_selection)
     for code, label in entities.items():
         _install_bridge_plugin(username, openclaw_dir, code, label, gateway_url, is_multi)
 
-    _patch_openclaw_config(username, openclaw_dir, entities, agent_selection)
+    _patch_openclaw_config(username, openclaw_dir, entities, agent_selection, is_multi)
     ok(f"Bridge installed for {username}")
 
 
-def remove_for_user(username, entities):
+def remove_for_user(username, entities, is_multi):
     home         = f"/home/{username}"
     openclaw_dir = f"{home}/.openclaw"
     token_dir    = f"{home}/.suitecrm-mcp"
@@ -735,7 +737,7 @@ def remove_for_user(username, entities):
         try:
             with open(config_path) as f: config = json.load(f)
             plugin_ids = suitecrm_plugin_ids(entities)
-            tool_names = suitecrm_tool_names(entities)
+            tool_names = suitecrm_tool_names(entities, is_multi)
             plugins = config.get("plugins", {})
             allow   = plugins.get("allow", [])
             entries = plugins.get("entries", {})
@@ -799,7 +801,7 @@ def main():
         if input("  Type 'yes' to confirm: ").strip().lower() != "yes":
             info("Aborted."); sys.exit(0)
         for username in args.remove:
-            remove_for_user(username, entities)
+            remove_for_user(username, entities, is_multi)
         print(); ok("Done."); sys.exit(0)
 
     print()

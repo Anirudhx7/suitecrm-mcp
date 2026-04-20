@@ -63,15 +63,21 @@ def save(path, data):
 
 
 def key_status(profile):
-    key = profile.get("apiKey", "")
-    exp = profile.get("apiKeyExpiry", 0)
+    key = profile.get("api_key", "")
+    issued_at = profile.get("api_key_issued_at", "")
     if not key:
         return f"{RED}no key{NC}"
-    now = time.time()
-    if exp and exp < now:
-        return f"{YELLOW}expired{NC}"
-    days = int((exp - now) / 86400) if exp else 0
-    return f"{GREEN}valid ({days}d){NC}"
+    if not issued_at:
+        return f"{GREEN}valid{NC}"
+    try:
+        issued_ts = datetime.fromisoformat(issued_at.replace('Z', '+00:00')).timestamp()
+        expiry_ts = issued_ts + 90 * 86400  # server default API_KEY_TTL_DAYS=90
+        now = time.time()
+        if expiry_ts < now:
+            return f"{YELLOW}expired{NC}"
+        return f"{GREEN}valid ({int((expiry_ts - now) / 86400)}d){NC}"
+    except Exception:
+        return f"{GREEN}valid{NC}"
 
 
 def fmt_time(ts):
@@ -88,7 +94,7 @@ def cmd_list(args, data):
     print("-" * 100)
     for sub, p in data.items():
         email = p.get("email", "")
-        luser = p.get("linuxUser", "")
+        luser = p.get("linux_user", "")
         status = key_status(p)
         print(f"{sub:<36}  {email:<32}  {luser:<20}  {status}")
     print()
@@ -98,14 +104,13 @@ def cmd_show(args, data):
     p = data.get(args.sub) or fail(f"User not found: {args.sub}")
     d = deepcopy(p)
     # redact sensitive fields for display
-    if "apiKey" in d:
-        d["apiKey"] = d["apiKey"][:12] + "..." + d["apiKey"][-4:]
-    if "crmCredentials" in d:
-        for code, cred in d["crmCredentials"].items():
-            if "password" in cred:
-                cred["password"] = "***"
-    d["_apiKeyExpiry_fmt"] = fmt_time(d.get("apiKeyExpiry"))
-    d["_lastAuth_fmt"]     = fmt_time(d.get("lastAuth"))
+    if "api_key" in d:
+        d["api_key"] = d["api_key"][:12] + "..." + d["api_key"][-4:]
+    if "entities" in d:
+        for code, cred in d["entities"].items():
+            if isinstance(cred, dict) and "pass" in cred:
+                cred["pass"] = "***"
+    d["_api_key_issued_at_fmt"] = d.get("api_key_issued_at", "never")
     print(json.dumps(d, indent=2))
 
 
@@ -116,8 +121,8 @@ def cmd_revoke(args, data, path):
         if confirm != "y":
             info("Aborted.")
             return
-    p.pop("apiKey", None)
-    p.pop("apiKeyExpiry", None)
+    p.pop("api_key", None)
+    p.pop("api_key_issued_at", None)
     save(path, data)
     ok(f"API key revoked for {p.get('email', args.sub)}. User must re-authenticate.")
 
@@ -130,9 +135,9 @@ def cmd_revoke_all(args, data, path):
             return
     count = 0
     for p in data.values():
-        if "apiKey" in p:
-            p.pop("apiKey", None)
-            p.pop("apiKeyExpiry", None)
+        if "api_key" in p:
+            p.pop("api_key", None)
+            p.pop("api_key_issued_at", None)
             count += 1
     save(path, data)
     ok(f"Revoked {count} API key(s). All users must re-authenticate.")
@@ -140,16 +145,16 @@ def cmd_revoke_all(args, data, path):
 
 def cmd_add_cred(args, data, path):
     p = data.get(args.sub) or fail(f"User not found: {args.sub}")
-    if "crmCredentials" not in p:
-        p["crmCredentials"] = {}
-    p["crmCredentials"][args.code] = {"username": args.user, "password": args.password}
+    if "entities" not in p:
+        p["entities"] = {}
+    p["entities"][args.code] = {"user": args.user, "pass": args.password}
     save(path, data)
     ok(f"CRM credential set for {p.get('email', args.sub)} / entity {args.code}")
 
 
 def cmd_rm_cred(args, data, path):
     p = data.get(args.sub) or fail(f"User not found: {args.sub}")
-    creds = p.get("crmCredentials", {})
+    creds = p.get("entities", {})
     if args.code not in creds:
         warn(f"No credential found for entity {args.code}")
         return
@@ -160,7 +165,7 @@ def cmd_rm_cred(args, data, path):
 
 def cmd_clean(args, data, path):
     before = len(data)
-    clean = {sub: p for sub, p in data.items() if p.get("apiKey")}
+    clean = {sub: p for sub, p in data.items() if p.get("api_key")}
     removed = before - len(clean)
     if removed == 0:
         info("Nothing to clean.")
