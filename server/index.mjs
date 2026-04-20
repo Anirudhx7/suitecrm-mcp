@@ -40,7 +40,7 @@ import { Server }             from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { createHash, randomBytes, createHmac } from 'crypto';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { execFile }  from 'child_process';
 import { promisify } from 'util';
 import express    from 'express';
@@ -177,7 +177,7 @@ const subBySid    = new Map(); // sessionId   -> sub
 const pendingStates = new Map(); // state -> created_at
 
 // Bridge token pickup store
-const pendingTokens = new Map(); // linux_user -> { api_key, entities, created_at }
+const pendingTokens = new Map(); // sub -> { api_key, entities, linux_user, created_at }
 
 // API key index (fast O(1) lookup)
 const apiKeyIndex = new Map(); // api_key -> sub
@@ -721,7 +721,7 @@ function loadProfiles() {
 
 function saveProfiles(profiles) {
   const dir = PROFILES_FILE.split('/').slice(0,-1).join('/');
-  try { require('fs').mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch {}
+  try { mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch {}
   writeFileSync(PROFILES_FILE, JSON.stringify(profiles, null, 2), { mode: 0o600 });
 }
 
