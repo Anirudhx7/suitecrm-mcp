@@ -40,7 +40,7 @@ import { Server }             from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { createHash, randomBytes, createHmac } from 'crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
 import { execFile }  from 'child_process';
 import { promisify } from 'util';
 import express    from 'express';
@@ -727,7 +727,18 @@ function loadProfiles() {
 function saveProfiles(profiles) {
   const dir = PROFILES_FILE.split('/').slice(0,-1).join('/');
   try { mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch {}
-  writeFileSync(PROFILES_FILE, JSON.stringify(profiles, null, 2), { mode: 0o600 });
+  const tmp = PROFILES_FILE + '.tmp';
+  writeFileSync(tmp, JSON.stringify(profiles, null, 2), { mode: 0o600 });
+  renameSync(tmp, PROFILES_FILE);
+}
+
+// Async mutex -- serializes concurrent read-modify-write on profiles
+let _profileLock = Promise.resolve();
+function acquireProfileLock() {
+  let release;
+  const prev = _profileLock;
+  _profileLock = new Promise(resolve => { release = resolve; });
+  return prev.then(() => release);
 }
 
 function buildApiKeyIndex() {
@@ -1076,6 +1087,11 @@ app.get('/auth/callback', authRL, async (req, res) => {
       try { crmHosts = JSON.parse(readFileSync(CRM_HOSTS_FILE, 'utf8')); } catch {}
     }
 
+    // Serialize concurrent OAuth callbacks to prevent profile clobber
+    const releaseProfile = await acquireProfileLock();
+    let apiKey;
+    try {
+
     // Load existing profiles
     const profiles = loadProfiles();
     if (!profiles[sub]) {
@@ -1142,13 +1158,15 @@ app.get('/auth/callback', authRL, async (req, res) => {
     }
 
     // Generate API key
-    const apiKey = generateApiKey();
+    apiKey = generateApiKey();
     profiles[sub].api_key           = apiKey;
     profiles[sub].api_key_issued_at  = new Date().toISOString();
 
     // Save profiles and rebuild index
     saveProfiles(profiles);
     buildApiKeyIndex();
+
+    } finally { releaseProfile(); }
 
     // Store in pending tokens for legacy linux_user bridge polling
     pendingTokens.set(sub, { api_key: apiKey, entities: accessibleEntities, linux_user: linuxUser, created_at: Date.now() });
@@ -1176,44 +1194,6 @@ app.get('/auth/callback', authRL, async (req, res) => {
   }
 });
 
-// GET /auth/status/:linux_user — bridge polling endpoint (one-time token pickup)
-app.get('/auth/status/:linux_user', pollRL, (req, res) => {
-  if (!OAUTH_CONFIGURED) return res.status(501).json({ error: 'OAuth not configured' });
-
-  const { linux_user } = req.params;
-  if (!SAFE_LINUX_USER.test(linux_user)) {
-    return res.status(400).json({ error: 'Invalid username format' });
-  }
-
-  // Scan all pending tokens for ones belonging to this linux_user (tokens are keyed by sub)
-  const matches = [];
-  for (const [sub, tok] of pendingTokens) {
-    if (tok.linux_user === linux_user) matches.push([sub, tok]);
-  }
-
-  if (matches.length === 0) {
-    return res.status(202).json({ status: 'waiting', message: 'Authentication not yet complete' });
-  }
-
-  if (matches.length > 1) {
-    // Two different identities share the same Linux username - cannot safely deliver either token
-    return res.status(409).json({
-      status:  'conflict',
-      message: 'Multiple authenticated identities share this username. Each user must re-authenticate after the other has connected.',
-    });
-  }
-
-  // One-time pickup — delete after returning
-  const [matchedSub, pending] = matches[0];
-  pendingTokens.delete(matchedSub);
-
-  res.json({
-    status:   'ready',
-    api_key:  pending.api_key,
-    entities: pending.entities,
-  });
-});
-
 // POST /auth/bridge/start — bridge requests a nonce-based auth session (lazy auth)
 app.post('/auth/bridge/start', authRL, (req, res) => {
   if (!OAUTH_CONFIGURED) return res.status(501).json({ error: 'OAuth not configured' });
@@ -1223,12 +1203,13 @@ app.post('/auth/bridge/start', authRL, (req, res) => {
     return res.status(400).json({ error: 'Invalid or missing linux_user' });
   }
 
-  const nonce    = randomBytes(32).toString('hex');
-  const loginUrl = `${GATEWAY_EXTERNAL_URL}/auth/login?bridge=${nonce}`;
-  pendingBridgeSessions.set(nonce, { linux_user, created_at: Date.now(), resolved: false });
+  const nonce         = randomBytes(32).toString('hex');
+  const client_secret = randomBytes(32).toString('hex');
+  const loginUrl      = `${GATEWAY_EXTERNAL_URL}/auth/login?bridge=${nonce}`;
+  pendingBridgeSessions.set(nonce, { linux_user, client_secret, created_at: Date.now(), resolved: false });
 
   process.stderr.write(`[${PREFIX}] Bridge auth session started for "${linux_user}" (nonce: ${nonce.slice(0, 8)}...)\n`);
-  res.json({ nonce, login_url: loginUrl, expires_in: 900 });
+  res.json({ nonce, client_secret, login_url: loginUrl, expires_in: 900 });
 });
 
 // GET /auth/bridge/poll/:nonce — bridge polls for auth completion (one-time pickup)
@@ -1244,6 +1225,12 @@ app.get('/auth/bridge/poll/:nonce', pollRL, (req, res) => {
   if (!session) {
     return res.status(404).json({ status: 'expired', message: 'Bridge session not found or expired' });
   }
+
+  const secret = (req.headers['x-bridge-secret'] || '').trim();
+  if (!secret || secret !== session.client_secret) {
+    return res.status(401).json({ error: 'Invalid or missing X-Bridge-Secret header' });
+  }
+
   if (!session.resolved) {
     return res.json({ status: 'pending' });
   }
