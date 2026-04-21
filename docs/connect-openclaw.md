@@ -7,13 +7,16 @@ OpenClaw uses a two-machine architecture: a remote gateway and a local bridge pl
   OpenClaw runtime
     suitecrm-{code} plugin  --SSE-->  suitecrm-mcp gateway  -->  SuiteCRM REST API
     ~/.suitecrm-mcp/
-      gateway.token  (API key, auto-saved after login)
+      gateway.token  (OAuth token, auto-saved after first tool call)
 ```
 
-The bridge is a Node.js plugin that OpenClaw loads. It handles authentication
-automatically: if no token is found, it prints the auth URL and polls the gateway
-in the background. Once the user logs in via a browser, the token is saved and
-the connection completes - no CLI needed on the OpenClaw machine.
+The bridge is a Node.js plugin that OpenClaw loads. It is silent at startup --
+no auth prompt, no polling. Authentication is triggered lazily the first time a
+SuiteCRM tool is actually called. The bridge requests a one-time login URL from
+the gateway, returns it as the tool response (visible in Teams chat or wherever
+the agent is running), and polls in the background. Once the user clicks the link
+and logs in, the token is saved and all subsequent tool calls work silently.
+No CLI needed on the OpenClaw machine.
 
 ## Prerequisites
 
@@ -97,29 +100,42 @@ sudo systemctl restart openclaw-USERNAME
 
 ---
 
-## Step 4 - Authenticate (per user, on OpenClaw machine)
+## Step 4 - Authenticate (per user, triggered on first tool call)
 
-Each user authenticates once:
+Authentication is lazy -- nothing happens at startup. The first time a user asks
+the agent to do something with SuiteCRM, the flow starts automatically:
 
-1. **OpenClaw starts** - the bridge plugin detects no token and prints to its log:
+1. **User invokes a SuiteCRM tool** (e.g. "List my open accounts") -- the bridge
+   detects no token and calls `POST /auth/gateway/start` on the gateway.
+
+2. **Gateway returns a one-time login URL** tied to a short-lived nonce. The bridge
+   returns this URL as the tool response, so it appears directly in Teams chat
+   (or wherever the agent is running):
    ```
-   [SuiteCRM mycrm] No token found.
-   [SuiteCRM mycrm] Authenticate at: https://mcp.example.com/auth/login
+   To connect to SuiteCRM, please authenticate:
+   https://mcp.example.com/auth/login?nonce=abc123
+   This link expires in 15 minutes.
    ```
 
-2. **User opens the URL** in any browser and logs in with their corporate account
+3. **User clicks the link** and logs in with their corporate account (Microsoft,
+   Auth0, or whatever identity provider is configured).
 
-3. **Bridge picks up the token automatically** (polling every 3 seconds) and connects:
+4. **Bridge polls in the background** (`GET /auth/bridge/poll/:nonce` every 3
+   seconds). Once the gateway resolves the nonce session, the bridge receives
+   the token and saves it:
    ```
-   [SuiteCRM mycrm] Token received.
-   [SuiteCRM mycrm] Connected to gateway
+   [SuiteCRM mycrm] Token received -- saving to ~/.suitecrm-mcp/gateway.token
    ```
 
-4. **Token is saved** to `~/.suitecrm-mcp/gateway.token` - future OpenClaw restarts
-   connect immediately without prompting
+5. **Subsequent tool calls work silently.** The token is stored per-Linux-user
+   because the bridge runs as that user and writes only to its own home directory.
+   The gateway never reads or writes user home directories.
 
-No CLI setup script, no manual credential entry. The browser login is the only
-user action required.
+6. **On expiry or revocation**, the bridge receives HTTP 401, clears the saved
+   token, and sends a fresh login URL on the next tool call. No restart needed.
+
+No CLI setup, no manual credential entry. The browser login is the only user
+action required.
 
 ---
 
@@ -140,9 +156,41 @@ Test prompt: `"List the first 5 accounts in the CRM"` - OpenClaw should call
 
 If the token expires (default 90 days) or is revoked by an admin:
 
-1. The bridge logs: `[SuiteCRM mycrm] Token rejected (HTTP 401) -- clearing token, re-auth required`
-2. It immediately restarts polling and prints the auth URL again
-3. The user visits the URL and logs in - no restart needed
+1. The next tool call returns HTTP 401 from the gateway.
+2. The bridge clears `~/.suitecrm-mcp/gateway.token` and logs:
+   `[SuiteCRM mycrm] Token rejected (HTTP 401) -- clearing token`
+3. The bridge calls `POST /auth/gateway/start` and returns a fresh login URL
+   as the tool response -- same flow as first-time auth.
+4. The user clicks the link and logs in. No agent restart needed.
+
+---
+
+## Revoking a user's token (operators)
+
+Two methods are available. Both require admin credentials on the gateway.
+
+**Using mcp-profile-admin (recommended):**
+
+```bash
+mcp-profile-admin revoke <sub>
+```
+
+Where `<sub>` is the user's subject claim from the identity provider (typically
+their user ID or email, depending on IdP configuration). This immediately
+invalidates the token -- the next tool call from that user triggers a fresh
+login prompt.
+
+**Using the REST endpoint directly:**
+
+```bash
+curl -X POST https://mcp.example.com/auth/revoke \
+  -H "X-Admin-Key: your-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{"sub": "user@example.com"}'
+```
+
+Returns `200 OK` on success. The bridge clears its local token on the next
+tool call when it receives HTTP 401 from the gateway.
 
 ---
 
@@ -176,9 +224,11 @@ deregisters them from `openclaw.json`.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Auth URL never appears in logs | Bridge plugin not loaded | Check `openclaw.json` plugins section; re-run installer |
-| Auth polling times out after 15 min | User did not complete login | Re-visit the auth URL and log in |
-| `Token rejected (HTTP 401)` in logs | Token expired or revoked | Bridge restarts auth automatically - user visits URL again |
+| Tool call returns a login URL instead of CRM data | Expected -- first-time auth or token expired | Click the URL and log in; next tool call works normally |
+| Login URL never appears as tool response | Bridge plugin not loaded | Check `openclaw.json` plugins section; re-run installer |
+| Login URL expired before user clicked it | Nonce TTL (15 min) elapsed | Call any SuiteCRM tool again -- a fresh URL is generated |
+| Auth polling times out after 15 min | User did not complete login | Re-invoke any SuiteCRM tool to get a new login URL |
+| `Token rejected (HTTP 401)` in logs | Token expired or revoked | Bridge clears token and sends fresh login URL on next tool call |
 | `HTTP 403 Forbidden` | User not in required group for entity | Admin checks group membership in identity provider |
 | `Rate limited (HTTP 429)` in logs | Too many reconnects | Wait 15 min; backoff is automatic |
 | `Gateway connect failed` | Wrong gateway URL or gateway down | Check `--gateway` URL; `systemctl status suitecrm-mcp-*` on gateway |
