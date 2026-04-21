@@ -106,14 +106,14 @@ Authentication is lazy -- nothing happens at startup. The first time a user asks
 the agent to do something with SuiteCRM, the flow starts automatically:
 
 1. **User invokes a SuiteCRM tool** (e.g. "List my open accounts") -- the bridge
-   detects no token and calls `POST /auth/gateway/start` on the gateway.
+   detects no token and calls `POST /auth/bridge/start` on the gateway.
 
 2. **Gateway returns a one-time login URL** tied to a short-lived nonce. The bridge
    returns this URL as the tool response, so it appears directly in Teams chat
    (or wherever the agent is running):
    ```
    To connect to SuiteCRM, please authenticate:
-   https://mcp.example.com/auth/login?nonce=abc123
+   https://mcp.example.com/auth/login?bridge=abc123
    This link expires in 15 minutes.
    ```
 
@@ -159,7 +159,7 @@ If the token expires (default 90 days) or is revoked by an admin:
 1. The next tool call returns HTTP 401 from the gateway.
 2. The bridge clears `~/.suitecrm-mcp/gateway.token` and logs:
    `[SuiteCRM mycrm] Token rejected (HTTP 401) -- clearing token`
-3. The bridge calls `POST /auth/gateway/start` and returns a fresh login URL
+3. The bridge calls `POST /auth/bridge/start` and returns a fresh login URL
    as the tool response -- same flow as first-time auth.
 4. The user clicks the link and logs in. No agent restart needed.
 

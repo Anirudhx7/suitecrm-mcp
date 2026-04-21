@@ -1,6 +1,6 @@
 # Complete Setup Guide
 
-End-to-end guide for deploying suitecrm-mcp v3.0 from scratch.
+End-to-end guide for deploying suitecrm-mcp v3.1+ from scratch.
 
 ## Overview
 
@@ -177,10 +177,21 @@ Then create `/etc/suitecrm-mcp/crm-hosts.json`:
 }
 ```
 
-And add to each entity's env file (`/etc/suitecrm-mcp/crm1.env`):
+Then point the gateway at that host map from each entity's env file
+(`/etc/suitecrm-mcp/crm1.env`):
 ```
 CRM_HOSTS_FILE=/etc/suitecrm-mcp/crm-hosts.json
-SSH_KEY_PATH=/root/.ssh/id_ed25519
+```
+
+Per-entity SSH settings live in `crm-hosts.json`, for example:
+```json
+{
+  "crm1": {
+    "ssh_host": "crm1.internal",
+    "ssh_user": "ubuntu",
+    "ssh_key": "/etc/suitecrm-mcp/crm-ssh-key"
+  }
+}
 ```
 
 Restart the service: `sudo systemctl restart suitecrm-mcp-crm1`

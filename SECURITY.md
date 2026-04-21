@@ -33,8 +33,10 @@ Please do not disclose security vulnerabilities publicly until they have been ad
   The HMAC binds each key to the `API_KEY_SECRET` so keys cannot be forged without the secret.
 - **Group-based entity access:** A configurable JWT claim (e.g. `roles`, `groups`) is checked
   against a per-entity `REQUIRED_GROUP` value. Users not in the required group receive HTTP 403.
-- **One-time token pickup:** The bridge polling endpoint (`/auth/status/:linux_user`) delivers
-  the API key exactly once and deletes it. Tokens have a 15-minute TTL.
+- **Nonce-bound bridge pickup:** OpenClaw bridges start a session via
+  `POST /auth/bridge/start`, receive a nonce plus bridge secret, and poll
+  `GET /auth/bridge/poll/:nonce`. The poll result is returned exactly once and
+  bridge sessions expire after 15 minutes.
 - **API key expiry:** Keys expire after a configurable number of days (default 90). Expired
   keys receive HTTP 401 and users must re-authenticate.
 - **Admin revocation:** Keys can be revoked instantly via `mcp-profile-admin revoke` or the
@@ -47,8 +49,8 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 - **SQL keyword blocklist:** The `query` and `order_by` parameters in search tools are checked
   against a blocklist of destructive SQL keywords (DROP, ALTER, DELETE, etc.) and
   comment/chaining patterns.
-- **Module and ID validation:** Module names are validated against an allowlist. Record IDs
-  must match strict UUID format (8-4-4-4-12 hex).
+- **Module and ID validation:** Module names must match a strict safe-character regex, and
+  record IDs must match strict UUID format (8-4-4-4-12 hex).
 - **Rate limiting:** `/sse`, `/auth/login`, `/auth/callback`, and `/messages` are rate-limited
   independently.
 - **No CORS header:** `Access-Control-Allow-Origin` is not set. Browser same-origin policy

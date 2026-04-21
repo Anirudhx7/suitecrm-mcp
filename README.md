@@ -341,7 +341,7 @@ Keys become the entity code (nginx path prefix, tool prefix suffix, service name
 
 ```bash
 curl http://YOUR_SERVER:3101/health
-# {"status":"ok","version":"3.1.0","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
+# {"status":"ok","version":"3.1.1","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
 
 curl http://YOUR_SERVER:3101/health/deep
 # {"status":"healthy","checks":{"endpoint":{"status":"ok"},"api":{"status":"ok","latency_ms":142},...}}
