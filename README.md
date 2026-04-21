@@ -255,10 +255,11 @@ sudo ufw allow 8080/tcp
 ```
 
 **5. Test a specific entity:**
+After authenticating at `/auth/login` and getting an API key:
 ```bash
-curl -s -H "X-CRM-User: admin" -H "X-CRM-Pass: yourpassword" \
+curl -s -H "Authorization: Bearer smcp_your_api_key_here" \
   http://YOUR_SERVER:8080/crm1/test
-# Expected: {"success":true,"crm_user":"admin","prefix":"suitecrm_crm1"}
+# Expected: {"success":true,"crm_user":"...","email":"...","entity":"crm1"}
 ```
 
 **6. Connect at:** `http://YOUR_SERVER:8080/<code>/sse` (or `https://your-domain/<code>/sse` if HTTPS is enabled)
@@ -286,13 +287,26 @@ sudo python3 install.py --remove crm2
 | `SUITECRM_ENDPOINT` | Yes | - | Full URL to `/service/v4_1/rest.php` |
 | `SUITECRM_PREFIX` | No | `suitecrm` | Tool name prefix |
 | `PORT` | No | `3101` | Listen port |
+| `BIND_HOST` | No | `127.0.0.1` | Interface to bind the gateway server to |
 | `METRICS_PORT` | No | `9090` | Prometheus metrics port (localhost only) |
 | `SUITECRM_CODE` | No | - | Entity code for multi-entity nginx routing |
 | `CRM_TIMEOUT_MS` | No | `30000` | CRM API request timeout in ms |
 | `CIRCUIT_BREAKER_THRESHOLD` | No | `5` | Consecutive failures before circuit opens |
 | `CIRCUIT_BREAKER_RESET_MS` | No | `60000` | ms before circuit tests recovery |
+| `OAUTH_ISSUER` | Yes (OAuth) | - | OIDC issuer URL |
+| `OAUTH_CLIENT_ID` | Yes (OAuth) | - | OAuth client ID |
+| `OAUTH_CLIENT_SECRET` | Yes (OAuth) | - | OAuth client secret |
+| `OAUTH_AUDIENCE` | Yes (OAuth) | - | OAuth audience / API identifier |
+| `OAUTH_REDIRECT_URI` | Yes (OAuth) | - | OAuth callback URL |
+| `GATEWAY_EXTERNAL_URL` | Yes (OAuth) | - | Public base URL of the gateway |
+| `API_KEY_SECRET` | Yes (OAuth) | - | Secret used to bind gateway-issued API keys |
+| `OAUTH_GROUPS_CLAIM` | No | `{audience}/groups` | JWT claim containing user groups |
+| `API_KEY_TTL_DAYS` | No | `90` | API key lifetime in days |
+| `PROFILES_FILE` | No | `/etc/suitecrm-mcp/user-profiles.json` | User profile storage path |
+| `ENTITIES_CONFIG` | No | `/etc/suitecrm-mcp/entities.json` | Multi-entity config path |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | No | - | Set to `0` only for self-signed certs |
 | `NODE_NO_WARNINGS` | No | - | Set to `1` to suppress Node warnings |
+| `TRUST_PROXY` | No | - | Set to `1` when running behind nginx or another reverse proxy |
 
 ### Multi-entity - entities.json
 
@@ -327,7 +341,7 @@ Keys become the entity code (nginx path prefix, tool prefix suffix, service name
 
 ```bash
 curl http://YOUR_SERVER:3101/health
-# {"status":"ok","version":"2.0.0","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
+# {"status":"ok","version":"3.1.0","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
 
 curl http://YOUR_SERVER:3101/health/deep
 # {"status":"healthy","checks":{"endpoint":{"status":"ok"},"api":{"status":"ok","latency_ms":142},...}}
@@ -349,7 +363,7 @@ curl http://127.0.0.1:9090/metrics | grep suitecrm_mcp
 The `monitoring/` directory contains a ready-to-use Prometheus + Grafana stack. To start it alongside the gateway:
 
 ```bash
-# Set Grafana admin password (optional - defaults to "changeme")
+# Set Grafana admin password (required by docker-compose.yml)
 echo "GRAFANA_PASSWORD=yourpassword" > .env
 
 docker compose up -d
