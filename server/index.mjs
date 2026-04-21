@@ -1171,12 +1171,19 @@ app.get('/auth/callback', authRL, async (req, res) => {
     // Store in pending tokens for legacy linux_user bridge polling
     pendingTokens.set(sub, { api_key: apiKey, entities: accessibleEntities, linux_user: linuxUser, created_at: Date.now() });
 
-    // Resolve nonce-based bridge session if this login came from a bridge/start request
+    // Resolve nonce-based bridge session if this login came from a bridge/start request.
+    // Verify the OAuth-derived linux user matches what the bridge claimed — prevents an attacker
+    // from starting a session for a victim username and collecting the resulting API key.
     if (bridgeNonce && pendingBridgeSessions.has(bridgeNonce)) {
       const session = pendingBridgeSessions.get(bridgeNonce);
-      session.api_key  = apiKey;
-      session.entities = accessibleEntities;
-      session.resolved = true;
+      if (session.linux_user !== linuxUser) {
+        process.stderr.write(`[${PREFIX}] Bridge identity mismatch: claimed "${session.linux_user}", authenticated as "${linuxUser}" — rejecting bridge session\n`);
+        pendingBridgeSessions.delete(bridgeNonce);
+      } else {
+        session.api_key  = apiKey;
+        session.entities = accessibleEntities;
+        session.resolved = true;
+      }
     }
 
     process.stderr.write(`[${PREFIX}] Auth complete: "${email}" (${linuxUser}) entities=[${accessibleEntities.map(e=>e.code).join(',')}]\n`);
@@ -1240,7 +1247,7 @@ app.get('/auth/bridge/poll/:nonce', pollRL, (req, res) => {
 });
 
 // POST /auth/revoke — admin revokes a user's API key by linux_user or sub
-app.post('/auth/revoke', (req, res) => {
+app.post('/auth/revoke', async (req, res) => {
   // Simple shared-secret admin auth
   const adminKey = (req.headers['x-admin-key'] || '').trim();
   const expected = createHmac('sha256', API_KEY_SECRET).update('admin-revoke').digest('hex');
@@ -1249,24 +1256,31 @@ app.post('/auth/revoke', (req, res) => {
   }
 
   const { linux_user, sub, api_key } = req.body || {};
-  const profiles = loadProfiles();
   let revoked = false;
 
-  for (const [s, profile] of Object.entries(profiles)) {
-    if ((linux_user && profile.linux_user === linux_user) ||
-        (sub        && s === sub) ||
-        (api_key    && profile.api_key === api_key)) {
-      apiKeyIndex.delete(profile.api_key);
-      delete profiles[s].api_key;
-      delete profiles[s].api_key_issued_at;
-      revoked = true;
-      process.stderr.write(`[${PREFIX}] API key revoked for "${profile.email || s}"\n`);
-      break;
+  const releaseProfile = await acquireProfileLock();
+  try {
+    const profiles = loadProfiles();
+
+    for (const [s, profile] of Object.entries(profiles)) {
+      if ((linux_user && profile.linux_user === linux_user) ||
+          (sub        && s === sub) ||
+          (api_key    && profile.api_key === api_key)) {
+        apiKeyIndex.delete(profile.api_key);
+        delete profiles[s].api_key;
+        delete profiles[s].api_key_issued_at;
+        revoked = true;
+        process.stderr.write(`[${PREFIX}] API key revoked for "${profile.email || s}"\n`);
+        break;
+      }
     }
+
+    if (!revoked) return res.status(404).json({ error: 'User not found' });
+    saveProfiles(profiles);
+  } finally {
+    releaseProfile();
   }
 
-  if (!revoked) return res.status(404).json({ error: 'User not found' });
-  saveProfiles(profiles);
   res.json({ success: true });
 });
 
