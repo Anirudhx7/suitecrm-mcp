@@ -369,8 +369,9 @@ const BACKOFF_MS = [5_000, 15_000, 30_000, 60_000];
 let backoffIdx  = 0;
 let nextRetryAt = 0;
 
-let token       = null;
-let activeNonce = null; // nonce for in-flight auth session
+let token        = null;
+let activeNonce  = null; // nonce for in-flight auth session
+let clientSecret = null; // secret returned by /auth/bridge/start
 
 function loadToken() {{
   try {{
@@ -409,8 +410,9 @@ async function startAuthSession() {{
       const body = await resp.json().catch(() => ({{}}));
       return {{ ok: false, message: `Could not start SuiteCRM authentication: ${{body.error || resp.status}}` }};
     }}
-    const {{ nonce, login_url }} = await resp.json();
-    activeNonce = nonce;
+    const {{ nonce, login_url, client_secret }} = await resp.json();
+    activeNonce  = nonce;
+    clientSecret = client_secret;
     pollBridgeSession(nonce);
     return {{
       ok: false,
@@ -428,24 +430,30 @@ function pollBridgeSession(nonce) {{
   const tick = async () => {{
     if (activeNonce !== nonce) return;
     if (Date.now() - start > TIMEOUT_MS) {{
-      activeNonce = null;
+      activeNonce  = null;
+      clientSecret = null;
       process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Auth session timed out\\n`);
       return;
     }}
     try {{
-      const resp = await fetch(`${{BRIDGE_POLL_BASE}}${{nonce}}`, {{ signal: AbortSignal.timeout(10_000) }});
+      const resp = await fetch(`${{BRIDGE_POLL_BASE}}${{nonce}}`, {{
+        headers: {{ 'X-Bridge-Secret': clientSecret }},
+        signal: AbortSignal.timeout(10_000),
+      }});
       if (resp.ok) {{
         const data = await resp.json();
         if (data.status === 'ready' && data.api_key) {{
           saveToken(data.api_key);
-          activeNonce = null;
+          activeNonce  = null;
+          clientSecret = null;
           process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received — connecting\\n`);
           backoffIdx = 0; nextRetryAt = 0;
           connect();
           return;
         }}
         if (data.status === 'expired') {{
-          activeNonce = null;
+          activeNonce  = null;
+          clientSecret = null;
           process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Auth session expired\\n`);
           return;
         }}

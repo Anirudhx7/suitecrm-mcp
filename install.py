@@ -380,9 +380,13 @@ def prompt_oauth_config(args, domain=None):
     if not client_secret:
         error("OAuth client secret is required")
 
-    audience = getattr(args, "oauth_audience", None) or _prompt(
-        "OAuth audience (Auth0: your API identifier; Azure AD: client ID; press Enter to skip)", ""
-    ) or ""
+    audience = getattr(args, "oauth_audience", None) or ""
+    while not audience:
+        audience = _prompt(
+            "OAuth audience (Auth0: your API identifier; Azure AD: client ID - required)", ""
+        )
+        if not audience:
+            error("OAuth audience is required")
 
     # Derive gateway URL
     if domain:
@@ -860,7 +864,7 @@ def show_status_single(port=None):
         try:
             with _ur.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
                 d = json.loads(resp.read())
-                print(f"  conns   : {d.get('active_connections', 0)} active")
+                print(f"  conns   : {d.get('connections', 0)} active")
         except Exception:
             print(f"  health  : {YELLOW}unreachable{NC}")
     print()
@@ -905,7 +909,7 @@ def show_status_multi(entities=None):
                 try:
                     with _ur.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
                         d = json.loads(resp.read())
-                        print(f"  conns   : {d.get('active_connections', 0)} active")
+                        print(f"  conns   : {d.get('connections', 0)} active")
                 except Exception:
                     print(f"  health  : {YELLOW}unreachable{NC}")
     print()
