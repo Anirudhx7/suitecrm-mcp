@@ -332,8 +332,6 @@ def _make_bridge_js(code, label, gateway_url, is_multi):
         else [f"suitecrm_{s}" for s in TOOL_SUFFIXES]
     )
     sse_url  = f"{gateway_url}/{code}/sse" if is_multi else f"{gateway_url}/sse"
-    auth_url = f"{gateway_url}/auth/login"
-
     return f"""/**
  * SuiteCRM Bridge Plugin for OpenClaw
  * Entity : {label} ({code})
@@ -341,12 +339,15 @@ def _make_bridge_js(code, label, gateway_url, is_multi):
  *
  * Compatible with suitecrm-mcp gateway v3.0+
  *
- * Auth flow:
- *   1. Reads ~/.suitecrm-mcp/gateway.token for a gateway-issued API key.
- *   2. If no token found, prints the auth URL and polls the gateway until
- *      the user authenticates in their browser (no CLI needed).
- *   3. All gateway requests carry: Authorization: Bearer <token>
- *   4. On 401, clears the saved token and restarts the auth flow.
+ * Auth flow (lazy, nonce-based):
+ *   1. Token is read from ~/.suitecrm-mcp/gateway.token when a tool is called.
+ *   2. If no token, requests a one-time login URL from the gateway and returns
+ *      it as the tool response (visible in Teams chat). Auth is NOT triggered
+ *      at startup or while idle.
+ *   3. User clicks the link and authenticates. Gateway resolves the nonce session.
+ *   4. Bridge polls in the background; once the key arrives it is saved to the
+ *      token file and the SSE connection is established.
+ *   5. On 401 the token is cleared; the next tool call triggers re-auth.
  */
 
 import {{ Client }} from '@modelcontextprotocol/sdk/client/index.js';
@@ -355,21 +356,21 @@ import {{ readFileSync, writeFileSync, unlinkSync, mkdirSync }} from 'fs';
 import {{ homedir, userInfo }} from 'os';
 import {{ join }} from 'path';
 
-const ENTITY_CODE = '{code}';
-const SSE_URL     = '{sse_url}';
-const AUTH_URL    = '{auth_url}';
-const LINUX_USER  = userInfo().username;
-const STATUS_URL  = `{gateway_url}/auth/status/${{LINUX_USER}}`;
-const TOKEN_FILE  = join(homedir(), '.suitecrm-mcp', 'gateway.token');
-const TOKEN_DIR   = join(homedir(), '.suitecrm-mcp');
-const TOOL_NAMES  = {tool_names};
+const ENTITY_CODE      = '{code}';
+const SSE_URL          = '{sse_url}';
+const BRIDGE_START_URL = '{gateway_url}/auth/bridge/start';
+const BRIDGE_POLL_BASE = '{gateway_url}/auth/bridge/poll/';
+const LINUX_USER       = userInfo().username;
+const TOKEN_FILE       = join(homedir(), '.suitecrm-mcp', 'gateway.token');
+const TOKEN_DIR        = join(homedir(), '.suitecrm-mcp');
+const TOOL_NAMES       = {tool_names};
 
 const BACKOFF_MS = [5_000, 15_000, 30_000, 60_000];
 let backoffIdx  = 0;
 let nextRetryAt = 0;
 
-let token            = null;
-let authTokenPromise = null; // in-flight poll promise (shared across callers)
+let token       = null;
+let activeNonce = null; // nonce for in-flight auth session
 
 function loadToken() {{
   try {{
@@ -390,49 +391,69 @@ function clearToken() {{
   try {{ unlinkSync(TOKEN_FILE); }} catch {{}}
 }}
 
-function pollForToken() {{
-  if (authTokenPromise) return authTokenPromise;
-
-  process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] No token found.\\n`);
-  process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Authenticate at: ${{AUTH_URL}}\\n`);
-
-  const INTERVAL_MS = 3_000;
-  const TIMEOUT_MS  = 15 * 60 * 1_000; // 15 min matches gateway pending-token TTL
-  const start       = Date.now();
-
-  authTokenPromise = new Promise(resolve => {{
-    const tick = async () => {{
-      if (Date.now() - start > TIMEOUT_MS) {{
-        process.stderr.write(
-          `[SuiteCRM ${{ENTITY_CODE}}] Auth timed out. Restart OpenClaw and authenticate again.\\n`
-        );
-        authTokenPromise = null;
-        return resolve(false);
-      }}
-      try {{
-        const resp = await fetch(STATUS_URL, {{ signal: AbortSignal.timeout(10_000) }});
-        if (resp.ok) {{
-          const data = await resp.json();
-          if (data.api_key) {{
-            saveToken(data.api_key);
-            process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received.\\n`);
-            authTokenPromise = null;
-            return resolve(true);
-          }}
-        }}
-      }} catch {{}}
-      setTimeout(tick, INTERVAL_MS);
+async function startAuthSession() {{
+  if (activeNonce) {{
+    return {{
+      ok: false,
+      message: 'SuiteCRM sign-in already in progress. Please use the link sent previously, or wait and try again.',
     }};
-    setTimeout(tick, INTERVAL_MS);
-  }});
-
-  return authTokenPromise;
+  }}
+  try {{
+    const resp = await fetch(BRIDGE_START_URL, {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ linux_user: LINUX_USER }}),
+      signal: AbortSignal.timeout(10_000),
+    }});
+    if (!resp.ok) {{
+      const body = await resp.json().catch(() => ({{}}));
+      return {{ ok: false, message: `Could not start SuiteCRM authentication: ${{body.error || resp.status}}` }};
+    }}
+    const {{ nonce, login_url }} = await resp.json();
+    activeNonce = nonce;
+    pollBridgeSession(nonce);
+    return {{
+      ok: false,
+      message: `To use SuiteCRM, please sign in:\\n${{login_url}}\\n\\nThis link expires in 15 minutes. Once signed in, resend your message and it will be processed automatically.`,
+    }};
+  }} catch (err) {{
+    return {{ ok: false, message: `Could not reach SuiteCRM gateway: ${{err.message}}` }};
+  }}
 }}
 
-async function requireToken() {{
-  if (token) return true;
-  if (loadToken()) return true;
-  return pollForToken();
+function pollBridgeSession(nonce) {{
+  const INTERVAL_MS = 3_000;
+  const TIMEOUT_MS  = 15 * 60 * 1_000;
+  const start       = Date.now();
+  const tick = async () => {{
+    if (activeNonce !== nonce) return;
+    if (Date.now() - start > TIMEOUT_MS) {{
+      activeNonce = null;
+      process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Auth session timed out\\n`);
+      return;
+    }}
+    try {{
+      const resp = await fetch(`${{BRIDGE_POLL_BASE}}${{nonce}}`, {{ signal: AbortSignal.timeout(10_000) }});
+      if (resp.ok) {{
+        const data = await resp.json();
+        if (data.status === 'ready' && data.api_key) {{
+          saveToken(data.api_key);
+          activeNonce = null;
+          process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received — connecting\\n`);
+          backoffIdx = 0; nextRetryAt = 0;
+          connect();
+          return;
+        }}
+        if (data.status === 'expired') {{
+          activeNonce = null;
+          process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Auth session expired\\n`);
+          return;
+        }}
+      }}
+    }} catch {{}}
+    setTimeout(tick, INTERVAL_MS);
+  }};
+  setTimeout(tick, INTERVAL_MS);
 }}
 
 export default {{
@@ -476,13 +497,11 @@ export default {{
 
     function connect() {{
       if (connecting) return connecting;
+      if (!token && !loadToken()) return Promise.resolve();
       const wait = nextRetryAt - Date.now();
       if (wait > 0) return new Promise(res => setTimeout(() => res(connect()), wait));
 
       connecting = (async () => {{
-        const hasToken = await requireToken();
-        if (!hasToken) {{ connecting = null; return; }}
-
         const transport = new SSEClientTransport(new URL(SSE_URL), {{
           eventSourceInit: {{ fetch: customFetch }},
           fetch: customFetch,
@@ -510,8 +529,7 @@ export default {{
         client     = null;
 
         if (err.needsReauth) {{
-          // Restart auth flow, then reconnect once token arrives
-          pollForToken().then(ok => {{ if (ok) {{ backoffIdx = 0; nextRetryAt = 0; connect(); }} }});
+          // Token cleared in customFetch. Next tool call will prompt re-auth.
           return;
         }}
 
@@ -550,22 +568,34 @@ export default {{
     for (const toolName of TOOL_NAMES) {{
       api.registerTool({{
         name: toolName,
-        description: `SuiteCRM ${{ENTITY_CODE}} -- ${{toolName.replace(`suitecrm_${{ENTITY_CODE}}_`, '')}}`,
+        description: `SuiteCRM ${{ENTITY_CODE}} -- ${{toolName.replace(/^suitecrm_(?:[^_]+_)?/, '')}}`,
         optional: true,
         parameters: {{ type: 'object', properties: {{}}, additionalProperties: true }},
         async execute(_callId, params) {{
-          const result = await callTool(toolName, params);
-          const text = (result.content ?? [])
-            .filter(c => c.type === 'text')
-            .map(c => c.text)
-            .join('\\n');
-          return {{ content: [{{ type: 'text', text: text || JSON.stringify(result) }}] }};
+          if (!token && !loadToken()) {{
+            const auth = await startAuthSession();
+            return {{ content: [{{ type: 'text', text: auth.message }}] }};
+          }}
+          try {{
+            const result = await callTool(toolName, params);
+            const text = (result.content ?? [])
+              .filter(c => c.type === 'text')
+              .map(c => c.text)
+              .join('\\n');
+            return {{ content: [{{ type: 'text', text: text || JSON.stringify(result) }}] }};
+          }} catch (err) {{
+            if (err.needsReauth) {{
+              const auth = await startAuthSession();
+              return {{
+                content: [{{ type: 'text', text: `Your SuiteCRM session has expired.\\n\\n${{auth.message}}` }}],
+              }};
+            }}
+            throw err;
+          }}
         }},
       }});
     }}
 
-    // Trigger connection at startup so the auth prompt appears immediately.
-    connect().catch(() => {{}});
   }},
 }};
 """

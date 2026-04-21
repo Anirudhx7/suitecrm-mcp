@@ -176,8 +176,12 @@ const subBySid    = new Map(); // sessionId   -> sub
 // OAuth state store (CSRF protection)
 const pendingStates = new Map(); // state -> created_at
 
-// Bridge token pickup store
+// Bridge token pickup store (legacy linux_user polling)
 const pendingTokens = new Map(); // sub -> { api_key, entities, linux_user, created_at }
+
+// Nonce-based bridge auth sessions (lazy auth)
+const pendingBridgeSessions = new Map(); // nonce -> { linux_user, created_at, resolved, api_key?, entities? }
+const BRIDGE_SESSION_TTL_MS = 15 * 60 * 1000;
 
 // API key index (fast O(1) lookup)
 const apiKeyIndex = new Map(); // api_key -> sub
@@ -185,8 +189,9 @@ const apiKeyIndex = new Map(); // api_key -> sub
 // Periodic cleanup of stale state and pending tokens
 setInterval(() => {
   const now = Date.now();
-  for (const [k, t] of pendingStates)  if (now - t > STATE_TTL_MS)         pendingStates.delete(k);
+  for (const [k, v] of pendingStates)  if (now - v.created_at > STATE_TTL_MS)         pendingStates.delete(k);
   for (const [k, v] of pendingTokens)  if (now - v.created_at > PENDING_TOKEN_TTL_MS) pendingTokens.delete(k);
+  for (const [k, v] of pendingBridgeSessions) if (now - v.created_at > BRIDGE_SESSION_TTL_MS) pendingBridgeSessions.delete(k);
 }, 5 * 60 * 1000).unref();
 
 // ---------------------------------------------------------------------------
@@ -1001,8 +1006,12 @@ app.get('/auth/login', authRL, async (req, res) => {
   }
   try {
     const endpoints = await ensureOidcEndpoints();
-    const state     = randomBytes(32).toString('hex');
-    pendingStates.set(state, Date.now());
+    const state       = randomBytes(32).toString('hex');
+    const bridgeNonce = (req.query.bridge || '').trim() || null;
+    if (bridgeNonce && !pendingBridgeSessions.has(bridgeNonce)) {
+      return res.status(400).json({ error: 'Invalid or expired bridge session. Request a new login link.' });
+    }
+    pendingStates.set(state, { created_at: Date.now(), nonce: bridgeNonce });
 
     const params = new URLSearchParams({
       client_id:     OAUTH_CLIENT_ID,
@@ -1034,10 +1043,12 @@ app.get('/auth/callback', authRL, async (req, res) => {
   }
 
   // CSRF check
-  if (!state || !pendingStates.has(state)) {
+  const stateData = pendingStates.get(state);
+  if (!state || !stateData) {
     return res.status(400).json({ error: 'Invalid or expired state parameter. Please start authentication again.' });
   }
   pendingStates.delete(state);
+  const bridgeNonce = stateData.nonce || null;
 
   if (!code) return res.status(400).json({ error: 'Missing authorization code' });
 
@@ -1139,8 +1150,16 @@ app.get('/auth/callback', authRL, async (req, res) => {
     saveProfiles(profiles);
     buildApiKeyIndex();
 
-    // Store in pending tokens for bridge polling (one-time pickup, keyed by sub for collision safety)
+    // Store in pending tokens for legacy linux_user bridge polling
     pendingTokens.set(sub, { api_key: apiKey, entities: accessibleEntities, linux_user: linuxUser, created_at: Date.now() });
+
+    // Resolve nonce-based bridge session if this login came from a bridge/start request
+    if (bridgeNonce && pendingBridgeSessions.has(bridgeNonce)) {
+      const session = pendingBridgeSessions.get(bridgeNonce);
+      session.api_key  = apiKey;
+      session.entities = accessibleEntities;
+      session.resolved = true;
+    }
 
     process.stderr.write(`[${PREFIX}] Auth complete: "${email}" (${linuxUser}) entities=[${accessibleEntities.map(e=>e.code).join(',')}]\n`);
 
@@ -1193,6 +1212,44 @@ app.get('/auth/status/:linux_user', pollRL, (req, res) => {
     api_key:  pending.api_key,
     entities: pending.entities,
   });
+});
+
+// POST /auth/bridge/start — bridge requests a nonce-based auth session (lazy auth)
+app.post('/auth/bridge/start', authRL, (req, res) => {
+  if (!OAUTH_CONFIGURED) return res.status(501).json({ error: 'OAuth not configured' });
+
+  const { linux_user } = req.body || {};
+  if (!linux_user || !SAFE_LINUX_USER.test(linux_user)) {
+    return res.status(400).json({ error: 'Invalid or missing linux_user' });
+  }
+
+  const nonce    = randomBytes(32).toString('hex');
+  const loginUrl = `${GATEWAY_EXTERNAL_URL}/auth/login?bridge=${nonce}`;
+  pendingBridgeSessions.set(nonce, { linux_user, created_at: Date.now(), resolved: false });
+
+  process.stderr.write(`[${PREFIX}] Bridge auth session started for "${linux_user}" (nonce: ${nonce.slice(0, 8)}...)\n`);
+  res.json({ nonce, login_url: loginUrl, expires_in: 900 });
+});
+
+// GET /auth/bridge/poll/:nonce — bridge polls for auth completion (one-time pickup)
+app.get('/auth/bridge/poll/:nonce', pollRL, (req, res) => {
+  if (!OAUTH_CONFIGURED) return res.status(501).json({ error: 'OAuth not configured' });
+
+  const { nonce } = req.params;
+  if (!nonce || !/^[0-9a-f]{64}$/.test(nonce)) {
+    return res.status(400).json({ error: 'Invalid nonce format' });
+  }
+
+  const session = pendingBridgeSessions.get(nonce);
+  if (!session) {
+    return res.status(404).json({ status: 'expired', message: 'Bridge session not found or expired' });
+  }
+  if (!session.resolved) {
+    return res.json({ status: 'pending' });
+  }
+
+  pendingBridgeSessions.delete(nonce);
+  res.json({ status: 'ready', api_key: session.api_key, entities: session.entities });
 });
 
 // POST /auth/revoke — admin revokes a user's API key by linux_user or sub
