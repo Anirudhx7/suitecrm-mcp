@@ -39,7 +39,7 @@
 import { Server }             from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { createHash, randomBytes, createHmac } from 'crypto';
+import { createHash, randomBytes, createHmac, timingSafeEqual } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
 import { execFile }  from 'child_process';
 import { promisify } from 'util';
@@ -103,7 +103,6 @@ const MAX_SEARCH_RESULTS   = 100;
 const TOOL_LATENCY_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const CRM_API_LATENCY_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30];
 const STATE_TTL_MS         = 10 * 60 * 1000; // 10 min
-const PENDING_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 min
 
 // Startup checks
 const OAUTH_CONFIGURED = !!(OAUTH_ISSUER && OAUTH_AUDIENCE && OAUTH_CLIENT_ID && OAUTH_CLIENT_SECRET && OAUTH_REDIRECT_URI);
@@ -176,9 +175,6 @@ const subBySid    = new Map(); // sessionId   -> sub
 // OAuth state store (CSRF protection)
 const pendingStates = new Map(); // state -> created_at
 
-// Bridge token pickup store (legacy linux_user polling)
-const pendingTokens = new Map(); // sub -> { api_key, entities, linux_user, created_at }
-
 // Nonce-based bridge auth sessions (lazy auth)
 const pendingBridgeSessions = new Map(); // nonce -> { linux_user, created_at, resolved, api_key?, entities? }
 const BRIDGE_SESSION_TTL_MS = 15 * 60 * 1000;
@@ -190,7 +186,6 @@ const apiKeyIndex = new Map(); // api_key -> sub
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of pendingStates)  if (now - v.created_at > STATE_TTL_MS)         pendingStates.delete(k);
-  for (const [k, v] of pendingTokens)  if (now - v.created_at > PENDING_TOKEN_TTL_MS) pendingTokens.delete(k);
   for (const [k, v] of pendingBridgeSessions) if (now - v.created_at > BRIDGE_SESSION_TTL_MS) pendingBridgeSessions.delete(k);
 }, 5 * 60 * 1000).unref();
 
@@ -1168,9 +1163,6 @@ app.get('/auth/callback', authRL, async (req, res) => {
 
     } finally { releaseProfile(); }
 
-    // Store in pending tokens for legacy linux_user bridge polling
-    pendingTokens.set(sub, { api_key: apiKey, entities: accessibleEntities, linux_user: linuxUser, created_at: Date.now() });
-
     // Resolve nonce-based bridge session if this login came from a bridge/start request.
     // Verify the OAuth-derived linux user matches what the bridge claimed — prevents an attacker
     // from starting a session for a victim username and collecting the resulting API key.
@@ -1234,7 +1226,9 @@ app.get('/auth/bridge/poll/:nonce', pollRL, (req, res) => {
   }
 
   const secret = (req.headers['x-bridge-secret'] || '').trim();
-  if (!secret || secret !== session.client_secret) {
+  const secretOk = secret.length === session.client_secret.length &&
+    timingSafeEqual(Buffer.from(secret), Buffer.from(session.client_secret));
+  if (!secretOk) {
     return res.status(401).json({ error: 'Invalid or missing X-Bridge-Secret header' });
   }
 
@@ -1277,6 +1271,7 @@ app.post('/auth/revoke', async (req, res) => {
 
     if (!revoked) return res.status(404).json({ error: 'User not found' });
     saveProfiles(profiles);
+    buildApiKeyIndex();
   } finally {
     releaseProfile();
   }
