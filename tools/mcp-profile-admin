@@ -71,7 +71,8 @@ def key_status(profile):
         return f"{GREEN}valid{NC}"
     try:
         issued_ts = datetime.fromisoformat(issued_at.replace('Z', '+00:00')).timestamp()
-        expiry_ts = issued_ts + 90 * 86400  # server default API_KEY_TTL_DAYS=90
+        ttl_days = int(os.environ.get("API_KEY_TTL_DAYS", "90"))
+        expiry_ts = issued_ts + ttl_days * 86400
         now = time.time()
         if expiry_ts < now:
             return f"{YELLOW}expired{NC}"
@@ -181,7 +182,13 @@ def cmd_clean(args, data, path):
 
 def cmd_export(args, data):
     p = data.get(args.sub) or fail(f"User not found: {args.sub}")
-    print(json.dumps({args.sub: p}, indent=2))
+    redacted = {k: v for k, v in p.items() if k not in ("api_key", "refresh_token")}
+    if "entities" in redacted:
+        redacted["entities"] = {
+            code: {ek: ("***" if ek == "pass" else ev) for ek, ev in ent.items()}
+            for code, ent in redacted["entities"].items()
+        }
+    print(json.dumps({args.sub: redacted}, indent=2))
 
 
 def main():

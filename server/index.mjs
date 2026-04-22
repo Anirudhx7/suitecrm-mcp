@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SuiteCRM MCP Gateway Server — v3.0
+ * SuiteCRM MCP Gateway Server — v3.1
  * Transport:  HTTP + Server-Sent Events
  * Auth:       OAuth2 Authorization Code (Auth0 / Azure AD / Okta / any OIDC)
  *             + gateway-issued API keys stored server-side
@@ -42,6 +42,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } fr
 import { createHash, randomBytes, createHmac, timingSafeEqual } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
 import { execFile }  from 'child_process';
+import { dirname }   from 'path';
 import { promisify } from 'util';
 import express    from 'express';
 import bodyParser from 'body-parser';
@@ -720,7 +721,7 @@ function loadProfiles() {
 }
 
 function saveProfiles(profiles) {
-  const dir = PROFILES_FILE.split('/').slice(0,-1).join('/');
+  const dir = dirname(PROFILES_FILE);
   try { mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch {}
   const tmp = PROFILES_FILE + '.tmp';
   writeFileSync(tmp, JSON.stringify(profiles, null, 2), { mode: 0o600 });
@@ -740,18 +741,15 @@ function buildApiKeyIndex() {
   apiKeyIndex.clear();
   const profiles = loadProfiles();
   for (const [sub, profile] of Object.entries(profiles)) {
-    if (profile.api_key) apiKeyIndex.set(profile.api_key, sub);
+    if (profile.api_key) apiKeyIndex.set(profile.api_key, { sub, issued_at: profile.api_key_issued_at, profile });
   }
 }
 
 function lookupApiKey(apiKey) {
-  const sub = apiKeyIndex.get(apiKey);
-  if (!sub) return null;
-  const profiles = loadProfiles();
-  const profile  = profiles[sub];
-  if (!profile) return null;
-  if (isApiKeyExpired(profile.api_key_issued_at)) return null;
-  return { sub, profile };
+  const entry = apiKeyIndex.get(apiKey);
+  if (!entry) return null;
+  if (isApiKeyExpired(entry.issued_at)) return null;
+  return { sub: entry.sub, profile: entry.profile };
 }
 
 // ---------------------------------------------------------------------------
@@ -1241,7 +1239,7 @@ app.get('/auth/bridge/poll/:nonce', pollRL, (req, res) => {
 });
 
 // POST /auth/revoke — admin revokes a user's API key by linux_user or sub
-app.post('/auth/revoke', async (req, res) => {
+app.post('/auth/revoke', authRL, async (req, res) => {
   // Simple shared-secret admin auth
   const adminKey = (req.headers['x-admin-key'] || '').trim();
   const expected = createHmac('sha256', API_KEY_SECRET).update('admin-revoke').digest('hex');
@@ -1393,7 +1391,6 @@ app.listen(PORT, BIND_HOST, (err) => {
 // ---------------------------------------------------------------------------
 // Metrics server (separate port, localhost only)
 // ---------------------------------------------------------------------------
-const METRICS_BIND_HOST = METRICS_BIND;
 const metricsServer = http.createServer(async (req, res) => {
   if (req.url === '/metrics' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': metricsRegistry.contentType });
@@ -1402,6 +1399,6 @@ const metricsServer = http.createServer(async (req, res) => {
     res.writeHead(404); res.end();
   }
 });
-metricsServer.listen(METRICS_PORT, METRICS_BIND_HOST, () => {
-  process.stderr.write(`[${PREFIX}] Metrics on ${METRICS_BIND_HOST}:${METRICS_PORT}/metrics\n`);
+metricsServer.listen(METRICS_PORT, METRICS_BIND, () => {
+  process.stderr.write(`[${PREFIX}] Metrics on ${METRICS_BIND}:${METRICS_PORT}/metrics\n`);
 });

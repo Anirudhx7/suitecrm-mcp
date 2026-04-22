@@ -43,7 +43,7 @@ def error(m): print(f"{RED}[ERROR]{NC} {m}"); sys.exit(1)
 
 SAFE_CODE_RE  = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$')
 SAFE_LABEL_RE = re.compile(r'^[a-zA-Z0-9 _.,()\-]+$')
-SAFE_USER_RE  = re.compile(r'^[a-zA-Z0-9_-]+$')
+SAFE_USER_RE  = re.compile(r'^[a-z_][a-z0-9._-]{0,31}$')
 TOOL_SUFFIXES = [
     "search", "search_text", "get", "create", "update", "delete",
     "count", "get_relationships", "link_records", "unlink_records",
