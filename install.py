@@ -42,6 +42,13 @@ Options:
   --status     Show service status
   --update     Update server code and restart
   --uninstall  Remove single-entity install (single mode only)
+
+SSH provisioning (LDAP/SSO deployments):
+  sudo python3 install.py --setup-crm-host crm1   # deploy provision script to CRM VM for entity crm1
+
+  SSH provisioning lets the gateway auto-create CRM API passwords for LDAP/SSO users at login
+  time. The gateway SSHes into each CRM VM and runs /usr/local/bin/crm-provision-user.
+  The interactive setup wizard will ask about this during a fresh install.
 """
 
 import os, sys, subprocess, json, argparse, shutil, re, socket, time, secrets
@@ -55,12 +62,14 @@ import urllib.parse
 # Constants
 # ---------------------------------------------------------------------------
 
-SERVER_DIR    = "/opt/suitecrm-mcp"
-ENV_DIR       = "/etc/suitecrm-mcp"
-ENV_FILE      = "/etc/suitecrm-mcp/gateway.env"   # single-entity env
-ENTITIES_JSON = "/etc/suitecrm-mcp/entities.json"  # runtime entity config for the server
-PROFILES_FILE = "/etc/suitecrm-mcp/user-profiles.json"
-DOMAIN_FILE   = "/etc/suitecrm-mcp/domain"
+SERVER_DIR         = "/opt/suitecrm-mcp"
+ENV_DIR            = "/etc/suitecrm-mcp"
+ENV_FILE           = "/etc/suitecrm-mcp/gateway.env"   # single-entity env
+ENTITIES_JSON      = "/etc/suitecrm-mcp/entities.json"  # runtime entity config for the server
+CRM_HOSTS_FILE     = "/etc/suitecrm-mcp/crm-hosts.json"  # SSH provisioning config
+PROFILES_FILE      = "/etc/suitecrm-mcp/user-profiles.json"
+DOMAIN_FILE        = "/etc/suitecrm-mcp/domain"
+PROFILE_ADMIN_DEST = "/usr/local/bin/mcp-profile-admin"
 NGINX_CONF    = "/etc/nginx/sites-available/suitecrm-mcp"
 NGINX_LINK    = "/etc/nginx/sites-enabled/suitecrm-mcp"
 NGINX_PORT    = 8080   # multi-entity plain HTTP listen port
@@ -88,6 +97,8 @@ API_DETECT_TIMEOUT = 5  # seconds per probe
 SAFE_DOMAIN_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9.-]+$')
 SAFE_EMAIL_RE  = re.compile(r'^[^@\s,;|&<>]+@[^@\s,;|&<>]+\.[^@\s,;|&<>]+$')
 SAFE_CODE_RE   = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$')
+SAFE_HOST_RE   = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$')
+SAFE_USER_RE   = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$')
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -444,6 +455,120 @@ def write_entities_json(entities):
     write_file(ENTITIES_JSON, json.dumps(out, indent=2), mode="640")
     run(["chown", f"root:{SVC_USER}", ENTITIES_JSON])
     ok(f"Entities config: {ENTITIES_JSON}")
+
+
+# ---------------------------------------------------------------------------
+# Admin tool + SSH provisioning helpers
+# ---------------------------------------------------------------------------
+
+def install_profile_admin():
+    src = script_dir() / "tools" / "mcp-profile-admin"
+    if not src.exists():
+        warn("tools/mcp-profile-admin not found - skipping admin tool install")
+        return
+    shutil.copy(src, PROFILE_ADMIN_DEST)
+    run(["chmod", "750", PROFILE_ADMIN_DEST])
+    run(["chown", "root:root", PROFILE_ADMIN_DEST])
+    ok(f"Admin tool: {PROFILE_ADMIN_DEST}")
+
+
+def write_crm_hosts(crm_hosts):
+    write_file(CRM_HOSTS_FILE, json.dumps(crm_hosts, indent=2), mode="640")
+    run(["chown", f"root:{SVC_USER}", CRM_HOSTS_FILE])
+    ok(f"SSH provisioning config: {CRM_HOSTS_FILE}")
+
+
+def prompt_ssh_provisioning(entities):
+    """
+    Ask admin if SSH provisioning should be enabled per entity.
+    Returns a crm-hosts.json-style dict (may be empty if skipped).
+    """
+    print()
+    info("=" * 60)
+    info("SSH PROVISIONING SETUP (OPTIONAL)")
+    info("=" * 60)
+    print()
+    print("  SSH provisioning lets the gateway auto-create CRM API")
+    print("  passwords for LDAP/SSO users at login time. The gateway")
+    print("  SSHes into each CRM VM and runs the provision script.")
+    print()
+    print("  Skip this if users have local CRM accounts (not LDAP/SSO),")
+    print("  or if you prefer to set CRM credentials manually.")
+    print()
+
+    enable = input("  Enable SSH provisioning? [y/N]: ").strip().lower()
+    if enable not in ("y", "yes"):
+        info("SSH provisioning skipped. You can enable it later by re-running install.py.")
+        return {}
+
+    crm_hosts = {}
+    for code in entities:
+        print()
+        info(f"  Entity: {code}")
+        ssh_host = _prompt(f"  CRM VM SSH host (IP or hostname, blank to skip)")
+        if not ssh_host:
+            info(f"  Skipping '{code}'")
+            continue
+        if not SAFE_HOST_RE.match(ssh_host):
+            warn(f"  Invalid hostname '{ssh_host}' - skipping '{code}'")
+            continue
+        ssh_user = _prompt("  SSH user", "ubuntu")
+        if not SAFE_USER_RE.match(ssh_user):
+            warn(f"  Invalid SSH user '{ssh_user}' - skipping '{code}'")
+            continue
+        ssh_key = _prompt("  Path to SSH private key", "/etc/suitecrm-mcp/crm-ssh-key")
+        crm_hosts[code] = {
+            "ssh_host": ssh_host,
+            "ssh_user": ssh_user,
+            "ssh_key":  ssh_key,
+        }
+        ok(f"  SSH provisioning enabled for '{code}'")
+
+    return crm_hosts
+
+
+def setup_crm_host(code, host_cfg):
+    """
+    Deploy tools/create-api-user.sh to the CRM VM as /usr/local/bin/crm-provision-user.
+    Returns True on success, False on failure (non-fatal when called during install).
+    """
+    ssh_host = host_cfg.get("ssh_host", "")
+    ssh_user = host_cfg.get("ssh_user", "ubuntu")
+    ssh_key  = host_cfg.get("ssh_key", "/etc/suitecrm-mcp/crm-ssh-key")
+    dest_cmd = host_cfg.get("command", "/usr/local/bin/crm-provision-user")
+
+    if not SAFE_HOST_RE.match(ssh_host):
+        warn(f"  [{code}] Invalid ssh_host '{ssh_host}' in crm-hosts.json - skipping")
+        return False
+    if not SAFE_USER_RE.match(ssh_user):
+        warn(f"  [{code}] Invalid ssh_user '{ssh_user}' in crm-hosts.json - skipping")
+        return False
+
+    src = script_dir() / "tools" / "create-api-user.sh"
+    if not src.exists():
+        warn(f"  [{code}] tools/create-api-user.sh not found - run from the repo root")
+        return False
+
+    ssh_opts = ["-i", ssh_key, "-o", "StrictHostKeyChecking=no",
+                "-o", "ConnectTimeout=15", "-o", "BatchMode=yes"]
+    target = f"{ssh_user}@{ssh_host}"
+
+    info(f"  [{code}] Copying provision script to {target} ...")
+    r = run(["scp"] + ssh_opts + [str(src), f"{target}:/tmp/crm-provision-user"],
+            check=False, capture=True)
+    if r.returncode != 0:
+        warn(f"  [{code}] scp failed: {r.stderr.strip()[:200]}")
+        return False
+
+    r = run(["ssh"] + ssh_opts + [target,
+             f"sudo mv /tmp/crm-provision-user {dest_cmd} && sudo chmod 755 {dest_cmd}"],
+            check=False, capture=True)
+    if r.returncode != 0:
+        warn(f"  [{code}] Remote install failed: {r.stderr.strip()[:200]}")
+        return False
+
+    ok(f"  [{code}] Provision script deployed to {ssh_host}:{dest_cmd}")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -990,6 +1115,8 @@ def main():
     parser.add_argument("--status",   action="store_true", help="Show status")
     parser.add_argument("--update",   action="store_true", help="Update server code and restart")
     parser.add_argument("--uninstall",action="store_true", help="Remove single-entity install")
+    parser.add_argument("--setup-crm-host", dest="setup_crm_host", metavar="CODE",
+                        help="Deploy provision script to CRM VM for entity CODE")
     args = parser.parse_args()
 
     # Validate auth/domain flags before anything else
@@ -1027,6 +1154,23 @@ def main():
 
     if args.uninstall:
         uninstall_single(); sys.exit(0)
+
+    if args.setup_crm_host:
+        validate_code(args.setup_crm_host)
+        if not Path(CRM_HOSTS_FILE).exists():
+            error(f"No SSH provisioning config found at {CRM_HOSTS_FILE}.\n"
+                  "Run install.py first and enable SSH provisioning when prompted.")
+        with open(CRM_HOSTS_FILE) as f:
+            crm_hosts = json.load(f)
+        code = args.setup_crm_host
+        if code not in crm_hosts:
+            avail = ", ".join(crm_hosts.keys()) or "none configured"
+            error(f"Entity '{code}' not in {CRM_HOSTS_FILE}. Available: {avail}")
+        print()
+        info(f"Deploying provision script for entity '{code}' ...")
+        if not setup_crm_host(code, crm_hosts[code]):
+            error("Deployment failed - check SSH access and key path above")
+        sys.exit(0)
 
     # --url: pure single-entity CLI mode
     if args.url:
@@ -1067,6 +1211,7 @@ def main():
     if args.update:
         print(); info("=" * 60); info("UPDATE MODE"); info("=" * 60); print()
         install_server(); print()
+        info("Installing admin tool ..."); install_profile_admin(); print()
         info("Applying hardening to existing installs ...")
         codes = list(entities.keys()) if is_multi else [SVC_NAME]
         apply_update_hardening(codes, is_multi); print()
@@ -1138,6 +1283,9 @@ def main():
     # Server code
     info("Installing server ..."); install_server(); print()
 
+    # Admin tool
+    info("Installing admin tool ..."); install_profile_admin(); print()
+
     # Env dir
     os.makedirs(ENV_DIR, exist_ok=True)
     run(["chmod", "700", ENV_DIR])
@@ -1152,6 +1300,21 @@ def main():
     info("Writing entities config ...")
     write_entities_json(entities)
     print()
+
+    # SSH provisioning config
+    crm_hosts = prompt_ssh_provisioning(to_install)
+    if crm_hosts:
+        info("Writing SSH provisioning config ...")
+        write_crm_hosts(crm_hosts)
+        print()
+        deploy_now = input("  Deploy provision script to CRM VMs now? [Y/n]: ").strip().lower()
+        if deploy_now in ("", "y", "yes"):
+            print()
+            for code, host_cfg in crm_hosts.items():
+                ok_deploy = setup_crm_host(code, host_cfg)
+                if not ok_deploy:
+                    warn(f"  Re-run later: sudo python3 install.py --setup-crm-host {code}")
+        print()
 
     # Per-entity install
     info("Installing env files and services ...")
