@@ -172,6 +172,7 @@ const transports  = new Map(); // sessionId -> SSEServerTransport
 const crmSessions = new Map(); // "sub:code"  -> CRM session token (survives reconnects)
 const connCreds   = new Map(); // sessionId   -> { user, pass }
 const subBySid    = new Map(); // sessionId   -> sub
+const connApiKey  = new Map(); // sessionId   -> raw api_key (for per-message revocation check)
 
 // OAuth state store (CSRF protection)
 const pendingStates = new Map(); // state -> created_at
@@ -641,6 +642,7 @@ async function ensureOidcEndpoints() {
     authorization_endpoint: disco.authorization_endpoint,
     token_endpoint:         disco.token_endpoint,
     jwks_uri:               disco.jwks_uri,
+    issuer:                 disco.issuer,
   };
   jwksClient = jwksRsa({
     jwksUri:               oidcEndpoints.jwks_uri,
@@ -692,12 +694,15 @@ async function exchangeCodeForTokens(code) {
 }
 
 async function validateIdToken(idToken) {
-  const decoded = jwt.decode(idToken, { complete: true });
+  const decoded   = jwt.decode(idToken, { complete: true });
   if (!decoded?.header?.kid) throw new Error('ID token missing kid header');
-  const key = await jwksClient.getSigningKey(decoded.header.kid);
+  const key       = await jwksClient.getSigningKey(decoded.header.kid);
+  const endpoints = await ensureOidcEndpoints();
   return jwt.verify(idToken, key.getPublicKey(), {
-    audience: OAUTH_AUDIENCE,
-    issuer:   `${OAUTH_ISSUER}/`,
+    // ID token audience is the OAuth client ID (not the API audience).
+    // Issuer is taken from OIDC discovery to avoid trailing-slash mismatches.
+    audience: OAUTH_CLIENT_ID,
+    issuer:   endpoints.issuer,
   });
 }
 
@@ -945,8 +950,9 @@ function requireApiKey(req, res, next) {
       entity: CODE || 'default',
     });
   }
-  req.apiUser   = found;
-  req.crmCreds  = crmCreds;
+  req.apiUser    = found;
+  req.apiKeyRaw  = apiKey;
+  req.crmCreds   = crmCreds;
   next();
 }
 
@@ -1063,7 +1069,8 @@ app.get('/auth/callback', authRL, async (req, res) => {
 
     const sub      = claims.sub;
     const email    = claims.email || '';
-    const groups   = claims[GROUPS_CLAIM] || [];
+    const rawGroups = claims[GROUPS_CLAIM];
+    const groups    = Array.isArray(rawGroups) ? rawGroups : rawGroups ? [String(rawGroups)] : [];
     const linuxUser = emailToLinuxUser(email || sub);
 
     if (!email) {
@@ -1313,6 +1320,7 @@ app.get('/sse', sseRL, requireApiKey, async (req, res) => {
 
   connCreds.set(sid, req.crmCreds);
   subBySid.set(sid, sub);
+  connApiKey.set(sid, req.apiKeyRaw);
 
   // Eager CRM login
   try {
@@ -1330,7 +1338,7 @@ app.get('/sse', sseRL, requireApiKey, async (req, res) => {
   metricConnections.inc({ entity: PREFIX });
 
   res.on('close', () => {
-    transports.delete(sid); connCreds.delete(sid); subBySid.delete(sid);
+    transports.delete(sid); connCreds.delete(sid); subBySid.delete(sid); connApiKey.delete(sid);
     // Keep crmSessions keyed by sub — reused on reconnect
     metricActiveConnections.set({ entity: PREFIX }, transports.size);
     process.stderr.write(`[${PREFIX}] Disconnected: "${email}" (sid=${sid.slice(0,8)})\n`);
@@ -1345,6 +1353,13 @@ app.post('/messages', messagesRL, async (req, res) => {
   const sid = req.query.sessionId;
   const t   = transports.get(sid);
   if (!t) return res.status(404).json({ error: `Session not found: ${sid}` });
+  // Re-validate the stored API key on every message to catch revocation and expiry.
+  const storedKey = connApiKey.get(sid);
+  if (!storedKey || !lookupApiKey(storedKey)) {
+    transports.delete(sid); connCreds.delete(sid); subBySid.delete(sid); connApiKey.delete(sid);
+    t.close?.();
+    return res.status(401).json({ error: 'API key revoked or expired. Reconnect to the gateway.' });
+  }
   await t.handlePostMessage(req, res);
 });
 

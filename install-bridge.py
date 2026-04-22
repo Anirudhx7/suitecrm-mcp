@@ -554,7 +554,16 @@ export default {{
 
     async function callTool(toolName, toolArgs) {{
       if (!ready || !client) await connect();
-      if (!client) throw new Error(`SuiteCRM ${{ENTITY_CODE}} gateway not available -- check logs`);
+      if (!client) {{
+        // connect() may have swallowed a needsReauth error (expired/revoked token).
+        // If no valid token exists, surface reauth immediately instead of a generic error.
+        if (!token && !loadToken()) {{
+          const err = new Error('Authentication required');
+          err.needsReauth = true;
+          throw err;
+        }}
+        throw new Error(`SuiteCRM ${{ENTITY_CODE}} gateway not available -- check logs`);
+      }}
       try {{
         return await client.callTool({{ name: toolName, arguments: toolArgs }});
       }} catch (err) {{
