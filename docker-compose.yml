@@ -12,7 +12,8 @@ services:
       SUITECRM_PREFIX: suitecrm
       PORT: "3101"
       METRICS_PORT: "9090"
-      METRICS_BIND: "0.0.0.0"   # allow Prometheus container to reach metrics
+      METRICS_BIND: "0.0.0.0"   # Docker-internal only: needed so Prometheus container can scrape metrics.
+                                 # If you remove the Prometheus service, change this to "127.0.0.1".
       # OAuth2/OIDC - required for v3.0 auth
       OAUTH_ISSUER: https://your-tenant.auth0.com
       OAUTH_CLIENT_ID: your-client-id

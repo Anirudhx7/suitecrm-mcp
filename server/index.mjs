@@ -622,8 +622,13 @@ async function httpsGetJson(url) {
       method: 'GET',
       headers: { 'User-Agent': `SuiteCRM-MCP-Gateway/${PKG_VERSION}` },
     }, (res) => {
-      let raw = '';
-      res.on('data', c => raw += c);
+      let raw = ''; let rawLen = 0;
+      const OIDC_MAX_BYTES = 1024 * 1024; // 1 MB cap for OIDC discovery / JWKS
+      res.on('data', c => {
+        rawLen += c.length;
+        if (rawLen > OIDC_MAX_BYTES) { req.destroy(new Error('OIDC response exceeds 1 MB')); return; }
+        raw += c;
+      });
       res.on('end', () => {
         try   { resolve(JSON.parse(raw)); }
         catch { reject(new Error(`Non-JSON response from ${url}: ${raw.slice(0,200)}`)); }
@@ -1248,9 +1253,11 @@ app.get('/auth/bridge/poll/:nonce', pollRL, (req, res) => {
 // POST /auth/revoke — admin revokes a user's API key by linux_user or sub
 app.post('/auth/revoke', authRL, async (req, res) => {
   // Simple shared-secret admin auth
-  const adminKey = (req.headers['x-admin-key'] || '').trim();
-  const expected = createHmac('sha256', API_KEY_SECRET).update('admin-revoke').digest('hex');
-  if (!adminKey || adminKey !== expected) {
+  const adminKey  = (req.headers['x-admin-key'] || '').trim();
+  const expected  = createHmac('sha256', API_KEY_SECRET).update('admin-revoke').digest('hex');
+  const adminKeyOk = adminKey.length === expected.length &&
+    timingSafeEqual(Buffer.from(adminKey), Buffer.from(expected));
+  if (!adminKeyOk) {
     return res.status(401).json({ error: 'X-Admin-Key header required' });
   }
 

@@ -11,7 +11,7 @@ No CRM credentials are stored on your machine.
 
 ## Prerequisites
 
-- Gateway v3.0+ installed and running (see [setup guide](setup-guide.md))
+- Gateway v3.0+ installed and running (see [README](../README.md))
 - Claude Code CLI installed (`npm install -g @anthropic-ai/claude-code`)
 - Your API key from `https://YOUR_GATEWAY/auth/login`
 

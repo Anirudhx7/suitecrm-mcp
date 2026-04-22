@@ -15,7 +15,7 @@ and connect on your behalf. Keys expire after 90 days (configurable by your admi
 
 ## Prerequisites
 
-- Gateway v3.0+ installed and running (see [setup guide](setup-guide.md))
+- Gateway v3.0+ installed and running (see [README](../README.md))
 - Claude Desktop installed
 - Your API key from `https://YOUR_GATEWAY/auth/login`
 

@@ -94,7 +94,7 @@ CRM endpoint is not HTTPS.
 SuiteCRM's v4_1 REST API only authenticates against local database passwords. LDAP and SSO
 users have no local password and cannot authenticate via REST directly.
 
-**Mitigation:** Use `tools/crm-provision-user.sh` to set a local API password for LDAP/SSO
+**Mitigation:** Use `tools/create-api-user.sh` to set a local API password for LDAP/SSO
 users. The gateway can run this automatically via SSH on first OAuth login if configured.
 See the Known Limitations section in README.md.
 
