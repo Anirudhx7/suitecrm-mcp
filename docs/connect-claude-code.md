@@ -28,7 +28,7 @@ The success page shows the exact command with your key already embedded.
 ```bash
 claude mcp add suitecrm \
   --transport sse \
-  --header "Authorization:Bearer smcp_YOUR_API_KEY_HERE" \
+  --header "Authorization:Bearer YOUR_API_KEY_HERE" \
   https://mcp.yourcompany.com/sse
 ```
 
@@ -39,12 +39,12 @@ Run once per entity. Each gets its own MCP server entry:
 ```bash
 claude mcp add suitecrm_crm1 \
   --transport sse \
-  --header "Authorization:Bearer smcp_YOUR_API_KEY_HERE" \
+  --header "Authorization:Bearer YOUR_API_KEY_HERE" \
   https://mcp.yourcompany.com/crm1/sse
 
 claude mcp add suitecrm_crm2 \
   --transport sse \
-  --header "Authorization:Bearer smcp_YOUR_API_KEY_HERE" \
+  --header "Authorization:Bearer YOUR_API_KEY_HERE" \
   https://mcp.yourcompany.com/crm2/sse
 ```
 
@@ -86,7 +86,7 @@ claude mcp remove suitecrm
 # Re-authenticate at the gateway, then re-add with the new key
 claude mcp add suitecrm \
   --transport sse \
-  --header "Authorization:Bearer smcp_YOUR_NEW_API_KEY" \
+  --header "Authorization:Bearer YOUR_NEW_API_KEY" \
   https://mcp.yourcompany.com/sse
 ```
 

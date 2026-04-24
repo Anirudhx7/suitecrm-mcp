@@ -44,7 +44,7 @@ construct it manually.
       "type": "sse",
       "url": "https://mcp.yourcompany.com/sse",
       "headers": {
-        "Authorization": "Bearer smcp_YOUR_API_KEY_HERE"
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
       }
     }
   }
@@ -62,14 +62,14 @@ Add one entry per entity. Each entity gets its own `/{code}/sse` path:
       "type": "sse",
       "url": "https://mcp.yourcompany.com/crm1/sse",
       "headers": {
-        "Authorization": "Bearer smcp_YOUR_API_KEY_HERE"
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
       }
     },
     "suitecrm_crm2": {
       "type": "sse",
       "url": "https://mcp.yourcompany.com/crm2/sse",
       "headers": {
-        "Authorization": "Bearer smcp_YOUR_API_KEY_HERE"
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
       }
     }
   }
@@ -97,7 +97,7 @@ If your key is compromised or expired:
 2. Update `Authorization` in the config file
 3. Restart Claude Desktop
 
-Your admin can also revoke a key immediately via `mcp-profile-admin revoke <sub>`.
+Your admin can also revoke a key immediately via `mcp-admin revoke <sub>`.
 
 ## Troubleshooting
 

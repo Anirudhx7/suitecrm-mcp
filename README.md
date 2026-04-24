@@ -103,10 +103,10 @@ For production: create a dedicated API user with only the module permissions you
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v4.0.1` instead of floating on `latest`.
+For production, pin to a release tag such as `v4.0.2` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v4.0.1/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v4.0.2/docker-compose.yml
 ```
 
 Edit `docker-compose.yml` and fill in `SUITECRM_ENDPOINT`, `AUTH0_*` vars, and `GATEWAY_PUBLIC_URL`, then:
@@ -137,7 +137,7 @@ Each container handles exactly one CRM entity. For N entities, add N service blo
 services:
 
   suitecrm-mcp-auth:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.1
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.2
     command: node auth.mjs
     working_dir: /app
     ports:
@@ -153,7 +153,7 @@ services:
     restart: unless-stopped
 
   suitecrm-mcp-crm1:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.1
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.2
     ports:
       - "127.0.0.1:3101:3101"   # expose via reverse proxy only
     environment:
@@ -170,7 +170,7 @@ services:
     restart: unless-stopped
 
   suitecrm-mcp-crm2:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.1
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.2
     ports:
       - "127.0.0.1:3102:3102"   # expose via reverse proxy only
     environment:
@@ -534,9 +534,8 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 
 - **HTTPS is required for production.** OAuth flows and API keys must not travel over plain HTTP. Use `--domain` to enable Let's Encrypt, or put the gateway behind a TLS-terminating proxy.
 - **API keys are personal and revocable.** Each user gets their own key tied to their identity. Admins can revoke a key instantly with `mcp-admin revoke <sub>`. Compromised keys do not expose other users.
-- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque `smcp_...` API key. CRM credentials are stored in `/etc/suitecrm-mcp/sessions.json` (mode 600) on the gateway.
+- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque API key. CRM credentials are stored in `/etc/suitecrm-mcp/sessions.json` (mode 600) on the gateway.
 - **Keep `AUTH0_CLIENT_SECRET` secret.** It is stored in `/etc/suitecrm-mcp/auth.env` (mode 600) and only read by the auth service.
-- **Query sanitisation.** The `search` and `count` tools accept a SQL WHERE clause. The gateway blocks destructive SQL keywords (DROP, ALTER, DELETE, etc.) and comment/statement-chaining patterns. SuiteCRM's own API layer provides additional protection.
 - Env files are written with mode `600` and the env directory with `700`
 - `entities.json` and `user-profiles.json` are in `.gitignore` - never commit them
 

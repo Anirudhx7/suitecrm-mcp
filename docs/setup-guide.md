@@ -234,15 +234,15 @@ You should see the success page with your API key.
 
 ```bash
 # Requires python3, reads /etc/suitecrm-mcp/user-profiles.json
-python3 tools/mcp-profile-admin list
-python3 tools/mcp-profile-admin show <sub>
-python3 tools/mcp-profile-admin revoke <sub>
+python3 tools/mcp-admin list
+python3 tools/mcp-admin show <sub>
+python3 tools/mcp-admin revoke <sub>
 ```
 
 ### Add a user who cannot authenticate via the normal OAuth flow
 
 ```bash
-python3 tools/mcp-profile-admin add-cred <sub> <entity_code> <crm_username> <crm_password>
+python3 tools/mcp-admin add-cred <sub> <entity_code> <crm_username> <crm_password>
 ```
 
 ### Update server code without reinstalling

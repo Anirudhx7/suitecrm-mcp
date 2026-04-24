@@ -169,10 +169,10 @@ If the token expires (default 90 days) or is revoked by an admin:
 
 Two methods are available. Both require admin credentials on the gateway.
 
-**Using mcp-profile-admin (recommended):**
+**Using mcp-admin (recommended):**
 
 ```bash
-mcp-profile-admin revoke <sub>
+mcp-admin revoke <sub>
 ```
 
 Where `<sub>` is the user's subject claim from the identity provider (typically
