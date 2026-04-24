@@ -10,7 +10,6 @@ import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } fr
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import express from 'express';
-import bodyParser from 'body-parser';
 import { rateLimit } from 'express-rate-limit';
 import https from 'https';
 import http from 'http';
@@ -755,7 +754,7 @@ const deepHealthRL = rateLimit({
 // ---------------------------------------------------------------------------
 const app = express();
 app.use((req, res, next) =>
-  req.path === '/messages' ? next() : bodyParser.json()(req, res, next)
+  req.path === '/messages' ? next() : express.json()(req, res, next)
 );
 
 app.get('/health', (_req, res) =>
@@ -820,7 +819,7 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
     return res.status(503).json({ error: 'Too many connections' });
   }
 
-  const transport = new SSEServerTransport(`/${CODE}/messages`, res);
+  const transport = new SSEServerTransport(`${CODE ? `/${CODE}` : ''}/messages`, res);
   const sid = transport.sessionId;
   const srv = createMcpServer(sid);
 
@@ -857,8 +856,9 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-app.listen(PORT, '127.0.0.1', () => {
-  process.stderr.write(`[${PREFIX}] Listening on 127.0.0.1:${PORT}\n`);
+const BIND_HOST = (process.env.BIND_HOST || '127.0.0.1').trim();
+app.listen(PORT, BIND_HOST, () => {
+  process.stderr.write(`[${PREFIX}] Listening on ${BIND_HOST}:${PORT}\n`);
 });
 
 // ---------------------------------------------------------------------------

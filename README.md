@@ -103,10 +103,10 @@ For production: create a dedicated API user with only the module permissions you
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v4.0.3` instead of floating on `latest`.
+For production, pin to a release tag such as `v4.0.4` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v4.0.3/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v4.0.4/docker-compose.yml
 ```
 
 Edit `docker-compose.yml` and fill in `SUITECRM_ENDPOINT`, `AUTH0_*` vars, and `GATEWAY_PUBLIC_URL`, then:
@@ -137,7 +137,7 @@ Each container handles exactly one CRM entity. For N entities, add N service blo
 services:
 
   suitecrm-mcp-auth:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.3
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.4
     command: node auth.mjs
     working_dir: /app
     ports:
@@ -153,7 +153,7 @@ services:
     restart: unless-stopped
 
   suitecrm-mcp-crm1:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.3
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.4
     ports:
       - "127.0.0.1:3101:3101"   # expose via reverse proxy only
     environment:
@@ -170,7 +170,7 @@ services:
     restart: unless-stopped
 
   suitecrm-mcp-crm2:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.3
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.4
     ports:
       - "127.0.0.1:3102:3102"   # expose via reverse proxy only
     environment:

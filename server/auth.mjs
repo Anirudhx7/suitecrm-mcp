@@ -13,7 +13,8 @@ function escHtml(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
 }
 
 function atomicWrite(path, data) {
@@ -444,9 +445,9 @@ app.get('/auth/callback', async (req, res) => {
   </svg>
 </div>
 <script>
-const GW_EMAIL    = "${email}";
-const GW_APIKEY   = "${apiKey}";
-const GW_BASE     = "${GATEWAY_URL}";
+const GW_EMAIL    = ${JSON.stringify(email)};
+const GW_APIKEY   = ${JSON.stringify(apiKey)};
+const GW_BASE     = ${JSON.stringify(GATEWAY_URL)};
 const GW_ENTITIES = ${JSON.stringify(entities.map(({code,label})=>({code,label})))};
 
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -639,6 +640,7 @@ app.post('/auth/logout', (req, res) => {
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'suitecrm-mcp-auth' }));
 
 const PORT = parseInt(process.env.PORT || '3100', 10);
-app.listen(PORT, '127.0.0.1', () => {
-  process.stderr.write(`[auth] Listening on 127.0.0.1:${PORT}\n`);
+const BIND_HOST = (process.env.BIND_HOST || '127.0.0.1').trim();
+app.listen(PORT, BIND_HOST, () => {
+  process.stderr.write(`[auth] Listening on ${BIND_HOST}:${PORT}\n`);
 });
