@@ -534,7 +534,7 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 
 - **HTTPS is required for production.** OAuth flows and API keys must not travel over plain HTTP. Use `--domain` to enable Let's Encrypt, or put the gateway behind a TLS-terminating proxy.
 - **API keys are personal and revocable.** Each user gets their own key tied to their identity. Admins can revoke a key instantly with `mcp-admin revoke <sub>`. Compromised keys do not expose other users.
-- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque API key. CRM credentials are stored in `/etc/suitecrm-mcp/sessions.json` (mode 600) on the gateway.
+- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque API key. CRM credentials are stored in `/etc/suitecrm-mcp/user-profiles.json` (mode 600) on the gateway.
 - **Keep `AUTH0_CLIENT_SECRET` secret.** It is stored in `/etc/suitecrm-mcp/auth.env` (mode 600) and only read by the auth service.
 - Env files are written with mode `600` and the env directory with `700`
 - `entities.json` and `user-profiles.json` are in `.gitignore` - never commit them
