@@ -270,7 +270,7 @@ sudo ufw allow 8080/tcp
 **5. Test a specific entity:**
 After authenticating at `/auth/login` and getting an API key:
 ```bash
-curl -s -H "Authorization: Bearer smcp_your_api_key_here" \
+curl -s -H "Authorization: Bearer your_api_key_here" \
   http://YOUR_SERVER:8080/crm1/test
 # Expected: {"success":true,"crm_user":"...","email":"...","entity":"crm1"}
 ```
