@@ -103,10 +103,10 @@ For production: create a dedicated API user with only the module permissions you
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v4.0.0` instead of floating on `latest`.
+For production, pin to a release tag such as `v4.0.1` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v4.0.0/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v4.0.1/docker-compose.yml
 ```
 
 Edit `docker-compose.yml` and fill in `SUITECRM_ENDPOINT`, `AUTH0_*` vars, and `GATEWAY_PUBLIC_URL`, then:
@@ -137,7 +137,7 @@ Each container handles exactly one CRM entity. For N entities, add N service blo
 services:
 
   suitecrm-mcp-auth:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.1
     command: node auth.mjs
     working_dir: /app
     ports:
@@ -153,7 +153,7 @@ services:
     restart: unless-stopped
 
   suitecrm-mcp-crm1:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.1
     ports:
       - "127.0.0.1:3101:3101"   # expose via reverse proxy only
     environment:
@@ -170,7 +170,7 @@ services:
     restart: unless-stopped
 
   suitecrm-mcp-crm2:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.1
     ports:
       - "127.0.0.1:3102:3102"   # expose via reverse proxy only
     environment:
@@ -312,6 +312,11 @@ sudo python3 install.py --remove crm2
 | `NODE_TLS_REJECT_UNAUTHORIZED` | No | - | Set to `0` only for self-signed certs |
 | `NODE_NO_WARNINGS` | No | - | Set to `1` to suppress Node warnings |
 | `TRUST_PROXY` | No | - | Set to `1` when running behind nginx or another reverse proxy |
+| `METRICS_PORT` | No | `9090` | Prometheus metrics server port |
+| `METRICS_BIND` | No | `127.0.0.1` | Metrics server bind address |
+| `CRM_TIMEOUT_MS` | No | `30000` | CRM REST API request timeout in ms |
+| `CIRCUIT_BREAKER_THRESHOLD` | No | `5` | Consecutive CRM failures before circuit opens |
+| `CIRCUIT_BREAKER_RESET_MS` | No | `60000` | Time in ms before circuit moves to half-open |
 
 ### Multi-entity - entities.json
 
@@ -337,11 +342,69 @@ Keys become the entity code (nginx path prefix, tool prefix suffix, service name
 
 ## Health Checks and Monitoring
 
-### Health endpoint
+### Health endpoints
+
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /health` | None | Shallow - always responds if the process is running |
+| `GET /health/deep` | None | Deep - pings the CRM REST API and returns latency |
 
 ```bash
+# Shallow health
 curl http://YOUR_SERVER:3101/health
-# {"status":"ok","version":"4.0.0","prefix":"suitecrm","uptime":3600,"connections":2}
+# {"status":"ok","entity":"crm1","port":3101,"active":2,"circuit_breaker":"closed"}
+
+# Deep health (pings CRM, returns latency)
+curl http://YOUR_SERVER:3101/health/deep
+# {"status":"healthy","entity":"crm1","uptime":3600,"connections":2,"circuit_breaker":"closed",
+#  "checks":{"endpoint":{"status":"ok","url":"https://crm.example.com"},
+#             "api":{"status":"ok","latency_ms":45},
+#             "sessions":{"status":"ok","active":2}},"duration_ms":47}
+```
+
+`/health/deep` returns HTTP 200 when healthy, 503 when the CRM is unreachable. Rate-limited to 10 requests/minute.
+
+### Prometheus metrics
+
+The gateway exposes a Prometheus metrics endpoint on a separate port (default 9090, localhost only). Metrics are per-entity and include:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `suitecrm_mcp_active_connections` | Gauge | Currently open SSE connections |
+| `suitecrm_mcp_connections_total` | Counter | Total SSE connections established |
+| `suitecrm_mcp_tool_calls_total` | Counter | Tool calls by name and status (success/error) |
+| `suitecrm_mcp_tool_duration_seconds` | Histogram | Tool call latency (p50/p95/p99 via buckets) |
+| `suitecrm_mcp_crm_api_duration_seconds` | Histogram | CRM REST API call latency |
+| `suitecrm_mcp_session_renewals_total` | Counter | CRM session re-authentications |
+| `suitecrm_mcp_auth_failures_total` | Counter | Authentication failures |
+| `suitecrm_mcp_circuit_breaker_state` | Gauge | 0=closed, 1=half-open, 2=open |
+| `suitecrm_mcp_circuit_breaker_openings_total` | Counter | Circuit breaker trip events |
+
+```bash
+# Scrape metrics (systemd)
+curl http://127.0.0.1:9090/metrics
+
+# Scrape metrics (Docker - use container name or host.docker.internal)
+curl http://127.0.0.1:9090/metrics
+```
+
+The included `docker-compose.yml` starts a Prometheus + Grafana stack that scrapes the gateway automatically. Set `GRAFANA_PASSWORD` in your environment and visit `http://localhost:3000`.
+
+For systemd installs, add a scrape target to `monitoring/prometheus.yml`:
+```yaml
+scrape_configs:
+  - job_name: suitecrm-mcp
+    static_configs:
+      - targets: ['127.0.0.1:9090']
+```
+
+### Circuit breaker
+
+The gateway tracks consecutive CRM REST API failures per entity. When the failure count reaches `CIRCUIT_BREAKER_THRESHOLD` (default 5), the circuit opens and all tool calls immediately return an error without hitting the CRM. After `CIRCUIT_BREAKER_RESET_MS` (default 60 seconds), the circuit moves to half-open and allows one probe call through. A successful probe closes the circuit; a failed probe keeps it open.
+
+This prevents a slow or unresponsive CRM from tying up connections and causing cascading timeouts in the MCP client.
+
+The current state appears in both `/health` and `{prefix}_server_info` tool responses.
 
 ---
 

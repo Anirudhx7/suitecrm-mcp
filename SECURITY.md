@@ -42,6 +42,14 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 
 - **Fail-fast auth:** Invalid or missing bearer tokens on `/sse` return HTTP 401 immediately
   before the SSE stream opens. No half-open sessions are created.
+- **Rate limiting:** `/sse` and `/test` are limited to 20 requests per 15 minutes per IP.
+  `/messages` is limited to 100 requests per minute. `/health/deep` is limited to 10 per minute.
+  Limits use `express-rate-limit` with standard headers (`RateLimit-*`).
+- **Circuit breaker:** The gateway tracks consecutive CRM REST API failures. After
+  `CIRCUIT_BREAKER_THRESHOLD` (default 5) failures, the circuit opens and all tool calls
+  immediately return an error without hitting the CRM. The circuit resets after
+  `CIRCUIT_BREAKER_RESET_MS` (default 60 s). This prevents a slow CRM from tying up
+  connections and causing cascading timeouts.
 - **No CORS header:** `Access-Control-Allow-Origin` is not set. Browser same-origin policy
   blocks cross-origin requests by default.
 - **CRM credentials stored only on gateway:** Per-user CRM usernames and passwords live in

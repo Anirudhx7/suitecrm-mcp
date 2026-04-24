@@ -2,7 +2,7 @@
 /**
  * SuiteCRM MCP Gateway Server (index.mjs)
  * Per-entity server (one process per entity)
- * Auth: Auth0 JWT or gateway API key
+ * Auth: gateway session tokens (issued by auth.mjs, stored in sessions.json)
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -11,32 +11,119 @@ import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import express from 'express';
 import bodyParser from 'body-parser';
+import { rateLimit } from 'express-rate-limit';
 import https from 'https';
 import http from 'http';
+import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 
 const REQUIRED = ['SUITECRM_ENDPOINT', 'SUITECRM_PREFIX', 'PORT', 'AUTH0_DOMAIN', 'AUTH0_AUDIENCE'];
 const missing = REQUIRED.filter(k => !process.env[k]);
 if (missing.length) { console.error(`Missing required env vars: ${missing.join(', ')}`); process.exit(1); }
 
-const ENDPOINT = process.env.SUITECRM_ENDPOINT.trim();
-const PREFIX = process.env.SUITECRM_PREFIX.trim();
-const PORT = parseInt(process.env.PORT, 10);
-const CODE = (process.env.SUITECRM_CODE || '').trim();
-const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN.trim();
+const ENDPOINT    = process.env.SUITECRM_ENDPOINT.trim();
+const PREFIX      = process.env.SUITECRM_PREFIX.trim();
+const PORT        = parseInt(process.env.PORT, 10);
+const CODE        = (process.env.SUITECRM_CODE || '').trim();
+const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN.trim();
 const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE.trim();
 const REQUIRED_GROUP = (process.env.REQUIRED_GROUP || '').trim();
-const PROFILES_FILE = '/etc/suitecrm-mcp/user-profiles.json';
-const NS = AUTH0_AUDIENCE + '/';
-const TLS_OK = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
+const PROFILES_FILE  = '/etc/suitecrm-mcp/user-profiles.json';
+const NS             = AUTH0_AUDIENCE + '/';
+const TLS_OK         = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
 
+const METRICS_PORT  = parseInt(process.env.METRICS_PORT || '9090', 10);
+const METRICS_BIND  = (process.env.METRICS_BIND || '127.0.0.1').trim();
+const CRM_REQUEST_TIMEOUT_MS    = parseInt(process.env.CRM_TIMEOUT_MS              || '30000', 10);
+const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD   || '5',     10);
+const CIRCUIT_BREAKER_RESET_MS  = parseInt(process.env.CIRCUIT_BREAKER_RESET_MS    || '60000', 10);
 
+// ---------------------------------------------------------------------------
+// Prometheus metrics
+// ---------------------------------------------------------------------------
+const metricsRegistry = new Registry();
+metricsRegistry.setDefaultLabels({ entity: PREFIX });
+collectDefaultMetrics({ register: metricsRegistry });
+
+const metricActiveConnections = new Gauge({
+  name: 'suitecrm_mcp_active_connections', help: 'Active SSE connections',
+  labelNames: ['entity'], registers: [metricsRegistry],
+});
+const metricConnections = new Counter({
+  name: 'suitecrm_mcp_connections_total', help: 'Total SSE connections established',
+  labelNames: ['entity'], registers: [metricsRegistry],
+});
+const metricToolCalls = new Counter({
+  name: 'suitecrm_mcp_tool_calls_total', help: 'Total tool calls',
+  labelNames: ['entity', 'tool', 'status'], registers: [metricsRegistry],
+});
+const metricToolDuration = new Histogram({
+  name: 'suitecrm_mcp_tool_duration_seconds', help: 'Tool call duration in seconds',
+  labelNames: ['entity', 'tool'], buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  registers: [metricsRegistry],
+});
+const metricCrmApiDuration = new Histogram({
+  name: 'suitecrm_mcp_crm_api_duration_seconds', help: 'CRM REST API call duration in seconds',
+  labelNames: ['entity', 'method'], buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+  registers: [metricsRegistry],
+});
+const metricSessionRenewals = new Counter({
+  name: 'suitecrm_mcp_session_renewals_total', help: 'CRM session renewals',
+  labelNames: ['entity'], registers: [metricsRegistry],
+});
+const metricAuthFailures = new Counter({
+  name: 'suitecrm_mcp_auth_failures_total', help: 'Authentication failures',
+  labelNames: ['entity'], registers: [metricsRegistry],
+});
+const metricCircuitBreakerState = new Gauge({
+  name: 'suitecrm_mcp_circuit_breaker_state', help: 'Circuit breaker state (0=closed,1=half-open,2=open)',
+  labelNames: ['entity'], registers: [metricsRegistry],
+});
+const metricCircuitBreakerOpenings = new Counter({
+  name: 'suitecrm_mcp_circuit_breaker_openings_total', help: 'Circuit breaker openings',
+  labelNames: ['entity'], registers: [metricsRegistry],
+});
+
+// ---------------------------------------------------------------------------
+// Circuit breaker
+// ---------------------------------------------------------------------------
+const circuitBreaker = {
+  state: 'CLOSED', failures: 0, lastFailure: 0,
+  isOpen() {
+    if (this.state === 'CLOSED') return false;
+    if (Date.now() - this.lastFailure > CIRCUIT_BREAKER_RESET_MS) {
+      this.state = 'HALF_OPEN';
+      metricCircuitBreakerState.set({ entity: PREFIX }, 1);
+      process.stderr.write(`[${PREFIX}] Circuit breaker HALF_OPEN\n`);
+      return false;
+    }
+    return true;
+  },
+  recordSuccess() {
+    if (this.state !== 'CLOSED') process.stderr.write(`[${PREFIX}] Circuit breaker CLOSED\n`);
+    this.state = 'CLOSED'; this.failures = 0;
+    metricCircuitBreakerState.set({ entity: PREFIX }, 0);
+  },
+  recordFailure() {
+    this.failures++; this.lastFailure = Date.now();
+    if (this.failures >= CIRCUIT_BREAKER_THRESHOLD && this.state !== 'OPEN') {
+      this.state = 'OPEN';
+      metricCircuitBreakerState.set({ entity: PREFIX }, 2);
+      metricCircuitBreakerOpenings.inc({ entity: PREFIX });
+      process.stderr.write(`[${PREFIX}] Circuit breaker OPEN after ${this.failures} failures\n`);
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// In-memory state
+// ---------------------------------------------------------------------------
 const transports = new Map();
-const crmSessions = new Map();     // key -> sessionId
-const crmSessionAges = new Map();  // key -> createdAt ms
+const crmSessions = new Map();
+const crmSessionAges = new Map();
 const connCreds = new Map();
 const subBySid = new Map();
 
-const CRM_SESSION_TTL = 2 * 60 * 60 * 1000; // 2 hours
+const CRM_SESSION_TTL = 2 * 60 * 60 * 1000;
 setInterval(() => {
   const cutoff = Date.now() - CRM_SESSION_TTL;
   for (const [key, at] of crmSessionAges.entries()) {
@@ -69,12 +156,12 @@ async function jwtMiddleware(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token) return res.status(401).json({ error: 'Bearer token required' });
 
-  // Check sessions.json (API keys from auth service), cached for 2s
   try {
     const sessions = loadSessions();
     const session = sessions[token];
     if (session) {
       if (session.expiresAt < Date.now()) {
+        metricAuthFailures.inc({ entity: PREFIX });
         return res.status(401).json({ error: 'Session expired' });
       }
       req.auth = {
@@ -87,6 +174,7 @@ async function jwtMiddleware(req, res, next) {
     }
   } catch {}
 
+  metricAuthFailures.inc({ entity: PREFIX });
   return res.status(401).json({ error: 'Invalid token' });
 }
 
@@ -147,7 +235,7 @@ function postForm(url, params) {
         catch { reject(new Error(`Non-JSON: ${raw.slice(0, 300)}`)); }
       });
     });
-    req.setTimeout(30000, () => req.destroy(new Error('Timeout')));
+    req.setTimeout(CRM_REQUEST_TIMEOUT_MS, () => req.destroy(new Error('Timeout')));
     req.on('error', reject);
     req.write(body);
     req.end();
@@ -155,18 +243,21 @@ function postForm(url, params) {
 }
 
 async function rawCall(method, restData) {
-  const r = await postForm(ENDPOINT, {
-    method,
-    input_type: 'JSON',
-    response_type: 'JSON',
-    rest_data: JSON.stringify(restData),
-  });
-  if (r && typeof r.number === 'number' && r.number !== 0) {
-    const e = new Error(r.name || r.description || `CRM error ${r.number}`);
-    e.code = r.number;
-    throw e;
-  }
-  return r;
+  const end = metricCrmApiDuration.startTimer({ entity: PREFIX, method });
+  try {
+    const r = await postForm(ENDPOINT, {
+      method,
+      input_type: 'JSON',
+      response_type: 'JSON',
+      rest_data: JSON.stringify(restData),
+    });
+    if (r && typeof r.number === 'number' && r.number !== 0) {
+      const e = new Error(r.name || r.description || `CRM error ${r.number}`);
+      e.code = r.number;
+      end(); throw e;
+    }
+    end(); return r;
+  } catch (err) { end(); throw err; }
 }
 
 async function crmLogin(user, pass) {
@@ -197,18 +288,32 @@ async function ensureCrmSession(sid) {
 }
 
 async function crmCall(sid, method, params) {
-  let crmSid = await ensureCrmSession(sid);
+  if (circuitBreaker.isOpen())
+    throw new Error(`Circuit breaker open - CRM unavailable (${circuitBreaker.failures} consecutive failures)`);
+
+  let crmSid;
+  try { crmSid = await ensureCrmSession(sid); }
+  catch (err) { circuitBreaker.recordFailure(); throw err; }
+
   try {
-    return await rawCall(method, { session: crmSid, ...params });
+    const result = await rawCall(method, { session: crmSid, ...params });
+    circuitBreaker.recordSuccess();
+    return result;
   } catch (err) {
     if (err.code === 11) {
+      process.stderr.write(`[${PREFIX}] Session expired - re-logging in\n`);
+      metricSessionRenewals.inc({ entity: PREFIX });
       const sub = subBySid.get(sid) || sid;
       crmSessions.delete(`${sub}:${CODE}`);
       crmSessionAges.delete(`${sub}:${CODE}`);
-      crmSid = await ensureCrmSession(sid);
-      return await rawCall(method, { session: crmSid, ...params });
+      try {
+        crmSid = await ensureCrmSession(sid);
+        const result = await rawCall(method, { session: crmSid, ...params });
+        circuitBreaker.recordSuccess();
+        return result;
+      } catch (retryErr) { circuitBreaker.recordFailure(); throw retryErr; }
     }
-    throw err;
+    circuitBreaker.recordFailure(); throw err;
   }
 }
 
@@ -411,6 +516,7 @@ async function serverInfo(sid) {
     required_group: REQUIRED_GROUP,
     session_active: crmSessions.has(`${subBySid.get(sid) || sid}:${CODE}`),
     active_connections: transports.size,
+    circuit_breaker: circuitBreaker.state.toLowerCase(),
   };
 }
 
@@ -589,6 +695,7 @@ function createMcpServer(sid) {
 
   srv.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args = {} } = req.params;
+    const end = metricToolDuration.startTimer({ entity: PREFIX, tool: name });
     try {
       let result;
       if (name === `${PREFIX}_search`) result = await searchRecords(sid, args);
@@ -606,8 +713,12 @@ function createMcpServer(sid) {
       else if (name === `${PREFIX}_server_info`) result = await serverInfo(sid);
       else throw new McpError(ErrorCode.MethodNotFound, `Unknown: ${name}`);
 
+      end();
+      metricToolCalls.inc({ entity: PREFIX, tool: name, status: 'success' });
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
+      end();
+      metricToolCalls.inc({ entity: PREFIX, tool: name, status: 'error' });
       return {
         content: [{ type: 'text', text: `Error: ${err.message}` }],
         isError: true,
@@ -618,6 +729,30 @@ function createMcpServer(sid) {
   return srv;
 }
 
+// ---------------------------------------------------------------------------
+// Rate limiters
+// ---------------------------------------------------------------------------
+const sseRL = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many connection attempts - try again in 15 minutes' },
+});
+
+const messagesRL = rateLimit({
+  windowMs: 60 * 1000, max: 100,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many tool calls - slow down' },
+});
+
+const deepHealthRL = rateLimit({
+  windowMs: 60 * 1000, max: 10,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many health check requests' },
+});
+
+// ---------------------------------------------------------------------------
+// Express app
+// ---------------------------------------------------------------------------
 const app = express();
 app.use((req, res, next) =>
   req.path === '/messages' ? next() : bodyParser.json()(req, res, next)
@@ -629,10 +764,49 @@ app.get('/health', (_req, res) =>
     entity: CODE,
     port: PORT,
     active: transports.size,
+    circuit_breaker: circuitBreaker.state.toLowerCase(),
   })
 );
 
-app.get('/test', jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req, res) => {
+app.get('/health/deep', deepHealthRL, async (_req, res) => {
+  const start = Date.now();
+  const checks = {};
+  let status = 'healthy';
+
+  try {
+    const parsed = new URL(ENDPOINT);
+    checks.endpoint = { status: 'ok', url: `${parsed.protocol}//${parsed.host}` };
+  } catch {
+    checks.endpoint = { status: 'error', message: 'Invalid endpoint URL' };
+    status = 'unhealthy';
+  }
+
+  if (status !== 'unhealthy') {
+    try {
+      const t = Date.now();
+      await rawCall('get_server_info', {});
+      checks.api = { status: 'ok', latency_ms: Date.now() - t };
+    } catch (err) {
+      checks.api = { status: 'error', message: err.message };
+      status = 'degraded';
+    }
+  }
+
+  checks.sessions = { status: 'ok', active: transports.size };
+
+  res.status(status === 'unhealthy' ? 503 : 200).json({
+    status,
+    entity: CODE,
+    port: PORT,
+    uptime: Math.floor(process.uptime()),
+    connections: transports.size,
+    circuit_breaker: circuitBreaker.state.toLowerCase(),
+    checks,
+    duration_ms: Date.now() - start,
+  });
+});
+
+app.get('/test', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req, res) => {
   try {
     await crmLogin(req.crmCreds.user, req.crmCreds.pass);
     res.json({ success: true, crm_user: req.crmCreds.user, entity: CODE });
@@ -641,7 +815,7 @@ app.get('/test', jwtMiddleware, profileMiddleware, groupAccessMiddleware, async 
   }
 });
 
-app.get('/sse', jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req, res) => {
+app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req, res) => {
   if (transports.size >= 100) {
     return res.status(503).json({ error: 'Too many connections' });
   }
@@ -654,6 +828,9 @@ app.get('/sse', jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (
   transports.set(sid, transport);
   subBySid.set(sid, req.auth.sub);
 
+  metricActiveConnections.set({ entity: PREFIX }, transports.size);
+  metricConnections.inc({ entity: PREFIX });
+
   ensureCrmSession(sid).catch(err => {
     process.stderr.write(`[${PREFIX}] Initial CRM login failed for session ${sid}: ${err.message}\n`);
   });
@@ -662,17 +839,39 @@ app.get('/sse', jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (
     transports.delete(sid);
     connCreds.delete(sid);
     subBySid.delete(sid);
+    metricActiveConnections.set({ entity: PREFIX }, transports.size);
   });
 
   await srv.connect(transport);
 });
 
-app.post('/messages', async (req, res) => {
+app.post('/messages', messagesRL, async (req, res) => {
   const t = transports.get(req.query.sessionId);
   if (!t) return res.status(404).json({ error: 'Session not found' });
   await t.handlePostMessage(req, res);
 });
 
+process.on('SIGTERM', () => {
+  process.stderr.write(`[${PREFIX}] SIGTERM received - shutting down\n`);
+  for (const [, t] of transports) t.close?.();
+  process.exit(0);
+});
+
 app.listen(PORT, '127.0.0.1', () => {
   process.stderr.write(`[${PREFIX}] Listening on 127.0.0.1:${PORT}\n`);
+});
+
+// ---------------------------------------------------------------------------
+// Metrics server (separate port, localhost only)
+// ---------------------------------------------------------------------------
+const metricsServer = http.createServer(async (req, res) => {
+  if (req.url === '/metrics' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': metricsRegistry.contentType });
+    res.end(await metricsRegistry.metrics());
+  } else {
+    res.writeHead(404); res.end();
+  }
+});
+metricsServer.listen(METRICS_PORT, METRICS_BIND, () => {
+  process.stderr.write(`[${PREFIX}] Metrics on ${METRICS_BIND}:${METRICS_PORT}/metrics\n`);
 });
