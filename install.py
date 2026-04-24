@@ -69,7 +69,9 @@ ENTITIES_JSON      = "/etc/suitecrm-mcp/entities.json"  # runtime entity config 
 CRM_HOSTS_FILE     = "/etc/suitecrm-mcp/crm-hosts.json"  # SSH provisioning config
 PROFILES_FILE      = "/etc/suitecrm-mcp/user-profiles.json"
 DOMAIN_FILE        = "/etc/suitecrm-mcp/domain"
-PROFILE_ADMIN_DEST = "/usr/local/bin/mcp-profile-admin"
+AUTH_ENV_FILE      = "/etc/suitecrm-mcp/auth.env"
+AUTH_SVC_NAME      = "suitecrm-mcp-auth"
+PROFILE_ADMIN_DEST = "/usr/local/bin/mcp-admin"
 NGINX_CONF    = "/etc/nginx/sites-available/suitecrm-mcp"
 NGINX_LINK    = "/etc/nginx/sites-enabled/suitecrm-mcp"
 NGINX_PORT    = 8080   # multi-entity plain HTTP listen port
@@ -376,28 +378,28 @@ def prompt_oauth_config(args, domain=None):
     print("  any OIDC provider. See docs/auth0-setup.md for guidance.")
     print()
 
-    issuer = getattr(args, "oauth_issuer", None) or _prompt(
-        "OIDC issuer URL (e.g. https://your-tenant.auth0.com)"
+    auth0_domain = getattr(args, "oauth_issuer", None) or _prompt(
+        "Auth0 domain (e.g. your-tenant.auth0.com)"
     )
-    if not issuer:
-        error("OAuth issuer URL is required")
-    issuer = issuer.rstrip("/")
+    if not auth0_domain:
+        error("Auth0 domain is required")
+    auth0_domain = auth0_domain.rstrip("/").removeprefix("https://")
 
-    client_id = getattr(args, "oauth_client_id", None) or _prompt("OAuth client ID")
+    client_id = getattr(args, "oauth_client_id", None) or _prompt("Auth0 client ID")
     if not client_id:
-        error("OAuth client ID is required")
+        error("Auth0 client ID is required")
 
-    client_secret = getattr(args, "oauth_client_secret", None) or _prompt("OAuth client secret")
+    client_secret = getattr(args, "oauth_client_secret", None) or _prompt("Auth0 client secret")
     if not client_secret:
-        error("OAuth client secret is required")
+        error("Auth0 client secret is required")
 
     audience = getattr(args, "oauth_audience", None) or ""
     while not audience:
         audience = _prompt(
-            "OAuth audience (Auth0: your API identifier; Azure AD: client ID - required)", ""
+            "Auth0 audience (your API identifier - required)", ""
         )
         if not audience:
-            error("OAuth audience is required")
+            error("Auth0 audience is required")
 
     # Derive gateway URL
     if domain:
@@ -405,34 +407,26 @@ def prompt_oauth_config(args, domain=None):
     else:
         default_gw = getattr(args, "gateway_url", None) or ""
     gateway_url = getattr(args, "gateway_url", None) or _prompt(
-        "Gateway external URL (e.g. https://mcp.yourcompany.com)", default_gw
+        "Gateway public URL (e.g. https://mcp.yourdomain.com)", default_gw
     )
     if not gateway_url:
-        error("Gateway external URL is required (used to build the OAuth redirect URI)")
+        error("Gateway public URL is required (used to build the OAuth redirect URI)")
     gateway_url = gateway_url.rstrip("/")
 
-    redirect_uri = f"{gateway_url}/auth/callback"
+    session_ttl = getattr(args, "session_ttl_days", None) or _prompt(
+        "Session TTL in days (default: 30)", "30"
+    ) or "30"
 
-    groups_claim = getattr(args, "oauth_groups_claim", None) or _prompt(
-        "JWT groups claim (default: roles)", "roles"
-    ) or "roles"
-
-    # Generate a new API key secret (one-time, written to env file)
-    api_key_secret = secrets.token_hex(32)
-
-    ok(f"Redirect URI: {redirect_uri}")
-    ok(f"Generated API_KEY_SECRET (save this - needed if you rebuild)")
+    ok(f"Redirect URI: {gateway_url}/auth/callback")
     print()
 
     return {
-        "OAUTH_ISSUER":        issuer,
-        "OAUTH_CLIENT_ID":     client_id,
-        "OAUTH_CLIENT_SECRET": client_secret,
-        "OAUTH_AUDIENCE":      audience,
-        "OAUTH_REDIRECT_URI":  redirect_uri,
-        "GATEWAY_EXTERNAL_URL": gateway_url,
-        "OAUTH_GROUPS_CLAIM":  groups_claim,
-        "API_KEY_SECRET":      api_key_secret,
+        "AUTH0_DOMAIN":      auth0_domain,
+        "AUTH0_CLIENT_ID":   client_id,
+        "AUTH0_CLIENT_SECRET": client_secret,
+        "AUTH0_AUDIENCE":    audience,
+        "GATEWAY_PUBLIC_URL": gateway_url,
+        "SESSION_TTL_DAYS":  session_ttl,
     }
 
 
@@ -458,13 +452,64 @@ def write_entities_json(entities):
 
 
 # ---------------------------------------------------------------------------
+# Auth service install
+# ---------------------------------------------------------------------------
+
+def install_auth_service(auth_cfg):
+    """Write auth.env and a systemd unit for suitecrm-mcp-auth (auth.mjs)."""
+    lines = [
+        "# SuiteCRM MCP Auth Service",
+        f"AUTH0_DOMAIN={auth_cfg['AUTH0_DOMAIN']}",
+        f"AUTH0_CLIENT_ID={auth_cfg['AUTH0_CLIENT_ID']}",
+        f"AUTH0_CLIENT_SECRET={auth_cfg['AUTH0_CLIENT_SECRET']}",
+        f"AUTH0_AUDIENCE={auth_cfg['AUTH0_AUDIENCE']}",
+        f"GATEWAY_PUBLIC_URL={auth_cfg['GATEWAY_PUBLIC_URL']}",
+        f"SESSION_TTL_DAYS={auth_cfg.get('SESSION_TTL_DAYS', '30')}",
+        "PORT=3100",
+        "BIND_HOST=127.0.0.1",
+        "",
+    ]
+    write_file(AUTH_ENV_FILE, "\n".join(lines), mode="600")
+    run(["chown", f"{SVC_USER}:{SVC_USER}", AUTH_ENV_FILE])
+    ok(f"  Auth env: {AUTH_ENV_FILE}")
+
+    nb = node_bin()
+    unit = (
+        f"[Unit]\n"
+        f"Description=SuiteCRM MCP Auth Service\n"
+        f"After=network.target\n\n"
+        f"[Service]\n"
+        f"Type=simple\n"
+        f"User={SVC_USER}\n"
+        f"Group={SVC_USER}\n"
+        f"EnvironmentFile={AUTH_ENV_FILE}\n"
+        f"ExecStart={nb} {SERVER_DIR}/auth.mjs\n"
+        f"Restart=always\n"
+        f"RestartSec=5\n"
+        f"StandardOutput=journal\n"
+        f"StandardError=journal\n"
+        f"SyslogIdentifier={AUTH_SVC_NAME}\n"
+        f"NoNewPrivileges=yes\n"
+        f"PrivateTmp=yes\n"
+        f"ProtectSystem=strict\n"
+        f"ProtectHome=yes\n"
+        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp\n\n"
+        f"[Install]\n"
+        f"WantedBy=multi-user.target\n"
+    )
+    unit_path = f"/etc/systemd/system/{AUTH_SVC_NAME}.service"
+    write_file(unit_path, unit)
+    ok(f"  Auth service: {unit_path}")
+
+
+# ---------------------------------------------------------------------------
 # Admin tool + SSH provisioning helpers
 # ---------------------------------------------------------------------------
 
 def install_profile_admin():
-    src = script_dir() / "tools" / "mcp-profile-admin"
+    src = script_dir() / "tools" / "mcp-admin"
     if not src.exists():
-        warn("tools/mcp-profile-admin not found - skipping admin tool install")
+        warn("tools/mcp-admin not found - skipping admin tool install")
         return
     shutil.copy(src, PROFILE_ADMIN_DEST)
     run(["chmod", "750", PROFILE_ADMIN_DEST])
@@ -679,15 +724,14 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
     if behind_proxy:
         lines.append("TRUST_PROXY=1")
 
-    # OAuth2/OIDC vars - same values for every entity (shared identity provider)
+    # Auth0 vars needed by the entity gateway to validate session tokens
     if oauth_cfg:
         lines.append("")
-        lines.append("# OAuth2/OIDC")
-        for key, val in oauth_cfg.items():
+        lines.append("# Auth0 (token validation)")
+        for key in ("AUTH0_DOMAIN", "AUTH0_AUDIENCE"):
+            val = oauth_cfg.get(key)
             if val:
                 lines.append(f"{key}={val}")
-        lines.append(f"PROFILES_FILE={PROFILES_FILE}")
-        lines.append(f"ENTITIES_CONFIG={ENTITIES_JSON}")
 
     lines.append("")
 
@@ -1316,6 +1360,12 @@ def main():
                     warn(f"  Re-run later: sudo python3 install.py --setup-crm-host {code}")
         print()
 
+    # Auth service
+    if oauth_cfg:
+        info("Installing auth service ...")
+        install_auth_service(oauth_cfg)
+        print()
+
     # Per-entity install
     info("Installing env files and services ...")
     svc_names = []
@@ -1327,6 +1377,9 @@ def main():
         svc_names.append((code, svc_name))
 
     run(["systemctl", "daemon-reload"])
+    if oauth_cfg:
+        run(["systemctl", "enable", "--now", AUTH_SVC_NAME])
+        ok(f"  Started: {AUTH_SVC_NAME}")
     for code, svc_name in svc_names:
         run(["systemctl", "enable", "--now", svc_name])
         ok(f"  Started: {svc_name}")
@@ -1366,7 +1419,7 @@ def main():
 
     print()
     if oauth_cfg:
-        gw_url = oauth_cfg.get("GATEWAY_EXTERNAL_URL", "https://YOUR_GATEWAY")
+        gw_url = oauth_cfg.get("GATEWAY_PUBLIC_URL", "https://YOUR_GATEWAY")
         info("Users authenticate by visiting:")
         print(f"  {gw_url}/auth/login")
         print()

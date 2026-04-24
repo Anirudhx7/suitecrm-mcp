@@ -1,28 +1,42 @@
 services:
 
+  # ── Auth service ─────────────────────────────────────────────────────────────
+  # Handles OAuth2/OIDC login and issues session tokens.
+  # One instance per deployment (shared across all entities).
+  suitecrm-mcp-auth:
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
+    command: node auth.mjs
+    working_dir: /app
+    ports:
+      - "127.0.0.1:3100:3100"
+    environment:
+      AUTH0_DOMAIN: your-tenant.auth0.com
+      AUTH0_CLIENT_ID: your-client-id
+      AUTH0_CLIENT_SECRET: your-client-secret
+      AUTH0_AUDIENCE: https://your-api-identifier
+      GATEWAY_PUBLIC_URL: https://mcp.yourdomain.com
+      SESSION_TTL_DAYS: "30"
+      PORT: "3100"
+    restart: unless-stopped
+
   # ── Gateway (single-entity Docker usage) ────────────────────────────────────
-  # For multi-entity deployments use install.py --config entities.json (systemd) instead.
+  # For multi-entity deployments use install.py (systemd) instead.
   # This service is kept for single-CRM / dev use.
   suitecrm-mcp:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v3.1.5
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
     ports:
-      - "3101:3101"    # MCP SSE gateway
+      - "3101:3101"
     environment:
-      SUITECRM_ENDPOINT: https://crm.example.com/service/v4_1/rest.php
+      SUITECRM_ENDPOINT: https://crm.example.com/legacy/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm
+      SUITECRM_CODE: crm1
+      AUTH0_DOMAIN: your-tenant.auth0.com
+      AUTH0_AUDIENCE: https://your-api-identifier
+      REQUIRED_GROUP: crm1_users
       PORT: "3101"
-      METRICS_PORT: "9090"
-      METRICS_BIND: "0.0.0.0"   # Docker-internal only: needed so Prometheus container can scrape metrics.
-                                 # If you remove the Prometheus service, change this to "127.0.0.1".
-      # OAuth2/OIDC - required for v3.0 auth
-      OAUTH_ISSUER: https://your-tenant.auth0.com
-      OAUTH_CLIENT_ID: your-client-id
-      OAUTH_CLIENT_SECRET: your-client-secret
-      OAUTH_AUDIENCE: https://your-tenant.auth0.com/api/v2/
-      OAUTH_REDIRECT_URI: https://mcp.yourcompany.com/auth/callback
-      GATEWAY_EXTERNAL_URL: https://mcp.yourcompany.com
-      API_KEY_SECRET: change-me-generate-with-node-crypto-randomBytes-32
       # NODE_TLS_REJECT_UNAUTHORIZED: "0"  # only for self-signed certs
+    depends_on:
+      - suitecrm-mcp-auth
     restart: unless-stopped
 
   # ── Prometheus ───────────────────────────────────────────────────────────────

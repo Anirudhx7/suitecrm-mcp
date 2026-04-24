@@ -1,15 +1,15 @@
 #!/bin/bash
 # ============================================================
-# crm-provision-user -- Non-interactive SuiteCRM API user provisioner
+# crm-provision-user — Non-interactive SuiteCRM API user provisioner
 # ============================================================
-# Runs on a CRM VM. Called via SSH by the MCP gateway after OAuth login.
+# Runs on each CRM VM. Called via SSH by the MCP gateway.
 # Auto-locates SuiteCRM config.php anywhere on the filesystem.
 #
 # Usage:
 #   Single user:  crm-provision-user <username> <password>
 #   Bulk CSV:     crm-provision-user --csv /path/to/users.csv
 #
-# Override config location if needed:
+# Override if needed:
 #   SUITECRM_CONFIG=/custom/path/config.php crm-provision-user alice pass
 # ============================================================
 
@@ -21,23 +21,22 @@ info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 fail() { echo -e "${RED}[FAIL]${NC} $1" >&2; exit 1; }
 
+# ── Auto-locate SuiteCRM config.php ──────────────────────────
 # ── Locate SuiteCRM config.php ───────────────────────────────
-# Set SUITECRM_CONFIG in /etc/environment to skip this search.
+# SUITECRM_CONFIG must be set in /etc/environment (done by Ansible/setup).
+# If not set, we run the reliable find command to discover it now
+# and tell the admin to persist it.
 if [ -z "${SUITECRM_CONFIG:-}" ]; then
-    warn "SUITECRM_CONFIG not set -- searching filesystem (this may take a moment)..."
-    SUITECRM_CONFIG=$(find / \
-        \( -path /proc -o -path /sys -o -path /dev \) -prune -o \
-        -name "config.php" -readable -print 2>/dev/null \
-        | xargs grep -l "dbconfig" 2>/dev/null \
-        | head -1)
+    warn "SUITECRM_CONFIG not set — searching filesystem..."
+    SUITECRM_CONFIG=$(find /         \( -path /proc -o -path /sys -o -path /dev \) -prune -o         -name "config.php" -readable -print 2>/dev/null         | xargs grep -l "dbconfig" 2>/dev/null         | head -1)
 
     [ -z "$SUITECRM_CONFIG" ] && fail "Could not find SuiteCRM config.php.
-Persist it manually:
-  export SUITECRM_CONFIG=\$(find / \\( -path /proc -o -path /sys -o -path /dev \\) -prune -o -name config.php -readable -print 2>/dev/null | xargs grep -l dbconfig 2>/dev/null | head -1)
-  echo \"SUITECRM_CONFIG=\$SUITECRM_CONFIG\" | sudo tee -a /etc/environment"
+Run this to find and persist it:
+  export SUITECRM_CONFIG=\$(find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o -name config.php -readable -print 2>/dev/null | xargs grep -l dbconfig 2>/dev/null | head -1)
+  echo "SUITECRM_CONFIG=\$SUITECRM_CONFIG" | sudo tee -a /etc/environment"
 
     warn "Found: $SUITECRM_CONFIG"
-    warn "Persist it: echo \"SUITECRM_CONFIG=$SUITECRM_CONFIG\" | sudo tee -a /etc/environment"
+    warn "Persist it: echo "SUITECRM_CONFIG=$SUITECRM_CONFIG" | sudo tee -a /etc/environment"
 fi
 
 [ ! -f "$SUITECRM_CONFIG" ] && fail "SUITECRM_CONFIG file not found: $SUITECRM_CONFIG"
@@ -64,6 +63,7 @@ if [ -z "${CRM_URL:-}" ]; then
     CRM_URL=$(php -r "include('$SUITECRM_CONFIG'); echo \$sugar_config['site_url'] ?? 'https://localhost';" 2>/dev/null)
 fi
 
+CRM_URL="${CRM_URL/http:\/\//https://}"
 API_PATH="${API_PATH:-/legacy/service/v4_1/rest.php}"
 ENDPOINT="${CRM_URL%/}${API_PATH}"
 
@@ -76,7 +76,6 @@ SERVER_INFO=$(curl -sk -m 10 -X POST "$ENDPOINT" \
 
 VERSION=$(echo "$SERVER_INFO" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('version',''))" 2>/dev/null || echo "")
 [ -z "$VERSION" ] && fail "API endpoint unreachable: $ENDPOINT"
-info "CRM version: $VERSION  endpoint: $ENDPOINT"
 
 # ── Set password in DB and verify API login ───────────────────
 process_user() {
@@ -98,9 +97,12 @@ try {
     $pdo = new PDO("mysql:host=$host;port=$db_port;dbname=$dbname", $db_user, $db_pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $hash = strtolower(md5($api_pass));
+    $check = $pdo->prepare("SELECT COUNT(*) FROM users WHERE user_name = ?");
+    $check->execute([$crm_user]);
+    if ($check->fetchColumn() == 0) { echo 0; exit; }
     $stmt = $pdo->prepare("UPDATE users SET user_hash = ?, external_auth_only = 0, system_generated_password = 0 WHERE user_name = ?");
     $stmt->execute([$hash, $crm_user]);
-    echo $stmt->rowCount();
+    echo 1;
 } catch (Exception $e) {
     echo "ERROR: " . $e->getMessage();
 }
@@ -139,10 +141,10 @@ if [ "${1:-}" != "--csv" ]; then
     [ $# -lt 2 ] && fail "Usage: crm-provision-user <username> <password>"
     RESULT=$(process_user "$1" "$2")
     case "$RESULT" in
-        OK)           ok "$1 -- password set and login verified"; exit 0 ;;
-        NO_USER)      fail "$1 -- not found in SuiteCRM database" ;;
-        DB_FAIL:*)    fail "$1 -- DB error: ${RESULT#DB_FAIL:}" ;;
-        LOGIN_FAIL:*) warn "$1 -- password set in DB (API verify failed -- may be normal if CRM not reachable internally)"; exit 0 ;;
+        OK)           ok "$1 — password set and login verified"; exit 0 ;;
+        NO_USER)      fail "$1 — not found in SuiteCRM database" ;;
+        DB_FAIL:*)    fail "$1 — DB error: ${RESULT#DB_FAIL:}" ;;
+        LOGIN_FAIL:*) warn "$1 — password set in DB (API verify failed — may be normal if CRM not reachable internally)"; exit 0 ;;
     esac
 fi
 
@@ -160,17 +162,17 @@ while IFS=',' read -r RAW_USER RAW_PASS; do
 
     if [ $LINE -eq 1 ]; then
         LOWER=$(echo "$CRM_USER" | tr '[:upper:]' '[:lower:]')
-        [[ "$LOWER" =~ ^(username|user|user_name)$ ]] && { info "Skipping header row"; continue; }
+        [[ "$LOWER" =~ ^(username|user|user_name)$ ]] && { info "Skipping header"; continue; }
     fi
 
-    [ -z "$API_PASS" ] && { warn "$CRM_USER -- skipped (no password)"; SKIP=$((SKIP+1)); continue; }
+    [ -z "$API_PASS" ] && { warn "$CRM_USER — skipped (no password)"; SKIP=$((SKIP+1)); continue; }
 
     printf "  %-30s ... " "$CRM_USER"
     RESULT=$(process_user "$CRM_USER" "$API_PASS")
     case "$RESULT" in
-        OK)           echo -e "${GREEN}OK${NC}";                    PASS=$((PASS+1)) ;;
-        NO_USER)      echo -e "${RED}FAIL${NC} (not in DB)";        FAIL=$((FAIL+1)) ;;
-        DB_FAIL:*)    echo -e "${RED}FAIL${NC} (DB error)";         FAIL=$((FAIL+1)) ;;
+        OK)           echo -e "${GREEN}OK${NC}";                   PASS=$((PASS+1)) ;;
+        NO_USER)      echo -e "${RED}FAIL${NC} (not in DB)";       FAIL=$((FAIL+1)) ;;
+        DB_FAIL:*)    echo -e "${RED}FAIL${NC} (DB error)";        FAIL=$((FAIL+1)) ;;
         LOGIN_FAIL:*) echo -e "${YELLOW}WARN${NC} (DB set, API verify failed)"; PASS=$((PASS+1)) ;;
     esac
 done < "$CSV_FILE"

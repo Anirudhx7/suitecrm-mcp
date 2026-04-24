@@ -103,13 +103,13 @@ For production: create a dedicated API user with only the module permissions you
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v3.1.5` instead of floating on `latest`.
+For production, pin to a release tag such as `v4.0.0` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v3.1.5/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v4.0.0/docker-compose.yml
 ```
 
-Edit `docker-compose.yml` and fill in `SUITECRM_ENDPOINT`, all `OAUTH_*` vars, and `API_KEY_SECRET`, then:
+Edit `docker-compose.yml` and fill in `SUITECRM_ENDPOINT`, `AUTH0_*` vars, and `GATEWAY_PUBLIC_URL`, then:
 
 ```bash
 docker compose up -d
@@ -136,40 +136,52 @@ Each container handles exactly one CRM entity. For N entities, add N service blo
 ```yaml
 services:
 
+  suitecrm-mcp-auth:
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
+    command: node auth.mjs
+    working_dir: /app
+    ports:
+      - "127.0.0.1:3100:3100"
+    environment:
+      AUTH0_DOMAIN: your-tenant.auth0.com
+      AUTH0_CLIENT_ID: your-client-id
+      AUTH0_CLIENT_SECRET: your-client-secret
+      AUTH0_AUDIENCE: https://your-api-identifier
+      GATEWAY_PUBLIC_URL: https://mcp.yourdomain.com
+      SESSION_TTL_DAYS: "30"
+      PORT: "3100"
+    restart: unless-stopped
+
   suitecrm-mcp-crm1:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v3.1.5
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
     ports:
       - "3101:3101"
     environment:
       SUITECRM_ENDPOINT: https://crm1.example.com/service/v4_1/rest.php
-      SUITECRM_PREFIX: suitecrm
-      SUITECRM_CODE: crm1         # entity code - sets tool names to suitecrm_crm1_*
+      SUITECRM_PREFIX: suitecrm_crm1
+      SUITECRM_CODE: crm1
+      AUTH0_DOMAIN: your-tenant.auth0.com
+      AUTH0_AUDIENCE: https://your-api-identifier
+      REQUIRED_GROUP: crm1_users
       PORT: "3101"
-      OAUTH_ISSUER: https://your-tenant.auth0.com
-      OAUTH_CLIENT_ID: your-client-id
-      OAUTH_CLIENT_SECRET: your-client-secret
-      OAUTH_AUDIENCE: https://your-tenant.auth0.com/api/v2/
-      OAUTH_REDIRECT_URI: https://mcp.yourcompany.com/auth/callback
-      GATEWAY_EXTERNAL_URL: https://mcp.yourcompany.com
-      API_KEY_SECRET: same-secret-for-all-entities
+    depends_on:
+      - suitecrm-mcp-auth
     restart: unless-stopped
 
   suitecrm-mcp-crm2:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v3.1.5
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
     ports:
       - "3102:3102"
     environment:
       SUITECRM_ENDPOINT: https://crm2.example.com/legacy/service/v4_1/rest.php
-      SUITECRM_PREFIX: suitecrm
-      SUITECRM_CODE: crm2         # entity code - sets tool names to suitecrm_crm2_*
+      SUITECRM_PREFIX: suitecrm_crm2
+      SUITECRM_CODE: crm2
+      AUTH0_DOMAIN: your-tenant.auth0.com
+      AUTH0_AUDIENCE: https://your-api-identifier
+      REQUIRED_GROUP: crm2_users
       PORT: "3102"
-      OAUTH_ISSUER: https://your-tenant.auth0.com
-      OAUTH_CLIENT_ID: your-client-id
-      OAUTH_CLIENT_SECRET: your-client-secret
-      OAUTH_AUDIENCE: https://your-tenant.auth0.com/api/v2/
-      OAUTH_REDIRECT_URI: https://mcp.yourcompany.com/auth/callback
-      GATEWAY_EXTERNAL_URL: https://mcp.yourcompany.com
-      API_KEY_SECRET: same-secret-for-all-entities
+    depends_on:
+      - suitecrm-mcp-auth
     restart: unless-stopped
 ```
 
@@ -180,9 +192,8 @@ What changes per entity:
 - `PORT` and the host port mapping - each entity needs its own port (3101, 3102, ...)
 
 What stays the same across all entities:
-- `API_KEY_SECRET` - must be identical so that API keys issued by any entity are valid on all
-- All `OAUTH_*` vars - one OAuth app handles all entities
-- `GATEWAY_EXTERNAL_URL` and `OAUTH_REDIRECT_URI`
+- `AUTH0_DOMAIN` and `AUTH0_AUDIENCE` - one Auth0 app handles all entities
+- The auth service (`suitecrm-mcp-auth`) is shared; entity containers depend on it
 
 Put a reverse proxy (nginx, Caddy) in front to route `/crm1/` to port 3101, `/crm2/` to port 3102, and `/auth/` to any one instance. For production use with multiple CRMs, `install.py --config entities.json` handles all of this automatically on a Linux host.
 
@@ -293,17 +304,13 @@ sudo python3 install.py --remove crm2
 | `CRM_TIMEOUT_MS` | No | `30000` | CRM API request timeout in ms |
 | `CIRCUIT_BREAKER_THRESHOLD` | No | `5` | Consecutive failures before circuit opens |
 | `CIRCUIT_BREAKER_RESET_MS` | No | `60000` | ms before circuit tests recovery |
-| `OAUTH_ISSUER` | Yes (OAuth) | - | OIDC issuer URL |
-| `OAUTH_CLIENT_ID` | Yes (OAuth) | - | OAuth client ID |
-| `OAUTH_CLIENT_SECRET` | Yes (OAuth) | - | OAuth client secret |
-| `OAUTH_AUDIENCE` | Yes (OAuth) | - | OAuth audience / API identifier |
-| `OAUTH_REDIRECT_URI` | Yes (OAuth) | - | OAuth callback URL |
-| `GATEWAY_EXTERNAL_URL` | Yes (OAuth) | - | Public base URL of the gateway |
-| `API_KEY_SECRET` | Yes (OAuth) | - | Secret used to bind gateway-issued API keys |
-| `OAUTH_GROUPS_CLAIM` | No | `{audience}/groups` | JWT claim containing user groups |
-| `API_KEY_TTL_DAYS` | No | `90` | API key lifetime in days |
-| `PROFILES_FILE` | No | `/etc/suitecrm-mcp/user-profiles.json` | User profile storage path |
-| `ENTITIES_CONFIG` | No | `/etc/suitecrm-mcp/entities.json` | Multi-entity config path |
+| `AUTH0_DOMAIN` | Yes (auth) | - | Auth0 tenant domain (entity gateway) |
+| `AUTH0_AUDIENCE` | Yes (auth) | - | Auth0 API identifier (entity gateway) |
+| `AUTH0_CLIENT_ID` | Yes (auth svc) | - | Auth0 client ID (auth service only) |
+| `AUTH0_CLIENT_SECRET` | Yes (auth svc) | - | Auth0 client secret (auth service only) |
+| `GATEWAY_PUBLIC_URL` | Yes (auth svc) | - | Public base URL of the gateway (auth service only) |
+| `SESSION_TTL_DAYS` | No (auth svc) | `30` | Session token lifetime in days (auth service only) |
+| `REQUIRED_GROUP` | No | - | Auth0 role required to access this entity |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | No | - | Set to `0` only for self-signed certs |
 | `NODE_NO_WARNINGS` | No | - | Set to `1` to suppress Node warnings |
 | `TRUST_PROXY` | No | - | Set to `1` when running behind nginx or another reverse proxy |
@@ -341,7 +348,7 @@ Keys become the entity code (nginx path prefix, tool prefix suffix, service name
 
 ```bash
 curl http://YOUR_SERVER:3101/health
-# {"status":"ok","version":"3.1.1","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
+# {"status":"ok","version":"4.0.0","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
 
 curl http://YOUR_SERVER:3101/health/deep
 # {"status":"healthy","checks":{"endpoint":{"status":"ok"},"api":{"status":"ok","latency_ms":142},...}}
@@ -506,9 +513,9 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 ## Security Notes
 
 - **HTTPS is required for production.** OAuth flows and API keys must not travel over plain HTTP. Use `--domain` to enable Let's Encrypt, or put the gateway behind a TLS-terminating proxy.
-- **API keys are personal and revocable.** Each user gets their own key tied to their identity. Admins can revoke a key instantly with `python3 tools/mcp-profile-admin revoke <sub>`. Compromised keys do not expose other users.
-- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque `smcp_...` API key. CRM credentials are stored in `/etc/suitecrm-mcp/user-profiles.json` (mode 600) on the gateway.
-- **Keep `API_KEY_SECRET` and `OAUTH_CLIENT_SECRET` secret.** These are stored in env files (mode 600). Rotating `API_KEY_SECRET` invalidates all issued API keys.
+- **API keys are personal and revocable.** Each user gets their own key tied to their identity. Admins can revoke a key instantly with `mcp-admin revoke <sub>`. Compromised keys do not expose other users.
+- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque `smcp_...` API key. CRM credentials are stored in `/etc/suitecrm-mcp/sessions.json` (mode 600) on the gateway.
+- **Keep `AUTH0_CLIENT_SECRET` secret.** It is stored in `/etc/suitecrm-mcp/auth.env` (mode 600) and only read by the auth service.
 - **Query sanitisation.** The `search` and `count` tools accept a SQL WHERE clause. The gateway blocks destructive SQL keywords (DROP, ALTER, DELETE, etc.) and comment/statement-chaining patterns. SuiteCRM's own API layer provides additional protection.
 - Env files are written with mode `600` and the env directory with `700`
 - `entities.json` and `user-profiles.json` are in `.gitignore` - never commit them

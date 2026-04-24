@@ -1,0 +1,55 @@
+---
+# ============================================================
+# inventory.yml — SuiteCRM MCP Gateway deployment inventory
+# ============================================================
+# Required per CRM VM:
+#   ansible_host  — IP or hostname of the CRM VM
+#   entity_code   — short code used everywhere (e.g. crm1, crm2)
+#   label         — human-readable name shown in the success page UI
+#   port          — MCP gateway port for this entity (3101, 3102, ...)
+#   group         — Auth0 group name that gates access to this entity
+#
+# Optional per CRM VM:
+#   api_path      — REST API path if non-standard
+#                   default: /legacy/service/v4_1/rest.php
+#
+# The CRM endpoint URL is auto-discovered from the VM's config.php.
+# ============================================================
+
+all:
+  hosts:
+    gateway:
+      ansible_host: 10.0.0.1                          # IP of your gateway server
+      ansible_user: ubuntu
+      ansible_ssh_private_key_file: ~/.ssh/gateway.pem
+
+  children:
+    crm_vms:
+      hosts:
+        crm1-vm:
+          ansible_host: 10.0.1.1                      # IP of CRM VM 1
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: ~/.ssh/gateway.pem
+          entity_code: crm1
+          label: "Main CRM"
+          port: 3101
+          group: crm1_users
+
+        crm2-vm:
+          ansible_host: 10.0.1.2                      # IP of CRM VM 2
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: ~/.ssh/gateway.pem
+          entity_code: crm2
+          label: "Client B CRM"
+          port: 3102
+          group: crm2_users
+
+        crm3-vm:
+          ansible_host: 10.0.1.3                      # IP of CRM VM 3
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: ~/.ssh/gateway.pem
+          entity_code: crm3
+          api_path: /crm/legacy/service/v4_1/rest.php # override if non-standard
+          label: "Client C CRM"
+          port: 3103
+          group: crm3_users

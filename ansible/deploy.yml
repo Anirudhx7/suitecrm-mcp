@@ -1,0 +1,352 @@
+---
+# ============================================================
+# deploy.yml — SuiteCRM MCP Gateway provisioner deployment
+# ============================================================
+# Idempotent — safe to re-run anytime.
+#
+# Play 1 — crm_vms:
+#   - Deploys crm-provision-user script to each CRM VM
+#   - Adds gateway SSH public key to each CRM VM
+#   - Discovers SuiteCRM config.php and persists SUITECRM_CONFIG
+#   - Updates SUITECRM_ENDPOINT in the entity .env on the gateway
+#   - Updates crm-hosts.json on the gateway (SSH provisioning config)
+#   - Restarts the entity MCP service if .env changed
+#   - Runs a smoke test
+#
+# Play 2 — gateway:
+#   - Rebuilds entities.json from inventory + discovered endpoints
+#   - Syncs REQUIRED_GROUP_* entries in auth.env
+#   - Restarts suitecrm-mcp-auth if either file changed
+#
+# Run:
+#   ansible-playbook -i ansible/inventory.yml ansible/deploy.yml
+# ============================================================
+
+# ============================================================
+# Play 1: Deploy provisioner to CRM VMs and update gateway config
+# ============================================================
+- name: Deploy SuiteCRM API provisioner to CRM VMs
+  hosts: crm_vms
+  become: yes
+  vars:
+    # Public key of the gateway server — added to each CRM VM's authorized_keys
+    # Generate with: ssh-keygen -t rsa -b 4096 -f /etc/suitecrm-mcp/ssh-key.pem
+    # Then paste the contents of /etc/suitecrm-mcp/ssh-key.pem.pub here
+    gateway_ssh_pubkey: "ssh-rsa AAAA...your-gateway-public-key... ubuntu@gateway"
+    api_path_suffix: "{{ hostvars[inventory_hostname].api_path | default('/legacy/service/v4_1/rest.php') }}"
+    gateway_ssh_user: ubuntu
+    gateway_ssh_key: /etc/suitecrm-mcp/ssh-key.pem
+
+  tasks:
+
+    - name: Install required packages
+      apt:
+        name: [php-cli, php-mysql, curl, python3]
+        state: present
+        update_cache: no
+
+    # ── Script deployment — redeploys if source changed ──────────
+    - name: Check deployed script stat
+      stat:
+        path: /usr/local/bin/crm-provision-user
+      register: script_stat
+
+    - name: Check source script stat on gateway
+      stat:
+        path: "{{ playbook_dir }}/../tools/crm-provision-user.sh"
+      register: source_stat
+      delegate_to: gateway
+
+    - name: Fetch crm-provision-user.sh from gateway
+      slurp:
+        src: "{{ playbook_dir }}/../tools/crm-provision-user.sh"
+      register: script_content
+      delegate_to: gateway
+      when: >
+        not script_stat.stat.exists or
+        script_stat.stat.checksum | default('') != source_stat.stat.checksum
+
+    - name: Deploy crm-provision-user script
+      copy:
+        content: "{{ script_content.content | b64decode }}"
+        dest: /usr/local/bin/crm-provision-user
+        owner: root
+        group: root
+        mode: '0755'
+      when: script_content is defined and script_content.content is defined
+
+    # ── SSH key ───────────────────────────────────────────────────
+    - name: Add gateway SSH public key to authorized_keys
+      authorized_key:
+        user: ubuntu
+        key: "{{ gateway_ssh_pubkey }}"
+        state: present
+
+    # ── Discover and persist SUITECRM_CONFIG ─────────────────────
+    - name: Check if SUITECRM_CONFIG already set in /etc/environment
+      shell: grep -c '^SUITECRM_CONFIG=' /etc/environment 2>/dev/null || echo 0
+      register: config_already_set
+      changed_when: false
+
+    - name: Fetch config discovery script from gateway
+      slurp:
+        src: "{{ playbook_dir }}/find-suitecrm-config.sh"
+      register: discovery_script
+      delegate_to: gateway
+      when: config_already_set.stdout == "0"
+
+    - name: Deploy config discovery script to CRM VM
+      copy:
+        content: "{{ discovery_script.content | b64decode }}"
+        dest: /tmp/find-suitecrm-config.sh
+        mode: '0755'
+      when: config_already_set.stdout == "0"
+
+    - name: Discover SuiteCRM config.php with highest user count
+      shell: /tmp/find-suitecrm-config.sh
+      register: suitecrm_config_path
+      changed_when: false
+      when: config_already_set.stdout == "0"
+
+    - name: Cleanup discovery script
+      file:
+        path: /tmp/find-suitecrm-config.sh
+        state: absent
+      when: config_already_set.stdout == "0"
+
+    - name: Read existing SUITECRM_CONFIG if already set
+      shell: grep '^SUITECRM_CONFIG=' /etc/environment | cut -d= -f2 | head -1
+      register: existing_config
+      changed_when: false
+      when: config_already_set.stdout != "0"
+
+    - name: Set config path fact
+      set_fact:
+        final_config_path: "{{ (suitecrm_config_path.stdout if config_already_set.stdout == '0' else existing_config.stdout) | trim | regex_replace('\n.*', '') }}"
+
+    - name: Fail if config.php not found
+      fail:
+        msg: "Could not find SuiteCRM config.php on {{ inventory_hostname }}"
+      when: final_config_path == ""
+
+    - name: Show config path
+      debug:
+        msg: "SuiteCRM config: {{ final_config_path }} ({{ 'newly discovered' if config_already_set.stdout == '0' else 'already set' }})"
+
+    - name: Persist SUITECRM_CONFIG in /etc/environment
+      lineinfile:
+        path: /etc/environment
+        regexp: '^SUITECRM_CONFIG='
+        line: "SUITECRM_CONFIG={{ final_config_path }}"
+        create: yes
+      when: config_already_set.stdout == "0"
+
+    # ── crm-hosts.json check ──────────────────────────────────────
+    - name: Check if crm-hosts.json already has correct command for this entity
+      shell: |
+        python3 -c "
+        import json, sys
+        from pathlib import Path
+        path = Path('/etc/suitecrm-mcp/crm-hosts.json')
+        if not path.exists(): sys.exit(1)
+        hosts = json.loads(path.read_text())
+        entity = '{{ hostvars[inventory_hostname].entity_code }}'
+        config = '{{ final_config_path }}'
+        current = hosts.get(entity, {}).get('command', '')
+        starts_ok = current.startswith('SUITECRM_CONFIG=' + config)
+        ends_ok = current.endswith('/usr/local/bin/crm-provision-user')
+        sys.exit(0 if (starts_ok and ends_ok) else 1)
+        "
+      register: hosts_check
+      delegate_to: gateway
+      changed_when: false
+      failed_when: false
+
+    # ── Derive endpoint and update gateway config ─────────────────
+    - name: Get site_url from config on CRM VM
+      shell: >
+        php -r "include('{{ final_config_path }}');
+        echo \$sugar_config['site_url'] ?? '';" 2>/dev/null | tr -d '\n'
+      register: site_url_result
+      changed_when: false
+      when: hosts_check.rc != 0
+
+    - name: Set derived endpoint fact
+      set_fact:
+        derived_endpoint: "{{ site_url_result.stdout | trim | regex_replace('^http://', 'https://') }}{{ api_path_suffix }}"
+      when:
+        - hosts_check.rc != 0
+        - site_url_result.stdout | trim != ""
+
+    - name: Update SUITECRM_ENDPOINT in .env file on gateway
+      lineinfile:
+        path: /etc/suitecrm-mcp/{{ hostvars[inventory_hostname].entity_code }}.env
+        regexp: '^SUITECRM_ENDPOINT='
+        line: "SUITECRM_ENDPOINT={{ derived_endpoint }}"
+      delegate_to: gateway
+      become: yes
+      register: env_updated
+      when:
+        - hosts_check.rc != 0
+        - derived_endpoint is defined
+        - derived_endpoint != ""
+
+    - name: Get CRM endpoint for this entity
+      shell: >
+        grep '^SUITECRM_ENDPOINT='
+        /etc/suitecrm-mcp/{{ hostvars[inventory_hostname].entity_code }}.env
+        | cut -d= -f2
+      register: entity_endpoint
+      delegate_to: gateway
+      changed_when: false
+      when: hosts_check.rc != 0
+
+    # ── Update crm-hosts.json on gateway ─────────────────────────
+    - name: Fetch update-crm-host.sh from gateway
+      slurp:
+        src: "{{ playbook_dir }}/update-crm-host.sh"
+      register: update_script
+      delegate_to: gateway
+      when: hosts_check.rc != 0
+
+    - name: Deploy update-crm-host.sh on gateway
+      copy:
+        content: "{{ update_script.content | b64decode }}"
+        dest: /tmp/update-crm-host.sh
+        mode: '0755'
+      delegate_to: gateway
+      become: yes
+      when: hosts_check.rc != 0
+
+    - name: Run update-crm-host.sh on gateway
+      shell: |
+        /tmp/update-crm-host.sh \
+          "{{ hostvars[inventory_hostname].entity_code }}" \
+          "{{ final_config_path }}" \
+          "{{ derived_endpoint | default(entity_endpoint.stdout | default('') | trim) }}" \
+          "{{ site_url_result.stdout | default('') | trim }}" \
+          "{{ hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}" \
+          "{{ gateway_ssh_user }}" \
+          "{{ gateway_ssh_key }}"
+        rm -f /tmp/update-crm-host.sh
+      delegate_to: gateway
+      become: yes
+      when: hosts_check.rc != 0
+
+    # ── Restart MCP service if .env changed ──────────────────────
+    - name: Restart MCP service on gateway to apply .env changes
+      shell: >
+        systemctl restart suitecrm-mcp-{{ hostvars[inventory_hostname].entity_code }} 2>/dev/null ||
+        echo "WARNING: could not restart service"
+      delegate_to: gateway
+      become: yes
+      changed_when: false
+      failed_when: false
+      when:
+        - env_updated is defined
+        - env_updated.changed | default(false)
+
+    # ── Smoke test ────────────────────────────────────────────────
+    - name: Test script works (DB connection only)
+      shell: "SUITECRM_CONFIG={{ final_config_path }} crm-provision-user __test__ __test__"
+      register: test_result
+      failed_when: >
+        ('not found in SuiteCRM database' not in (test_result.stderr + test_result.stdout)) and
+        ('DB set, API verify failed' not in (test_result.stderr + test_result.stdout)) and
+        ('API endpoint unreachable' not in (test_result.stderr + test_result.stdout))
+      changed_when: false
+
+    - name: Confirm deployment
+      debug:
+        msg: >
+          {{ inventory_hostname }} ({{ hostvars[inventory_hostname].entity_code }}) ready —
+          config: {{ final_config_path }} |
+          endpoint: {{ derived_endpoint | default(entity_endpoint.stdout | default('not changed') | trim) }}
+
+
+# ============================================================
+# Play 2: Sync gateway config files from inventory
+# ============================================================
+- name: Sync gateway config from inventory
+  hosts: gateway
+  become: yes
+
+  handlers:
+    - name: restart auth
+      systemd:
+        name: suitecrm-mcp-auth
+        state: restarted
+
+  tasks:
+
+    # ── entities.json ─────────────────────────────────────────────
+    - name: Write entities.json from inventory + .env endpoints
+      shell: |
+        python3 - << 'PYEOF'
+        import json, os, pwd, grp
+        from pathlib import Path
+
+        base = json.loads('{{ _inv | to_json }}')
+
+        for code, data in base.items():
+            try:
+                for line in open(f"/etc/suitecrm-mcp/{code}.env"):
+                    if line.startswith("SUITECRM_ENDPOINT="):
+                        data["endpoint"] = line.strip().split("=", 1)[1]
+                        break
+            except FileNotFoundError:
+                data.setdefault("endpoint", "")
+
+        path = Path("/etc/suitecrm-mcp/entities.json")
+        old = {}
+        if path.exists():
+            try:
+                old = json.loads(path.read_text())
+            except Exception:
+                pass
+            st = os.stat(str(path))
+            uid, gid = st.st_uid, st.st_gid
+        else:
+            uid = pwd.getpwnam("suitecrm-mcp").pw_uid
+            gid = grp.getgrnam("suitecrm-mcp").gr_gid
+
+        if old == base:
+            print("UNCHANGED")
+        else:
+            tmp = str(path) + ".tmp." + str(os.getpid())
+            Path(tmp).write_text(json.dumps(base, indent=2) + "\n")
+            os.chown(tmp, uid, gid)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, str(path))
+            print("CHANGED:", list(base.keys()))
+        PYEOF
+      vars:
+        _inv: >-
+          {%- set d = {} -%}
+          {%- for h in groups['crm_vms'] -%}
+            {%- set v = hostvars[h] -%}
+            {%- set _ = d.update({v.entity_code: {
+                "label": v.label | default(v.entity_code),
+                "port":  v.port  | int,
+                "group": v.group | default(v.entity_code ~ '_users')
+            }}) -%}
+          {%- endfor -%}
+          {{ d }}
+      register: entities_result
+      changed_when: "'CHANGED' in entities_result.stdout"
+      notify: restart auth
+
+    - name: Show entities.json status
+      debug:
+        msg: "entities.json: {{ entities_result.stdout | trim }}"
+
+    # ── auth.env REQUIRED_GROUP_* ─────────────────────────────────
+    - name: Sync REQUIRED_GROUP entries in auth.env
+      lineinfile:
+        path: /etc/suitecrm-mcp/auth.env
+        regexp: "^REQUIRED_GROUP_{{ item.entity_code | upper }}="
+        line: "REQUIRED_GROUP_{{ item.entity_code | upper }}={{ item.group | default(item.entity_code ~ '_users') }}"
+      loop: "{{ groups['crm_vms'] | map('extract', hostvars) | list }}"
+      loop_control:
+        label: "{{ item.entity_code }}"
+      notify: restart auth

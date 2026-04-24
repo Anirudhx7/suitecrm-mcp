@@ -1,7 +1,7 @@
 {
   "name": "suitecrm-mcp-gateway",
-  "version": "3.1.5",
-  "description": "SuiteCRM MCP Gateway - OAuth2/OIDC auth, SSE transport, 13 tools, Prometheus metrics",
+  "version": "4.0.0",
+  "description": "SuiteCRM MCP Gateway - two-service auth, SSE transport, 13 tools, Ansible deployment",
   "type": "module",
   "main": "index.mjs",
   "engines": {

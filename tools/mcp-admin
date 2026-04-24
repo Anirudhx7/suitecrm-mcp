@@ -1,0 +1,418 @@
+#!/usr/bin/env python3
+"""mcp-admin - SuiteCRM MCP Gateway admin CLI"""
+
+import argparse
+import hashlib
+import json
+import os
+import ssl
+import sys
+import tempfile
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+
+PROFILES_FILE = '/etc/suitecrm-mcp/user-profiles.json'
+SESSIONS_FILE = '/etc/suitecrm-mcp/sessions.json'
+HOSTS_FILE    = '/etc/suitecrm-mcp/crm-hosts.json'
+ENTITIES_FILE = '/etc/suitecrm-mcp/entities.json'
+
+GREEN  = '\033[32m'
+RED    = '\033[31m'
+YELLOW = '\033[33m'
+CYAN   = '\033[36m'
+BOLD   = '\033[1m'
+DIM    = '\033[2m'
+RESET  = '\033[0m'
+
+def c(text, *codes):
+    if not sys.stdout.isatty():
+        return text
+    return ''.join(codes) + str(text) + RESET
+
+def load_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        print(c(f'Error: {path} is not valid JSON: {e}', RED), file=sys.stderr)
+        sys.exit(1)
+
+def save_json(path, data):
+    dir_ = os.path.dirname(path) or '.'
+    fd, tmp = tempfile.mkstemp(dir=dir_)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f, indent=2)
+            f.write('\n')
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+def find_sub(profiles, *, sub=None, email=None):
+    if sub:
+        return sub if sub in profiles else None
+    if email:
+        email = email.lower()
+        for s, p in profiles.items():
+            if p.get('email', '').lower() == email:
+                return s
+    return None
+
+def ts(ms):
+    try:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    except Exception:
+        return str(ms)
+
+def now_ms():
+    return datetime.now(tz=timezone.utc).timestamp() * 1000
+
+
+# ── list ─────────────────────────────────────────────────────────────────────
+
+def cmd_list(args):
+    profiles = load_json(PROFILES_FILE)
+    entities = load_json(ENTITIES_FILE)
+    ef = getattr(args, 'entity', None)
+
+    if not profiles:
+        print(c('No user profiles found.', YELLOW))
+        return
+
+    for sub, p in profiles.items():
+        ents = p.get('entities', {})
+        if ef and ef not in ents:
+            continue
+        print(c(p.get('email', sub), BOLD + CYAN))
+        print(f"  sub: {c(sub, DIM)}")
+        if not ents:
+            print(f"  {c('no entity access', YELLOW)}")
+        else:
+            for code, creds in ents.items():
+                if ef and code != ef:
+                    continue
+                label = entities.get(code, {}).get('label', code)
+                print(f"  {c(code, BOLD)} ({label})  crm_user={creds.get('user', '?')}")
+        print()
+
+
+# ── add ──────────────────────────────────────────────────────────────────────
+
+def cmd_add(args):
+    profiles = load_json(PROFILES_FILE)
+    sub = find_sub(profiles, sub=args.sub, email=args.email)
+
+    if not sub:
+        if args.email:
+            sub = f'manual|{args.email}'
+            print(c(f'No existing profile found — creating: {sub}', YELLOW))
+        else:
+            print(c('Error: --sub or --email required', RED), file=sys.stderr)
+            sys.exit(1)
+
+    if sub not in profiles:
+        email = args.email or sub
+        profiles[sub] = {'email': email, 'name': email, 'entities': {}}
+        print(c(f'Created profile for {email}', GREEN))
+    elif args.email:
+        profiles[sub]['email'] = args.email
+        profiles[sub]['name']  = args.email
+
+    if args.entity:
+        if not args.user or not args.password:
+            print(c('Error: --user and --pass are required when using --entity', RED), file=sys.stderr)
+            sys.exit(1)
+        profiles[sub].setdefault('entities', {})[args.entity] = {
+            'user': args.user,
+            'pass': args.password,
+        }
+        email = profiles[sub].get('email', sub)
+        print(c(f"Set {args.entity} credentials for {email}", GREEN))
+
+    save_json(PROFILES_FILE, profiles)
+
+
+# ── remove ───────────────────────────────────────────────────────────────────
+
+def cmd_remove(args):
+    profiles = load_json(PROFILES_FILE)
+    sub = find_sub(profiles, sub=args.sub, email=args.email)
+
+    if not sub:
+        print(c('User not found', RED), file=sys.stderr)
+        sys.exit(1)
+
+    email = profiles[sub].get('email', sub)
+
+    if args.entity:
+        if args.entity not in profiles[sub].get('entities', {}):
+            print(c(f'{args.entity} not found in profile for {email}', YELLOW))
+            sys.exit(0)
+        del profiles[sub]['entities'][args.entity]
+        print(c(f'Removed {args.entity} access for {email}', GREEN))
+    else:
+        del profiles[sub]
+        print(c(f'Removed profile for {email}', GREEN))
+
+    save_json(PROFILES_FILE, profiles)
+
+
+# ── whoami ───────────────────────────────────────────────────────────────────
+
+def cmd_whoami(args):
+    profiles = load_json(PROFILES_FILE)
+    sessions = load_json(SESSIONS_FILE)
+    entities = load_json(ENTITIES_FILE)
+
+    sub = find_sub(profiles, sub=args.sub, email=args.email)
+    if not sub:
+        print(c('Error: --sub or --email required (and must match an existing profile)', RED), file=sys.stderr)
+        sys.exit(1)
+
+    p = profiles[sub]
+    print(c(p.get('email', sub), BOLD + CYAN))
+    print(f"  sub: {c(sub, DIM)}")
+    print()
+
+    ents = p.get('entities', {})
+    print(c('Entity access:', BOLD))
+    if not ents:
+        print(c('  none', YELLOW))
+    else:
+        for code, creds in ents.items():
+            label = entities.get(code, {}).get('label', code)
+            print(f"  {c(code, BOLD)} ({label})  crm_user={creds.get('user', '?')}")
+
+    print()
+    now = now_ms()
+    active = [(t, s) for t, s in sessions.items() if s.get('sub') == sub and s.get('expiresAt', 0) > now]
+    print(c('Active sessions:', BOLD))
+    if not active:
+        print(c('  none', DIM))
+    else:
+        for tok, s in active:
+            print(f"  {tok[:20]}...  expires {ts(s['expiresAt'])}")
+
+
+# ── test ─────────────────────────────────────────────────────────────────────
+
+def crm_login(endpoint, user, password, verify_tls=False):
+    rest_data = json.dumps({
+        'user_auth': {
+            'user_name': user,
+            'password': hashlib.md5(password.encode()).hexdigest(),
+        },
+        'application_name': 'mcp-admin',
+        'name_value_list': [],
+    })
+    body = urllib.parse.urlencode({
+        'method': 'login',
+        'input_type': 'JSON',
+        'response_type': 'JSON',
+        'rest_data': rest_data,
+    }).encode()
+    ctx = ssl.create_default_context()
+    if not verify_tls:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request(endpoint, data=body, method='POST')
+    req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+    with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+        return json.loads(resp.read())
+
+def cmd_test(args):
+    profiles = load_json(PROFILES_FILE)
+    entities = load_json(ENTITIES_FILE)
+    ef = args.entity
+
+    if args.sub or args.email:
+        sub = find_sub(profiles, sub=args.sub, email=args.email)
+        if not sub:
+            print(c('User not found', RED), file=sys.stderr)
+            sys.exit(1)
+        targets = [(sub, profiles[sub])]
+    else:
+        targets = list(profiles.items())
+
+    failed = 0
+    for sub_, p in targets:
+        email = p.get('email', sub_)
+        for code, creds in p.get('entities', {}).items():
+            if ef and code != ef:
+                continue
+            endpoint = entities.get(code, {}).get('endpoint')
+            if not endpoint:
+                print(f"  {c(email, CYAN)}/{c(code, BOLD)}  {c('no endpoint configured', YELLOW)}")
+                continue
+            label = entities.get(code, {}).get('label', code)
+            sys.stdout.write(f"  {c(email, CYAN)}/{c(code, BOLD)} ({label})  ... ")
+            sys.stdout.flush()
+            try:
+                result = crm_login(endpoint, creds['user'], creds['pass'], verify_tls=args.verify_tls)
+                sid = result.get('id')
+                if sid and sid not in ('0', 0, ''):
+                    print(c('OK', GREEN))
+                else:
+                    print(c(f"FAIL  (CRM returned id={sid!r})", RED))
+                    failed += 1
+            except Exception as e:
+                print(c(f"ERROR  {e}", RED))
+                failed += 1
+
+    if failed:
+        sys.exit(1)
+
+
+# ── set-crm-host ─────────────────────────────────────────────────────────────
+
+def cmd_set_crm_host(args):
+    hosts = load_json(HOSTS_FILE)
+    entry = hosts.setdefault(args.entity, {})
+
+    if args.ssh_host:    entry['ssh_host']  = args.ssh_host
+    if args.ssh_user:    entry['ssh_user']  = args.ssh_user
+    if args.command:     entry['command']   = args.command
+    if args.ssh_key:     entry['ssh_key']   = args.ssh_key
+
+    save_json(HOSTS_FILE, hosts)
+    print(c(f'Updated crm-hosts entry for {args.entity}:', GREEN))
+    print(json.dumps(entry, indent=2))
+
+
+# ── revoke ───────────────────────────────────────────────────────────────────
+
+def cmd_revoke(args):
+    sessions = load_json(SESSIONS_FILE)
+    now = now_ms()
+
+    if args.sub:
+        match_key = 'sub'
+        match_val = args.sub
+    elif args.email:
+        match_key = 'email'
+        match_val = args.email.lower()
+    else:
+        print(c('Error: --sub or --email required', RED), file=sys.stderr)
+        sys.exit(1)
+
+    to_delete = [
+        tok for tok, s in sessions.items()
+        if s.get(match_key, '').lower() == match_val.lower()
+        and s.get('expiresAt', 0) > now
+    ]
+
+    if not to_delete:
+        print(c('No active session found for that user.', YELLOW))
+        return
+
+    for tok in to_delete:
+        email = sessions[tok].get('email', '?')
+        del sessions[tok]
+        print(c(f'Revoked token {tok[:20]}... for {email}', GREEN))
+
+    save_json(SESSIONS_FILE, sessions)
+    print(c(f'Done. User must re-authenticate via the gateway URL to get a new token.', DIM))
+
+
+# ── sessions ─────────────────────────────────────────────────────────────────
+
+def cmd_sessions(args):
+    sessions = load_json(SESSIONS_FILE)
+    now = now_ms()
+    active  = {t: s for t, s in sessions.items() if s.get('expiresAt', 0) > now}
+    expired = {t: s for t, s in sessions.items() if s.get('expiresAt', 0) <= now}
+
+    if args.purge_expired and expired:
+        save_json(SESSIONS_FILE, active)
+        print(c(f'Purged {len(expired)} expired session(s)', GREEN))
+        expired = {}
+        sessions = active
+
+    if not sessions:
+        print(c('No sessions.', DIM))
+        return
+
+    print(c(f'{len(active)} active, {len(expired)} expired\n', BOLD))
+    for tok, s in sorted(sessions.items(), key=lambda x: x[1].get('expiresAt', 0), reverse=True):
+        is_exp = s.get('expiresAt', 0) <= now
+        status = c('expired', RED) if is_exp else c('active', GREEN)
+        print(f"  {tok[:20]}...  {c(s.get('email', '?'), CYAN)}  {status}  expires {ts(s.get('expiresAt', 0))}")
+
+
+# ── main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog='mcp-admin',
+        description='SuiteCRM MCP Gateway admin CLI',
+    )
+    cmds = parser.add_subparsers(dest='command', metavar='command')
+    cmds.required = True
+
+    # list
+    p = cmds.add_parser('list', help='List user profiles')
+    p.add_argument('--entity', help='Filter by entity code')
+    p.set_defaults(func=cmd_list)
+
+    # add
+    p = cmds.add_parser('add', help='Add or update a user profile / entity credentials')
+    p.add_argument('--sub',    help='Auth0 sub identifier')
+    p.add_argument('--email',  help='User email (alternative to --sub)')
+    p.add_argument('--entity', help='Entity code to set credentials for')
+    p.add_argument('--user',   help='CRM username')
+    p.add_argument('--pass',   dest='password', help='CRM password (plaintext)')
+    p.set_defaults(func=cmd_add)
+
+    # remove
+    p = cmds.add_parser('remove', help='Remove a user profile or entity access')
+    p.add_argument('--sub',    help='Auth0 sub identifier')
+    p.add_argument('--email',  help='User email')
+    p.add_argument('--entity', help='Remove only this entity (omit to remove whole profile)')
+    p.set_defaults(func=cmd_remove)
+
+    # whoami
+    p = cmds.add_parser('whoami', help='Show user profile and active sessions')
+    p.add_argument('--sub',   help='Auth0 sub identifier')
+    p.add_argument('--email', help='User email')
+    p.set_defaults(func=cmd_whoami)
+
+    # test
+    p = cmds.add_parser('test', help='Test CRM login for user(s)')
+    p.add_argument('--sub',    help='Auth0 sub (omit to test all users)')
+    p.add_argument('--email',  help='User email')
+    p.add_argument('--entity', help='Entity to test (omit to test all entities for matched users)')
+    p.add_argument('--verify-tls', action='store_true', help='Enable TLS certificate verification (default: off, matching gateway env)')
+    p.set_defaults(func=cmd_test)
+
+    # set-crm-host
+    p = cmds.add_parser('set-crm-host', help='Configure CRM SSH provisioning host for an entity')
+    p.add_argument('--entity',   required=True, help='Entity code')
+    p.add_argument('--ssh-host', help='SSH host IP or hostname')
+    p.add_argument('--ssh-user', help='SSH username')
+    p.add_argument('--command',  help='Provisioning command to run over SSH')
+    p.add_argument('--ssh-key',  help='Path to SSH private key')
+    p.set_defaults(func=cmd_set_crm_host)
+
+    # revoke
+    p = cmds.add_parser('revoke', help='Revoke a user\'s active token (forces re-authentication)')
+    p.add_argument('--sub',   help='Auth0 sub identifier')
+    p.add_argument('--email', help='User email')
+    p.set_defaults(func=cmd_revoke)
+
+    # sessions
+    p = cmds.add_parser('sessions', help='List active gateway sessions')
+    p.add_argument('--purge-expired', action='store_true', help='Remove expired sessions from sessions.json')
+    p.set_defaults(func=cmd_sessions)
+
+    args = parser.parse_args()
+    args.func(args)
+
+if __name__ == '__main__':
+    main()
