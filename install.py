@@ -51,7 +51,7 @@ SSH provisioning (LDAP/SSO deployments):
   The interactive setup wizard will ask about this during a fresh install.
 """
 
-import os, sys, subprocess, json, argparse, shutil, re, socket, time, secrets
+import os, sys, subprocess, json, argparse, shutil, re, socket, time, secrets, getpass
 from pathlib import Path
 from urllib.parse import urlparse
 import urllib.request
@@ -389,7 +389,7 @@ def prompt_oauth_config(args, domain=None):
     if not client_id:
         error("Auth0 client ID is required")
 
-    client_secret = getattr(args, "oauth_client_secret", None) or _prompt("Auth0 client secret")
+    client_secret = getattr(args, "oauth_client_secret", None) or getpass.getpass("  Auth0 client secret: ")
     if not client_secret:
         error("Auth0 client secret is required")
 

@@ -204,10 +204,11 @@ def cmd_whoami(args):
 # ── test ─────────────────────────────────────────────────────────────────────
 
 def crm_login(endpoint, user, password, verify_tls=False):
+    # SuiteCRM v4_1 REST API login protocol requires MD5 of the plaintext password
     rest_data = json.dumps({
         'user_auth': {
             'user_name': user,
-            'password': hashlib.md5(password.encode()).hexdigest(),
+            'password': hashlib.md5(password.encode()).hexdigest(),  # nosec B324 - protocol requirement
         },
         'application_name': 'mcp-admin',
         'name_value_list': [],

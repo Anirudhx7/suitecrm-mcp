@@ -44,6 +44,13 @@ const SESSION_TTL_DAYS    = parseInt(process.env.SESSION_TTL_DAYS || '30');
 const BRIDGE_SESSION_TTL_MS = 15 * 60 * 1000;
 const NS = AUTH0_AUDIENCE + '/';
 
+// 64-char hex string (output of randomBytes(32).toString('hex'))
+const NONCE_RE = /^[0-9a-f]{64}$/;
+const API_KEY_RE = /^[0-9a-f]{64}$/;
+
+// Safely extract a scalar string from a query param (prevents array injection)
+function qs(v) { return typeof v === 'string' ? v : ''; }
+
 function loadProfiles() {
   try { return JSON.parse(readFileSync(PROFILES_FILE, 'utf8')); } catch { return {}; }
 }
@@ -163,7 +170,7 @@ app.get('/', (req, res) => {
 
 // GET /auth/login -> OAuth2 flow
 app.get('/auth/login', (req, res) => {
-  const nonce  = req.query.nonce;
+  const nonce  = qs(req.query.nonce) || undefined;
   const params = new URLSearchParams({
     response_type: 'code',
     client_id:     AUTH0_CLIENT_ID,
@@ -177,8 +184,11 @@ app.get('/auth/login', (req, res) => {
 
 // GET /auth/callback -> exchange code, provision CRM, store token, show success UI
 app.get('/auth/callback', async (req, res) => {
-  const { code, error, error_description, state } = req.query;
-  const nonce = state;
+  const code              = qs(req.query.code);
+  const error             = qs(req.query.error);
+  const error_description = qs(req.query.error_description);
+  const state             = qs(req.query.state);
+  const nonce = NONCE_RE.test(state) ? state : '';
 
   if (error) {
     return res.status(400).send(`
@@ -238,7 +248,7 @@ app.get('/auth/callback', async (req, res) => {
 
     if (nonce) {
       const bridgeSessions = loadBridgeSessions();
-      if (bridgeSessions[nonce]) {
+      if (Object.hasOwn(bridgeSessions, nonce)) {
         bridgeSessions[nonce].status = 'ready';
         bridgeSessions[nonce].apiKey  = apiKey;
         bridgeSessions[nonce].sub     = sub;
@@ -562,15 +572,18 @@ app.post('/auth/bridge/start', (req, res) => {
 
 // GET /auth/bridge/poll/:nonce -> bridge polls this with X-Bridge-Secret
 app.get('/auth/bridge/poll/:nonce', (req, res) => {
-  const { nonce }      = req.params;
-  const clientSecret = req.headers['x-bridge-secret'];
+  const nonce        = qs(req.params.nonce);
+  const clientSecret = qs(req.headers['x-bridge-secret']);
 
   if (!clientSecret) {
     return res.status(401).json({ error: 'Missing X-Bridge-Secret header' });
   }
+  if (!NONCE_RE.test(nonce)) {
+    return res.status(400).json({ error: 'Invalid nonce format' });
+  }
 
   const bridgeSessions = cleanExpiredBridgeSessions(loadBridgeSessions());
-  const session        = bridgeSessions[nonce];
+  const session        = Object.hasOwn(bridgeSessions, nonce) ? bridgeSessions[nonce] : null;
 
   if (!session) return res.status(404).json({ status: 'not_found' });
 
@@ -614,9 +627,9 @@ app.get('/auth/bridge/poll/:nonce', (req, res) => {
 
 // POST /auth/logout -> invalidate session
 app.post('/auth/logout', (req, res) => {
-  const token    = req.query.token || req.headers['x-gateway-token'];
+  const token    = qs(req.query.token) || qs(req.headers['x-gateway-token']);
   const sessions = loadSessions();
-  if (sessions[token]) {
+  if (API_KEY_RE.test(token) && Object.hasOwn(sessions, token)) {
     delete sessions[token];
     saveSessions(sessions);
   }
