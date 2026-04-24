@@ -155,7 +155,7 @@ services:
   suitecrm-mcp-crm1:
     image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
     ports:
-      - "3101:3101"
+      - "127.0.0.1:3101:3101"   # expose via reverse proxy only
     environment:
       SUITECRM_ENDPOINT: https://crm1.example.com/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm_crm1
@@ -165,13 +165,14 @@ services:
       REQUIRED_GROUP: crm1_users
       PORT: "3101"
     depends_on:
-      - suitecrm-mcp-auth
+      suitecrm-mcp-auth:
+        condition: service_healthy
     restart: unless-stopped
 
   suitecrm-mcp-crm2:
     image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
     ports:
-      - "3102:3102"
+      - "127.0.0.1:3102:3102"   # expose via reverse proxy only
     environment:
       SUITECRM_ENDPOINT: https://crm2.example.com/legacy/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm_crm2
@@ -181,7 +182,8 @@ services:
       REQUIRED_GROUP: crm2_users
       PORT: "3102"
     depends_on:
-      - suitecrm-mcp-auth
+      suitecrm-mcp-auth:
+        condition: service_healthy
     restart: unless-stopped
 ```
 

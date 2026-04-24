@@ -17,15 +17,23 @@ services:
       GATEWAY_PUBLIC_URL: https://mcp.yourdomain.com
       SESSION_TTL_DAYS: "30"
       PORT: "3100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3100/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   # ── Gateway (single-entity Docker usage) ────────────────────────────────────
   # For multi-entity deployments use install.py (systemd) instead.
   # This service is kept for single-CRM / dev use.
+  # NOTE: port 3101 binds to all interfaces. Put nginx/Caddy in front before
+  # exposing this on a public VPS - the auth service alone does not protect
+  # the SSE port from unauthenticated connection attempts.
   suitecrm-mcp:
     image: ghcr.io/anirudhx7/suitecrm-mcp:v4.0.0
     ports:
-      - "3101:3101"
+      - "127.0.0.1:3101:3101"   # change to "3101:3101" only behind a reverse proxy
     environment:
       SUITECRM_ENDPOINT: https://crm.example.com/legacy/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm
@@ -36,7 +44,8 @@ services:
       PORT: "3101"
       # NODE_TLS_REJECT_UNAUTHORIZED: "0"  # only for self-signed certs
     depends_on:
-      - suitecrm-mcp-auth
+      suitecrm-mcp-auth:
+        condition: service_healthy
     restart: unless-stopped
 
   # ── Prometheus ───────────────────────────────────────────────────────────────

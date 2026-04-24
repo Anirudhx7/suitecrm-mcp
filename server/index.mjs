@@ -14,13 +14,17 @@ import bodyParser from 'body-parser';
 import https from 'https';
 import http from 'http';
 
+const REQUIRED = ['SUITECRM_ENDPOINT', 'SUITECRM_PREFIX', 'PORT', 'AUTH0_DOMAIN', 'AUTH0_AUDIENCE'];
+const missing = REQUIRED.filter(k => !process.env[k]);
+if (missing.length) { console.error(`Missing required env vars: ${missing.join(', ')}`); process.exit(1); }
+
 const ENDPOINT = process.env.SUITECRM_ENDPOINT.trim();
 const PREFIX = process.env.SUITECRM_PREFIX.trim();
 const PORT = parseInt(process.env.PORT, 10);
-const CODE = process.env.SUITECRM_CODE.trim();
+const CODE = (process.env.SUITECRM_CODE || '').trim();
 const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN.trim();
 const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE.trim();
-const REQUIRED_GROUP = process.env.REQUIRED_GROUP.trim();
+const REQUIRED_GROUP = (process.env.REQUIRED_GROUP || '').trim();
 const PROFILES_FILE = '/etc/suitecrm-mcp/user-profiles.json';
 const NS = AUTH0_AUDIENCE + '/';
 const TLS_OK = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';

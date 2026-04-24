@@ -1106,11 +1106,13 @@ def uninstall_single():
     warn("This will stop and remove the SuiteCRM MCP gateway.")
     if input("  Type 'yes' to confirm: ").strip().lower() != "yes":
         info("Aborted."); sys.exit(0)
-    run(["systemctl", "stop", SVC_NAME], check=False)
-    run(["systemctl", "disable", SVC_NAME], check=False)
+    for svc in [SVC_NAME, AUTH_SVC_NAME]:
+        run(["systemctl", "stop", svc], check=False)
+        run(["systemctl", "disable", svc], check=False)
     for path in [
         f"/etc/systemd/system/{SVC_NAME}.service",
-        ENV_FILE, ENV_DIR, SERVER_DIR, NGINX_LINK, NGINX_CONF
+        f"/etc/systemd/system/{AUTH_SVC_NAME}.service",
+        ENV_FILE, AUTH_ENV_FILE, ENV_DIR, SERVER_DIR, NGINX_LINK, NGINX_CONF
     ]:
         if Path(path).exists():
             if Path(path).is_dir(): shutil.rmtree(path)
