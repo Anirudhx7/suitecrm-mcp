@@ -13,6 +13,7 @@ server/node_modules/
 
 # IDE and tooling
 CLAUDE.md
+CHANGELOG.md
 .claude/
 
 # Python
