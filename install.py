@@ -818,12 +818,11 @@ def _rebuild_nginx_multi(entities, domain=None):
             f"    }}\n"
         )
 
-    # Auth routes served by the primary entity (first in the list)
-    primary_port = next(iter(entities.values()))["port"]
+    # Auth routes served by the auth service (port 3100)
     auth_block = (
-        f"\n    # OAuth2 auth routes - served by primary entity\n"
+        f"\n    # OAuth2 auth routes - served by auth service (suitecrm-mcp-auth)\n"
         f"    location /auth/ {{\n"
-        f"        proxy_pass http://127.0.0.1:{primary_port}/auth/;\n"
+        f"        proxy_pass http://127.0.0.1:3100/auth/;\n"
         f"        proxy_http_version 1.1;\n"
         f"        proxy_set_header Connection '';\n"
         f"        proxy_set_header Host $host;\n"

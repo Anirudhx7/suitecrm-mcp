@@ -4,7 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 3.x     | Yes       |
+| 4.x     | Yes       |
+| 3.x     | No        |
 | 2.x     | No        |
 | 1.x     | No        |
 
@@ -18,48 +19,34 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 
 ## Security Controls
 
-### Authentication (v3.0+)
+### Authentication (v4.0+)
 
-- **OAuth2 Authorization Code flow:** Users authenticate via a configurable OIDC provider
-  (Auth0, Azure AD, etc.). The gateway is the sole OAuth client - MCP clients and bridges
-  only hold a gateway-issued API key, never CRM credentials.
-- **OIDC discovery:** Provider endpoints (authorization, token, JWKS) are resolved via
-  `/.well-known/openid-configuration` at startup. Supports any OIDC-compliant provider.
-- **JWKS token validation:** ID tokens are validated against the provider's public keys
-  using `jwks-rsa`. Keys are cached and auto-rotated.
-- **CSRF protection:** The OAuth state parameter is generated with `crypto.randomBytes(32)`
-  and validated on callback. Pending states are held in memory with a 10-minute TTL.
-- **API key design:** Gateway-issued keys use the format `smcp_<64-hex><8-char HMAC>`.
-  The HMAC binds each key to the `API_KEY_SECRET` so keys cannot be forged without the secret.
-- **Group-based entity access:** A configurable JWT claim (e.g. `roles`, `groups`) is checked
-  against a per-entity `REQUIRED_GROUP` value. Users not in the required group receive HTTP 403.
+- **OAuth2 Authorization Code flow:** Users authenticate via Auth0 (or any OIDC provider).
+  The gateway is the sole OAuth client - MCP clients and bridges only hold a gateway-issued
+  session token, never CRM credentials.
+- **Session-based API keys:** On successful login, the auth service writes a session record
+  to `sessions.json` (mode 600). The session token is a `crypto.randomBytes(32)` hex string
+  tied to the user's sub, email, and groups. It expires after a configurable number of days
+  (default 30).
+- **Group-based entity access:** A per-entity `REQUIRED_GROUP` value is checked against the
+  groups in the session. Users not in the required group receive HTTP 403.
 - **Nonce-bound bridge pickup:** OpenClaw bridges start a session via
   `POST /auth/bridge/start`, receive a nonce plus bridge secret, and poll
   `GET /auth/bridge/poll/:nonce`. The poll result is returned exactly once and
   bridge sessions expire after 15 minutes.
-- **API key expiry:** Keys expire after a configurable number of days (default 90). Expired
-  keys receive HTTP 401 and users must re-authenticate.
-- **Admin revocation:** Keys can be revoked instantly via `mcp-profile-admin revoke` or the
-  `POST /auth/revoke` endpoint (requires HMAC-signed admin header).
+- **Session expiry:** Tokens expire after a configurable number of days (default 30). Expired
+  tokens receive HTTP 401 and users must re-authenticate.
+- **Admin revocation:** Sessions can be revoked instantly via `mcp-admin revoke`.
 
 ### Gateway (server/index.mjs)
 
 - **Fail-fast auth:** Invalid or missing bearer tokens on `/sse` return HTTP 401 immediately
   before the SSE stream opens. No half-open sessions are created.
-- **SQL keyword blocklist:** The `query` and `order_by` parameters in search tools are checked
-  against a blocklist of destructive SQL keywords (DROP, ALTER, DELETE, etc.) and
-  comment/chaining patterns.
-- **Module and ID validation:** Module names must match a strict safe-character regex, and
-  record IDs must match strict UUID format (8-4-4-4-12 hex).
-- **Rate limiting:** `/sse`, `/auth/login`, `/auth/callback`, and `/messages` are rate-limited
-  independently.
 - **No CORS header:** `Access-Control-Allow-Origin` is not set. Browser same-origin policy
-  blocks cross-origin requests by default, including `Origin: null` contexts.
+  blocks cross-origin requests by default.
 - **CRM credentials stored only on gateway:** Per-user CRM usernames and passwords live in
   `/etc/suitecrm-mcp/user-profiles.json` (mode 600, owned by the service user). MCP clients
-  hold only an opaque API key.
-- **Circuit breaker:** Repeated CRM failures trip a per-entity circuit breaker that stops
-  forwarding requests until the CRM recovers. Prevents cascading failures.
+  hold only an opaque session token.
 
 ### Installer (install.py)
 
@@ -86,8 +73,7 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 The SuiteCRM v4_1 REST API requires passwords to be transmitted as MD5 hashes.
 MD5 is cryptographically broken. This is a protocol constraint, not a gateway bug.
 
-**Mitigation:** Always run the gateway behind HTTPS. The gateway warns at startup if the
-CRM endpoint is not HTTPS.
+**Mitigation:** Always run the gateway behind HTTPS.
 
 ### LDAP / SSO users
 
@@ -98,17 +84,11 @@ users have no local password and cannot authenticate via REST directly.
 users. The gateway can run this automatically via SSH on first OAuth login if configured.
 See the Known Limitations section in README.md.
 
-### API_KEY_SECRET must be kept secret
+### AUTH0_CLIENT_SECRET must be kept secret
 
-If `API_KEY_SECRET` is compromised, an attacker can forge valid API keys for any user sub.
-Keep it in `/etc/suitecrm-mcp/*.env` (mode 600). If it must be rotated, all existing API
-keys become invalid and all users must re-authenticate.
-
-### OAuth client secret
-
-`OAUTH_CLIENT_SECRET` grants the gateway the ability to exchange authorization codes for
-tokens. Store it only in the env file (mode 600). Do not include it in Docker images,
-version control, or log output.
+`AUTH0_CLIENT_SECRET` grants the gateway the ability to exchange authorization codes for
+tokens. Store it only in `/etc/suitecrm-mcp/auth.env` (mode 600). Do not include it in
+Docker images, version control, or log output.
 
 ### NodeSource bootstrap
 

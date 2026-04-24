@@ -52,14 +52,26 @@ function loadProfiles() {
   catch { return {}; }
 }
 
+let _sessionsCache = null;
+let _sessionsCacheAt = 0;
+function loadSessions() {
+  const now = Date.now();
+  if (!_sessionsCache || now - _sessionsCacheAt > 2000) {
+    try { _sessionsCache = JSON.parse(readFileSync('/etc/suitecrm-mcp/sessions.json', 'utf8')); }
+    catch { _sessionsCache = {}; }
+    _sessionsCacheAt = now;
+  }
+  return _sessionsCache;
+}
+
 async function jwtMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token) return res.status(401).json({ error: 'Bearer token required' });
 
-  // Check sessions.json first (API keys from auth service)
+  // Check sessions.json (API keys from auth service), cached for 2s
   try {
-    const sessions = JSON.parse(readFileSync('/etc/suitecrm-mcp/sessions.json', 'utf8'));
+    const sessions = loadSessions();
     const session = sessions[token];
     if (session) {
       if (session.expiresAt < Date.now()) {
@@ -662,5 +674,5 @@ app.post('/messages', async (req, res) => {
 });
 
 app.listen(PORT, '127.0.0.1', () => {
-  process.stderr.write(`[${PREFIX}] Listening on 127.0.0.1:${PORT}\\n`);
+  process.stderr.write(`[${PREFIX}] Listening on 127.0.0.1:${PORT}\n`);
 });

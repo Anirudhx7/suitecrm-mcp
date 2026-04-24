@@ -25,6 +25,10 @@ function atomicWrite(path, data) {
 
 const execFileAsync = promisify(execFile);
 
+const REQUIRED_AUTH = ['AUTH0_DOMAIN','AUTH0_CLIENT_ID','AUTH0_CLIENT_SECRET','AUTH0_AUDIENCE','GATEWAY_PUBLIC_URL'];
+const missingAuth = REQUIRED_AUTH.filter(k => !process.env[k]);
+if (missingAuth.length) { console.error(`[auth] Missing required env vars: ${missingAuth.join(', ')}`); process.exit(1); }
+
 const AUTH0_DOMAIN        = process.env.AUTH0_DOMAIN;
 const AUTH0_CLIENT_ID     = process.env.AUTH0_CLIENT_ID;
 const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
@@ -150,7 +154,7 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
 
 const app = express();
 app.use(express.json());
-app.set('trust proxy', 1);
+if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 
 // GET / -> redirect to /auth/login
 app.get('/', (req, res) => {
@@ -618,6 +622,8 @@ app.post('/auth/logout', (req, res) => {
   }
   res.json({ success: true });
 });
+
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'suitecrm-mcp-auth' }));
 
 const PORT = parseInt(process.env.PORT || '3100', 10);
 app.listen(PORT, '127.0.0.1', () => {

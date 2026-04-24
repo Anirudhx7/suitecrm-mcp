@@ -301,11 +301,7 @@ sudo python3 install.py --remove crm2
 | `SUITECRM_PREFIX` | No | `suitecrm` | Tool name prefix |
 | `PORT` | No | `3101` | Listen port |
 | `BIND_HOST` | No | `127.0.0.1` | Interface to bind the gateway server to |
-| `METRICS_PORT` | No | `9090` | Prometheus metrics port (localhost only) |
 | `SUITECRM_CODE` | No | - | Entity code for multi-entity nginx routing |
-| `CRM_TIMEOUT_MS` | No | `30000` | CRM API request timeout in ms |
-| `CIRCUIT_BREAKER_THRESHOLD` | No | `5` | Consecutive failures before circuit opens |
-| `CIRCUIT_BREAKER_RESET_MS` | No | `60000` | ms before circuit tests recovery |
 | `AUTH0_DOMAIN` | Yes (auth) | - | Auth0 tenant domain (entity gateway) |
 | `AUTH0_AUDIENCE` | Yes (auth) | - | Auth0 API identifier (entity gateway) |
 | `AUTH0_CLIENT_ID` | Yes (auth svc) | - | Auth0 client ID (auth service only) |
@@ -341,52 +337,11 @@ Keys become the entity code (nginx path prefix, tool prefix suffix, service name
 
 ## Health Checks and Monitoring
 
-### Health endpoints
-
-| Endpoint | Use for | Response time |
-|----------|---------|---------------|
-| `GET /health` | Liveness probe, quick status | <1ms, no external calls |
-| `GET /health/deep` | Readiness probe, CRM connectivity | 100-500ms, calls CRM API |
+### Health endpoint
 
 ```bash
 curl http://YOUR_SERVER:3101/health
-# {"status":"ok","version":"4.0.0","prefix":"suitecrm","uptime":3600,"connections":2,"circuit_breaker":"closed"}
-
-curl http://YOUR_SERVER:3101/health/deep
-# {"status":"healthy","checks":{"endpoint":{"status":"ok"},"api":{"status":"ok","latency_ms":142},...}}
-```
-
-`/health/deep` returns HTTP 503 with `"status":"unhealthy"` if the CRM is unreachable, and 200 with `"status":"degraded"` if the endpoint is reachable but the API is not responding.
-
-### Prometheus metrics
-
-The gateway exposes 9 metrics on a separate server at `127.0.0.1:METRICS_PORT/metrics` (default port 9090). This port is never routed through nginx and is only reachable by a local Prometheus instance.
-
-```bash
-# systemd installs only - for Docker, query via Prometheus at localhost:9090
-curl http://127.0.0.1:9090/metrics | grep suitecrm_mcp
-```
-
-### Grafana dashboard
-
-The `monitoring/` directory contains a ready-to-use Prometheus + Grafana stack. To start it alongside the gateway:
-
-```bash
-# Set Grafana admin password (required by docker-compose.yml)
-echo "GRAFANA_PASSWORD=yourpassword" > .env
-
-docker compose up -d
-```
-
-Grafana runs at `http://localhost:3000`. The pre-built dashboard includes panels for active connections, tool call rate, error rate, auth failures, tool latency percentiles (p50/p95/p99), CRM API latency by method, and circuit breaker state.
-
-For systemd installs (non-Docker), install Prometheus separately and point it at `127.0.0.1:METRICS_PORT`. See `monitoring/prometheus.yml` for a multi-entity config example.
-
-### Circuit breaker
-
-The gateway has a built-in circuit breaker. After `CIRCUIT_BREAKER_THRESHOLD` consecutive CRM failures (default 5), it switches to OPEN state and fails fast instead of waiting for each timeout. After `CIRCUIT_BREAKER_RESET_MS` (default 60s) it allows one test request through to check recovery.
-
-The current state is visible in `/health`, `/health/deep`, `{prefix}_server_info`, and the `suitecrm_mcp_circuit_breaker_state` metric.
+# {"status":"ok","version":"4.0.0","prefix":"suitecrm","uptime":3600,"connections":2}
 
 ---
 
