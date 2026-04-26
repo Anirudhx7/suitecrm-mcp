@@ -105,6 +105,15 @@ services:
     restart: unless-stopped
 
   # ── Promtail ─────────────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+    command: --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    restart: unless-stopped
+
   promtail:
     image: grafana/promtail:3.4.2
     volumes:
