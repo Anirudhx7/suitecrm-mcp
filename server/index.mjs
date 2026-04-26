@@ -507,15 +507,15 @@ function validateFieldList(fields) {
 }
 
 function validateQuery(query) {
-  if (typeof query === 'string' && query.length > MAX_QUERY_LEN) {
-    throw new McpError(ErrorCode.InvalidParams, `Query exceeds maximum length of ${MAX_QUERY_LEN} characters`);
-  }
+  if (query == null) return;
+  if (typeof query !== 'string') throw new McpError(ErrorCode.InvalidParams, 'query must be a string');
+  if (query.length > MAX_QUERY_LEN) throw new McpError(ErrorCode.InvalidParams, `Query exceeds maximum length of ${MAX_QUERY_LEN} characters`);
 }
 
 function validateOrderBy(order_by) {
-  if (typeof order_by === 'string' && order_by.length > MAX_ORDER_BY_LEN) {
-    throw new McpError(ErrorCode.InvalidParams, `order_by exceeds maximum length of ${MAX_ORDER_BY_LEN} characters`);
-  }
+  if (order_by == null) return;
+  if (typeof order_by !== 'string') throw new McpError(ErrorCode.InvalidParams, 'order_by must be a string');
+  if (order_by.length > MAX_ORDER_BY_LEN) throw new McpError(ErrorCode.InvalidParams, `order_by exceeds maximum length of ${MAX_ORDER_BY_LEN} characters`);
 }
 
 function coerceNumeric(val, defaultVal, min, max) {
