@@ -1,6 +1,6 @@
 {
   "name": "suitecrm-mcp-gateway",
-  "version": "4.3.1",
+  "version": "4.3.2",
   "description": "SuiteCRM MCP Gateway - two-service auth, SSE transport, 13 tools, Ansible deployment",
   "type": "module",
   "main": "index.mjs",

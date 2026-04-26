@@ -4,7 +4,7 @@ services:
   # Handles OAuth2/OIDC login and issues session tokens.
   # One instance per deployment (shared across all entities).
   suitecrm-mcp-auth:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.3.1
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.3.2
     command: node auth.mjs
     working_dir: /app
     ports:
@@ -36,7 +36,7 @@ services:
   # exposing this on a public VPS - the auth service alone does not protect
   # the SSE port from unauthenticated connection attempts.
   suitecrm-mcp:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.3.1
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.3.2
     ports:
       - "127.0.0.1:3101:3101"   # change to "3101:3101" only behind a reverse proxy
     volumes:
