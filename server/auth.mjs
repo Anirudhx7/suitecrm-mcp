@@ -785,13 +785,15 @@ setInterval(() => {
 
 // Purge expired gateway tokens from sessions.json every hour. Also runs once on
 // startup so stale tokens from a prior run are cleared immediately.
-;(() => {
+try {
   const sessions = loadSessions();
   const before = Object.keys(sessions).length;
   cleanExpiredSessions(sessions);
   const removed = before - Object.keys(sessions).length;
   if (removed > 0) { saveSessions(sessions); logger.info({ removed }, 'gateway_sessions_purged'); }
-})();
+} catch (err) {
+  logger.warn({ err: err.message }, 'startup gateway_sessions_purge failed — continuing');
+}
 setInterval(() => {
   const sessions = loadSessions();
   const before = Object.keys(sessions).length;

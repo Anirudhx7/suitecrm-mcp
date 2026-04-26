@@ -553,8 +553,11 @@ async function searchRecords(sid, { module, query='', fields=[], max_results=20,
 
 async function searchText(sid, { search_string, modules=['Accounts','Contacts','Leads'], max_results=10 }) {
   validateQuery(search_string);
-  if (!Array.isArray(modules) || modules.length === 0 || modules.length > 20) {
-    throw new McpError(ErrorCode.InvalidParams, 'modules must be a non-empty array with at most 20 entries');
+  if (!Array.isArray(modules) || modules.length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, 'modules must be a non-empty array');
+  }
+  if (modules.length > 20) {
+    throw new McpError(ErrorCode.InvalidParams, 'modules array exceeds maximum of 20 entries');
   }
   for (const m of modules) validateModule(m);
   const safeMax = coerceNumeric(max_results, 10, 1, MAX_RESULTS_CAP);
