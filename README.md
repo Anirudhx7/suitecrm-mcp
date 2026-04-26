@@ -668,6 +668,6 @@ See [SECURITY.md](SECURITY.md) for full details on controls and known limitation
 
 <div align="center">
 
-Built by [Anirudhx7](https://github.com/Anirudhx7) · Part of [AgentLayer](https://github.com/Anirudhx7)
+Built by [Anirudhx7](https://github.com/Anirudhx7)
 
 </div>
