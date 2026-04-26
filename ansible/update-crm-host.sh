@@ -36,6 +36,11 @@ if [[ -z "$ENDPOINT" && -n "$SITE_URL" ]]; then
   done
 fi
 
+# Serialize concurrent updates from parallel Ansible tasks
+LOCK_FILE="/var/lock/suitecrm-crm-hosts.lock"
+exec 9>"$LOCK_FILE"
+flock -x 9
+
 python3 - <<PYEOF
 import json
 from pathlib import Path

@@ -246,11 +246,11 @@ function loadProfiles() {
 function redactAuditArgs(args) {
   const safe = {};
   for (const [k, v] of Object.entries(args)) {
-    if (k === 'name_value_list' || k === 'search_params') {
+    if (k === 'name_value_list' || k === 'search_params' || k === 'fields') {
       safe[k] = (typeof v === 'object' && v !== null)
         ? Object.fromEntries(Object.keys(v).map(fk => [fk, '[redacted]']))
         : '[redacted]';
-    } else if (k === 'query' || k === 'search_query') {
+    } else if (k === 'query' || k === 'search_query' || k === 'search_string') {
       safe[k] = '[redacted]';
     } else {
       safe[k] = v;
