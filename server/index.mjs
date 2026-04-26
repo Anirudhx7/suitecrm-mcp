@@ -240,6 +240,9 @@ function loadProfiles() {
   catch { return {}; }
 }
 
+// 2-second read cache. In Docker multi-container deployments, auth.mjs writes
+// sessions.json on a different container's filesystem - the cache means an entity
+// gateway may lag up to 2s after a new token is issued before it accepts it.
 let _sessionsCache = null;
 let _sessionsCacheAt = 0;
 function loadSessions() {

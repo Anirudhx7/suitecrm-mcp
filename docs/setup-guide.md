@@ -240,6 +240,20 @@ You should see the success page with your API key.
 
 ## Admin operations
 
+### Periodic session cleanup
+
+`sessions.json` accumulates expired entries over time. Run this periodically or add it as a cron job:
+
+```bash
+# Purge expired sessions (safe to run at any time)
+python3 tools/mcp-admin sessions --purge-expired
+
+# Example cron: run daily at 2am
+echo "0 2 * * * suitecrm-mcp python3 /opt/suitecrm-mcp/tools/mcp-admin sessions --purge-expired" | sudo crontab -
+```
+
+---
+
 ### Check user profiles and API keys
 
 ```bash

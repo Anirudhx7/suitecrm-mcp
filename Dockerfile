@@ -7,6 +7,8 @@ RUN adduser -D appuser && chown -R appuser /app
 USER appuser
 EXPOSE 3100
 EXPOSE 3101
+# Metrics ports are bound to 127.0.0.1 by default. Set METRICS_BIND=0.0.0.0 so
+# a Prometheus container on the same Docker network can reach them by service name.
 EXPOSE 9090
 EXPOSE 9091
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:3101/health || exit 1
