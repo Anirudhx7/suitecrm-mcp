@@ -552,11 +552,17 @@ async function searchRecords(sid, { module, query='', fields=[], max_results=20,
 }
 
 async function searchText(sid, { search_string, modules=['Accounts','Contacts','Leads'], max_results=10 }) {
+  validateQuery(search_string);
+  if (!Array.isArray(modules) || modules.length === 0 || modules.length > 20) {
+    throw new McpError(ErrorCode.InvalidParams, 'modules must be a non-empty array with at most 20 entries');
+  }
+  for (const m of modules) validateModule(m);
+  const safeMax = coerceNumeric(max_results, 10, 1, MAX_RESULTS_CAP);
   const r = await crmCall(sid, 'search_by_module', {
     search_string,
     modules,
     offset: 0,
-    max_results,
+    max_results: safeMax,
     assigned_user_id: '',
     select_fields: [],
     unified_search_only: false,
@@ -591,8 +597,20 @@ async function getRecord(sid, { module, id, fields=[] }) {
   return recs.length ? recs[0] : null;
 }
 
+function validateFieldsObject(fields) {
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
+    throw new McpError(ErrorCode.InvalidParams, 'fields must be a non-null object');
+  }
+  const keys = Object.keys(fields);
+  if (keys.length > MAX_FIELDS) {
+    throw new McpError(ErrorCode.InvalidParams, `Too many fields (max ${MAX_FIELDS})`);
+  }
+  for (const k of keys) validateIdent(k, 'field');
+}
+
 async function createRecord(sid, { module, fields }) {
   validateModule(module);
+  validateFieldsObject(fields);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: toNvl(fields),
@@ -603,6 +621,7 @@ async function createRecord(sid, { module, fields }) {
 async function updateRecord(sid, { module, id, fields }) {
   validateModule(module);
   validateId(id);
+  validateFieldsObject(fields);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: [{ name: 'id', value: id }, ...toNvl(fields)],
