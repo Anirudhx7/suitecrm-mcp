@@ -245,14 +245,14 @@ You should see the success page with your API key.
 ```bash
 # Requires python3, reads /etc/suitecrm-mcp/user-profiles.json
 python3 tools/mcp-admin list
-python3 tools/mcp-admin show <sub>
-python3 tools/mcp-admin revoke <sub>
+python3 tools/mcp-admin whoami --sub <sub>
+python3 tools/mcp-admin revoke --sub <sub>
 ```
 
 ### Add a user who cannot authenticate via the normal OAuth flow
 
 ```bash
-python3 tools/mcp-admin add-cred <sub> <entity_code> <crm_username> <crm_password>
+python3 tools/mcp-admin add --sub <sub> --entity <entity_code> --user <crm_username> --pass <crm_password>
 ```
 
 ### Update server code without reinstalling
@@ -289,17 +289,21 @@ sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --em
 ```
 /opt/suitecrm-mcp/           gateway server code
   index.mjs
+  auth.mjs
   package.json
   node_modules/
 
 /etc/suitecrm-mcp/           config and runtime state (mode 700, owned by suitecrm-mcp)
   entities.json              entity list (written by installer)
+  auth.env                   env vars for auth service (mode 600)
   crm1.env                   env vars for entity crm1 (mode 600)
   user-profiles.json         per-user API keys and CRM creds (mode 600, written at runtime)
+  sessions.json              active gateway sessions (mode 600, written at runtime)
   crm-hosts.json             SSH host map for provisioning (if configured)
   domain                     saved domain for nginx rebuild
 
 /etc/systemd/system/
+  suitecrm-mcp-auth.service
   suitecrm-mcp-crm1.service
   suitecrm-mcp-crm2.service
 

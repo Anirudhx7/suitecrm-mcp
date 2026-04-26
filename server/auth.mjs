@@ -728,9 +728,14 @@ app.listen(PORT, BIND_HOST, () => {
 
 const METRICS_PORT = parseInt(process.env.METRICS_PORT || '9091', 10);
 const METRICS_BIND = (process.env.METRICS_BIND || '127.0.0.1').trim();
-http.createServer(async (_req, res) => {
-  res.writeHead(200, { 'Content-Type': metricsRegistry.contentType });
-  res.end(await metricsRegistry.metrics());
+http.createServer(async (req, res) => {
+  if (req.url === '/metrics' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': metricsRegistry.contentType });
+    res.end(await metricsRegistry.metrics());
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
 }).listen(METRICS_PORT, METRICS_BIND, () => {
   logger.info({ host: METRICS_BIND, port: METRICS_PORT }, 'metrics_listening');
 });

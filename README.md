@@ -168,6 +168,7 @@ services:
       AUTH0_AUDIENCE: https://your-api-identifier
       REQUIRED_GROUP: crm1_users
       PORT: "3101"
+      METRICS_PORT: "9090"
       METRICS_BIND: "0.0.0.0"   # 0.0.0.0 required so the Prometheus container can reach it by service name
     depends_on:
       suitecrm-mcp-auth:
@@ -187,6 +188,7 @@ services:
       AUTH0_AUDIENCE: https://your-api-identifier
       REQUIRED_GROUP: crm2_users
       PORT: "3102"
+      METRICS_PORT: "9090"
       METRICS_BIND: "0.0.0.0"   # 0.0.0.0 required so the Prometheus container can reach it by service name
     depends_on:
       suitecrm-mcp-auth:
