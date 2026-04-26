@@ -240,6 +240,25 @@ function loadProfiles() {
   catch { return {}; }
 }
 
+// Redact potentially-PII field values from audit log entries.
+// Keeps structural keys (so logs show which fields were queried) but
+// removes values that may contain names, emails, or business-sensitive data.
+function redactAuditArgs(args) {
+  const safe = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (k === 'name_value_list' || k === 'search_params') {
+      safe[k] = (typeof v === 'object' && v !== null)
+        ? Object.fromEntries(Object.keys(v).map(fk => [fk, '[redacted]']))
+        : '[redacted]';
+    } else if (k === 'query' || k === 'search_query') {
+      safe[k] = '[redacted]';
+    } else {
+      safe[k] = v;
+    }
+  }
+  return safe;
+}
+
 // 2-second read cache. In Docker multi-container deployments, auth.mjs writes
 // sessions.json on a different container's filesystem - the cache means an entity
 // gateway may lag up to 2s after a new token is issued before it accepts it.
@@ -815,7 +834,7 @@ function createMcpServer(sid) {
     const cLog = (connLoggers.get(sid) || logger).child({ reqId });
     const callStart = Date.now();
     const end = metricToolDuration.startTimer({ entity: PREFIX, tool: name });
-    cLog.info({ audit: true, tool: name, args }, 'tool_call');
+    cLog.info({ audit: true, tool: name, args: redactAuditArgs(args) }, 'tool_call');
     try {
       let result;
       if (name === `${PREFIX}_search`) result = await searchRecords(sid, args);
