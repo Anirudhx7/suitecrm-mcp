@@ -339,3 +339,5 @@
     - name: Show entities.json status
       debug:
         msg: "entities.json: {{ entities_result.stdout | trim }}"
+    # Note: group membership for each entity is read from entities.json (ent.group),
+    # not from auth.env env vars. Do not add REQUIRED_GROUP_* entries to auth.env.
