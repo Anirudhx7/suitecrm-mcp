@@ -640,6 +640,14 @@ function copyEl(id,btn){
 // SECURE BRIDGE AUTH ENDPOINTS (v3.1+)
 // ========================================================================
 
+const logoutLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many logout requests' },
+});
+
 const bridgeStartLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -741,7 +749,7 @@ app.get('/auth/bridge/poll/:nonce', bridgePollLimiter, (req, res) => {
 
 
 // POST /auth/logout -> invalidate session
-app.post('/auth/logout', (req, res) => {
+app.post('/auth/logout', logoutLimiter, (req, res) => {
   const authHeader = req.headers.authorization || '';
   const token = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '')
     || qs(req.headers['x-gateway-token']);
@@ -772,6 +780,19 @@ setInterval(() => {
   if (removed > 0) {
     saveBridgeSessions(bs);
     logger.info({ removed }, 'bridge_sessions_purged');
+  }
+}, 60 * 60 * 1000).unref();
+
+// Purge expired gateway tokens from sessions.json every hour. Tokens are also
+// cleaned on each OAuth callback, but long-idle deployments accumulate stale entries.
+setInterval(() => {
+  const sessions = loadSessions();
+  const before = Object.keys(sessions).length;
+  cleanExpiredSessions(sessions);
+  const removed = before - Object.keys(sessions).length;
+  if (removed > 0) {
+    saveSessions(sessions);
+    logger.info({ removed }, 'gateway_sessions_purged');
   }
 }, 60 * 60 * 1000).unref();
 

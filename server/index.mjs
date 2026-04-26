@@ -1125,11 +1125,13 @@ app.post('/messages', messagesRL, async (req, res) => {
   await t.handlePostMessage(req, res);
 });
 
-process.on('SIGTERM', () => {
-  logger.info({ connections: transports.size }, 'sigterm_shutdown');
+function gracefulShutdown(signal) {
+  logger.info({ connections: transports.size, signal }, 'shutdown');
   for (const [, t] of transports) t.close?.();
   process.exit(0);
-});
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 
 const BIND_HOST = (process.env.BIND_HOST || '127.0.0.1').trim();
 app.listen(PORT, BIND_HOST, () => {
