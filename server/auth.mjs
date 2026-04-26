@@ -205,7 +205,7 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
       try {
         await execFileAsync('ssh', [
           '-i',  host.ssh_key || '/etc/suitecrm-mcp/ssh-key.pem',
-          '-o',  'StrictHostKeyChecking=no',
+          '-o',  'StrictHostKeyChecking=accept-new',
           '-o',  'ConnectTimeout=10',
           '-o',  'BatchMode=yes',
           `${host.ssh_user}@${host.ssh_host}`,
