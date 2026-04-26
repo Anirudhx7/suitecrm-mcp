@@ -5,7 +5,7 @@ the two most common configurations.
 
 ---
 
-## Auth0
+## 🔐 Auth0
 
 ### 1. Create a Regular Web Application
 
@@ -78,7 +78,7 @@ Then set `OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/roles` in the gateway env file
 
 ---
 
-## Azure AD (direct, without Auth0)
+## 🏢 Azure AD (direct, without Auth0)
 
 Use this if you want to skip Auth0 and authenticate directly against Azure AD.
 
@@ -120,7 +120,7 @@ the `onpremisessecurityidentifier`.
 
 ---
 
-## Installer prompts reference
+## 📋 Installer prompts reference
 
 When you run `sudo python3 install.py`, the OAuth section asks:
 
@@ -135,7 +135,7 @@ When you run `sudo python3 install.py`, the OAuth section asks:
 
 ---
 
-## Verifying the setup
+## ✅ Verifying the setup
 
 After installation, visit `https://YOUR_GATEWAY/auth/login`. You should be redirected
 to your identity provider's login page. After logging in successfully, you should see
