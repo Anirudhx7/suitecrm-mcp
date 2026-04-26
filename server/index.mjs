@@ -1115,7 +1115,8 @@ app.post('/messages', messagesRL, async (req, res) => {
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token) return res.status(401).json({ error: 'Bearer token required' });
   const session = loadSessions()[token];
-  if (!session || session.sub !== subBySid.get(sid)) {
+  const expectedSub = subBySid.get(sid);
+  if (!session || !expectedSub || session.sub !== expectedSub) {
     return res.status(403).json({ error: 'Token does not match session owner' });
   }
   if (session.expiresAt < Date.now()) {
