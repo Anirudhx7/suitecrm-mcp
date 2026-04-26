@@ -3,7 +3,10 @@ WORKDIR /app
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 COPY server/index.mjs server/auth.mjs ./
-RUN adduser -D appuser && chown -R appuser /app
+RUN adduser -D appuser \
+    && chown -R appuser /app \
+    && mkdir -p /etc/suitecrm-mcp \
+    && chown appuser /etc/suitecrm-mcp
 USER appuser
 EXPOSE 3100
 EXPOSE 3101
