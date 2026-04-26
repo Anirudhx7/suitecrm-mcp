@@ -1,0 +1,75 @@
+groups:
+  - name: suitecrm_mcp
+    rules:
+
+      - alert: SuiteCRMCircuitBreakerOpen
+        expr: suitecrm_mcp_circuit_breaker_state == 2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CRM unreachable - circuit breaker open"
+          description: "Circuit breaker is open for entity {{ $labels.entity }}. The CRM is not responding and all requests are being short-circuited."
+
+      - alert: SuiteCRMEntityDown
+        expr: up{job=~"suitecrm.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Gateway process is down"
+          description: "The suitecrm-mcp gateway for entity {{ $labels.entity }} (job={{ $labels.job }}) has been unreachable for more than 1 minute."
+
+      - alert: SuiteCRMHighErrorRate
+        expr: sum(rate(suitecrm_mcp_tool_calls_total{status="error"}[5m])) / sum(rate(suitecrm_mcp_tool_calls_total[5m])) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tool error rate above 10%"
+          description: "More than 10% of MCP tool calls are returning errors for entity {{ $labels.entity }}. Check CRM connectivity and credentials."
+
+      - alert: SuiteCRMHighHeapUsage
+        expr: nodejs_heap_size_used_bytes / nodejs_heap_size_total_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node.js heap above 85%"
+          description: "Node.js heap usage is above 85% for entity {{ $labels.entity }}. Memory pressure may cause degraded performance or OOM crashes."
+
+      - alert: SuiteCRMHighEventLoopLag
+        expr: histogram_quantile(0.99, rate(nodejs_eventloop_lag_seconds_bucket[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Event loop lag p99 above 100ms - server may be blocking"
+          description: "The p99 event loop lag for entity {{ $labels.entity }} has exceeded 100ms. A synchronous or CPU-bound operation may be blocking the event loop."
+
+      - alert: SuiteCRMAuthFailureSpike
+        expr: rate(suitecrm_mcp_auth_failures_total[5m]) > 0.2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Auth failures above 12/min"
+          description: "Auth failure rate for entity {{ $labels.entity }} has exceeded 0.2/s (12/min). This may indicate a brute-force attempt or misconfigured clients."
+
+      - alert: SuiteCRMRateLimitSpike
+        expr: rate(suitecrm_mcp_rate_limited_total[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limit hits above 30/min"
+          description: "Rate limiting is triggering at above 0.5/s (30/min) for entity {{ $labels.entity }}. A client may be sending excessive requests."
+
+      - alert: SuiteCRMConnectionCapacity
+        expr: suitecrm_mcp_active_connections > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Active connections above 80% of capacity cap (100)"
+          description: "Active SSE connections for entity {{ $labels.entity }} have exceeded 80. The gateway cap is 100 - new connections may begin to be rejected."

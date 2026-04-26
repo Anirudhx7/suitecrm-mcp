@@ -81,6 +81,94 @@ const metricCircuitBreakerOpenings = new Counter({
   name: 'suitecrm_mcp_circuit_breaker_openings_total', help: 'Circuit breaker openings',
   labelNames: ['entity'], registers: [metricsRegistry],
 });
+const metricRateLimited = new Counter({
+  name: 'suitecrm_mcp_rate_limited_total', help: 'Requests rejected by rate limiter',
+  labelNames: ['entity', 'route'], registers: [metricsRegistry],
+});
+const metricConnectionRejected = new Counter({
+  name: 'suitecrm_mcp_connection_rejected_total', help: 'SSE connections rejected at capacity cap',
+  labelNames: ['entity'], registers: [metricsRegistry],
+});
+const metricCrmErrors = new Counter({
+  name: 'suitecrm_mcp_crm_errors_total', help: 'CRM REST API errors by error code',
+  labelNames: ['entity', 'method', 'crm_code'], registers: [metricsRegistry],
+});
+const NETWORK_ERRS = new Set(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','ECONNABORTED']);
+const metricCrmSessionsCached = new Gauge({
+  name: 'suitecrm_mcp_crm_sessions_cached', help: 'In-memory CRM sessions cached',
+  labelNames: ['entity'], registers: [metricsRegistry],
+});
+new Gauge({
+  name: 'suitecrm_mcp_profiles_configured',
+  help: 'Users with a CRM profile configured for this entity',
+  labelNames: ['entity'], registers: [metricsRegistry],
+  collect() {
+    this.reset();
+    const profiles = loadProfiles();
+    let count = 0;
+    for (const p of Object.values(profiles)) {
+      if (p.entities?.[CODE]) count++;
+    }
+    this.set({ entity: PREFIX }, count);
+  },
+});
+new Gauge({
+  name: 'suitecrm_mcp_gateway_sessions_active',
+  help: 'Users with a valid non-expired gateway API session for this entity',
+  labelNames: ['entity'], registers: [metricsRegistry],
+  collect() {
+    this.reset();
+    const sessions = loadSessions();
+    const profiles = loadProfiles();
+    const now = Date.now();
+    const activeSubs = new Set(
+      Object.values(sessions).filter(s => s.expiresAt > now).map(s => s.sub)
+    );
+    let count = 0;
+    for (const [sub, p] of Object.entries(profiles)) {
+      if (p.entities?.[CODE] && activeSubs.has(sub)) count++;
+    }
+    this.set({ entity: PREFIX }, count);
+  },
+});
+new Gauge({
+  name: 'suitecrm_mcp_user_crm_session_active',
+  help: 'Whether user has active in-memory CRM session (1=yes 0=no)',
+  labelNames: ['sub', 'email', 'entity', 'crm_user'], registers: [metricsRegistry],
+  collect() {
+    this.reset();
+    const profiles = loadProfiles();
+    for (const [sub, profile] of Object.entries(profiles)) {
+      const creds = profile.entities?.[CODE];
+      if (!creds) continue;
+      this.set({
+        sub,
+        email: profile.email || sub,
+        entity: PREFIX,
+        crm_user: creds.user || '',
+      }, crmSessions.has(`${sub}:${CODE}`) ? 1 : 0);
+    }
+  },
+});
+new Gauge({
+  name: 'suitecrm_mcp_user_gateway_session_active',
+  help: 'Whether user has a valid non-expired gateway session token (1=yes 0=no)',
+  labelNames: ['sub', 'email'], registers: [metricsRegistry],
+  collect() {
+    this.reset();
+    const sessions = loadSessions();
+    const profiles = loadProfiles();
+    const now = Date.now();
+    const subBest = {};
+    for (const sess of Object.values(sessions)) {
+      if (!profiles[sess.sub]?.entities?.[CODE]) continue;
+      subBest[sess.sub] = subBest[sess.sub] || (sess.expiresAt > now ? 1 : 0);
+    }
+    for (const [sub, active] of Object.entries(subBest)) {
+      this.set({ sub, email: profiles[sub]?.email || sub }, active);
+    }
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Circuit breaker
@@ -131,6 +219,7 @@ setInterval(() => {
       crmSessionAges.delete(key);
     }
   }
+  metricCrmSessionsCached.set({ entity: PREFIX }, crmSessions.size);
 }, 30 * 60 * 1000).unref();
 
 function loadProfiles() {
@@ -256,7 +345,14 @@ async function rawCall(method, restData) {
       end(); throw e;
     }
     end(); return r;
-  } catch (err) { end(); throw err; }
+  } catch (err) {
+    end();
+    const crmCode = typeof err.code === 'number'
+      ? String(err.code)
+      : (NETWORK_ERRS.has(err.code) || err.message?.includes('Timeout') ? 'network' : 'unknown');
+    metricCrmErrors.inc({ entity: PREFIX, method, crm_code: crmCode });
+    throw err;
+  }
 }
 
 async function crmLogin(user, pass) {
@@ -283,6 +379,7 @@ async function ensureCrmSession(sid) {
   const crmSid = await crmLogin(creds.user, creds.pass);
   crmSessions.set(key, crmSid);
   crmSessionAges.set(key, Date.now());
+  metricCrmSessionsCached.set({ entity: PREFIX }, crmSessions.size);
   return crmSid;
 }
 
@@ -305,6 +402,7 @@ async function crmCall(sid, method, params) {
       const sub = subBySid.get(sid) || sid;
       crmSessions.delete(`${sub}:${CODE}`);
       crmSessionAges.delete(`${sub}:${CODE}`);
+      metricCrmSessionsCached.set({ entity: PREFIX }, crmSessions.size);
       try {
         crmSid = await ensureCrmSession(sid);
         const result = await rawCall(method, { session: crmSid, ...params });
@@ -735,18 +833,44 @@ const sseRL = rateLimit({
   windowMs: 15 * 60 * 1000, max: 20,
   standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many connection attempts - try again in 15 minutes' },
+  keyGenerator: (req) => {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (token) {
+      const sess = loadSessions()[token];
+      if (sess?.sub) return sess.sub;
+    }
+    return req.ip;
+  },
+  handler: (req, res, next, options) => {
+    const key = req.rateLimit?.key || req.ip;
+    metricRateLimited.inc({ entity: PREFIX, route: 'sse' });
+    process.stderr.write(`[${PREFIX}] Rate limit hit on sse for ${key}\n`);
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 const messagesRL = rateLimit({
   windowMs: 60 * 1000, max: 100,
   standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many tool calls - slow down' },
+  keyGenerator: (req) => subBySid.get(req.query.sessionId) || req.ip,
+  handler: (req, res, next, options) => {
+    const key = req.rateLimit?.key || req.ip;
+    metricRateLimited.inc({ entity: PREFIX, route: 'messages' });
+    process.stderr.write(`[${PREFIX}] Rate limit hit on messages for ${key}\n`);
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 const deepHealthRL = rateLimit({
   windowMs: 60 * 1000, max: 10,
   standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many health check requests' },
+  handler: (req, res, next, options) => {
+    metricRateLimited.inc({ entity: PREFIX, route: 'health_deep' });
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -816,6 +940,7 @@ app.get('/test', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware,
 
 app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req, res) => {
   if (transports.size >= 100) {
+    metricConnectionRejected.inc({ entity: PREFIX });
     return res.status(503).json({ error: 'Too many connections' });
   }
 

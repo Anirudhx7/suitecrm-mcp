@@ -2,6 +2,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - "rules.yml"
+
 scrape_configs:
   # Single-entity Docker setup - scrapes the suitecrm-mcp container
   # METRICS_BIND must be set to 0.0.0.0 in docker-compose.yml for this to work
