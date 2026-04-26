@@ -5,6 +5,7 @@
 [![CI](https://github.com/Anirudhx7/suitecrm-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Anirudhx7/suitecrm-mcp/actions/workflows/ci.yml)
 [![GitHub Stars](https://img.shields.io/github/stars/Anirudhx7/suitecrm-mcp?style=social)](https://github.com/Anirudhx7/suitecrm-mcp)
 [![Issues](https://img.shields.io/github/issues/Anirudhx7/suitecrm-mcp?color=ff80eb&labelColor=black&style=flat-square)](https://github.com/Anirudhx7/suitecrm-mcp/issues)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Anirudh%20Mehandru-0077B5?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/anirudh-mehandru/)
 
 An open-source MCP (Model Context Protocol) gateway for SuiteCRM. Lets AI assistants - Claude, OpenAI, or any MCP-compatible client - read and write your CRM data over a persistent SSE connection.
 
