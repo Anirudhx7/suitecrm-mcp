@@ -182,11 +182,13 @@ const circuitBreaker = {
   state: 'CLOSED', failures: 0, lastFailure: 0,
   isOpen() {
     if (this.state === 'CLOSED') return false;
+    if (this.state === 'HALF_OPEN') return true; // probe in-flight; block all other requests
+    // OPEN: check reset window
     if (Date.now() - this.lastFailure > CIRCUIT_BREAKER_RESET_MS) {
       this.state = 'HALF_OPEN';
       metricCircuitBreakerState.set({ entity: PREFIX }, 1);
       logger.warn({ state: 'HALF_OPEN' }, 'circuit_breaker_state');
-      return false;
+      return false; // let exactly one probe through
     }
     return true;
   },
@@ -197,7 +199,12 @@ const circuitBreaker = {
   },
   recordFailure() {
     this.failures++; this.lastFailure = Date.now();
-    if (this.failures >= CIRCUIT_BREAKER_THRESHOLD && this.state !== 'OPEN') {
+    if (this.state === 'HALF_OPEN') {
+      this.state = 'OPEN';
+      metricCircuitBreakerState.set({ entity: PREFIX }, 2);
+      metricCircuitBreakerOpenings.inc({ entity: PREFIX });
+      logger.warn({ state: 'OPEN', failures: this.failures }, 'circuit_breaker_state');
+    } else if (this.failures >= CIRCUIT_BREAKER_THRESHOLD && this.state !== 'OPEN') {
       this.state = 'OPEN';
       metricCircuitBreakerState.set({ entity: PREFIX }, 2);
       metricCircuitBreakerOpenings.inc({ entity: PREFIX });

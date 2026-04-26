@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, renameSync } from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomBytes } from 'crypto';
+import pino from 'pino';
 
 function escHtml(s) {
   return String(s)
@@ -28,7 +29,7 @@ const execFileAsync = promisify(execFile);
 
 const REQUIRED_AUTH = ['AUTH0_DOMAIN','AUTH0_CLIENT_ID','AUTH0_CLIENT_SECRET','AUTH0_AUDIENCE','GATEWAY_PUBLIC_URL'];
 const missingAuth = REQUIRED_AUTH.filter(k => !process.env[k]);
-if (missingAuth.length) { console.error(`[auth] Missing required env vars: ${missingAuth.join(', ')}`); process.exit(1); }
+if (missingAuth.length) { pino().error({ vars: missingAuth }, 'missing_required_env_vars'); process.exit(1); }
 
 const AUTH0_DOMAIN        = process.env.AUTH0_DOMAIN;
 const AUTH0_CLIENT_ID     = process.env.AUTH0_CLIENT_ID;
@@ -44,6 +45,11 @@ const SESSION_TTL_MS      = parseInt(process.env.SESSION_TTL_DAYS || '30') * 24 
 const SESSION_TTL_DAYS    = parseInt(process.env.SESSION_TTL_DAYS || '30');
 const BRIDGE_SESSION_TTL_MS = 15 * 60 * 1000;
 const NS = AUTH0_AUDIENCE + '/';
+
+const logger = pino({
+  base: { service: 'suitecrm-mcp-auth' },
+  timestamp: pino.stdTimeFunctions.isoTime,
+});
 
 // 64-char hex string (output of randomBytes(32).toString('hex'))
 const NONCE_RE = /^[0-9a-f]{64}$/;
@@ -72,7 +78,7 @@ function saveBridgeSessions(s) {
 }
 function loadEntities() {
   try { return JSON.parse(readFileSync('/etc/suitecrm-mcp/entities.json', 'utf8')); } catch (e) {
-    process.stderr.write(`[auth] WARN: could not read entities.json: ${e.message}\n`);
+    logger.warn({ err: e.message }, 'entities_load_failed');
     return {};
   }
 }
@@ -145,10 +151,10 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
           crmUser,
           crmPass,
         ]);
-        process.stderr.write(`[auth] Provisioned CRM user "${crmUser}" on ${code}\n`);
+        logger.info({ crmUser, entity: code }, 'crm_user_provisioned');
       } catch (err) {
         const msg = (err.stderr || err.message || '').trim().slice(0, 200);
-        process.stderr.write(`[auth] CRM provision failed for ${code}: ${msg}\n`);
+        logger.error({ entity: code, err: msg }, 'crm_provision_failed');
         continue;
       }
     }
@@ -212,7 +218,7 @@ app.get('/auth/callback', async (req, res) => {
     const userGroups = payload[`${NS}groups`] || [];
     const linuxUser  = email.split('@')[0].toLowerCase();
 
-    process.stderr.write(`[auth] Login: ${email} (${sub.slice(-8)})\n`);
+    logger.info({ email, sub: sub.slice(-8) }, 'login');
 
     await provisionCrmAccounts(sub, email, sam, userGroups);
 
@@ -231,7 +237,7 @@ app.get('/auth/callback', async (req, res) => {
       // Clean up any older duplicate sessions for the same user
       for (let i = 1; i < userSessions.length; i++) delete sessions[userSessions[i][0]];
       if (userSessions.length > 1) saveSessions(sessions);
-      process.stderr.write(`[auth] Existing session for ${email} — ${daysLeft} day(s) left\n`);
+      logger.info({ email, daysLeft }, 'session_reused');
     } else {
       apiKey = randomBytes(32).toString('hex');
       sessions[apiKey] = {
@@ -244,7 +250,7 @@ app.get('/auth/callback', async (req, res) => {
       };
       daysLeft = SESSION_TTL_DAYS;
       saveSessions(sessions);
-      process.stderr.write(`[auth] New session created for ${email}\n`);
+      logger.info({ email }, 'session_created');
     }
 
     if (nonce) {
@@ -256,7 +262,7 @@ app.get('/auth/callback', async (req, res) => {
         bridgeSessions[nonce].email   = email;
         bridgeSessions[nonce].groups  = userGroups;
         saveBridgeSessions(bridgeSessions);
-        process.stderr.write(`[auth] Bridge session ${nonce.slice(0, 16)}... marked ready\n`);
+        logger.info({ nonce: nonce.slice(0, 16) }, 'bridge_session_ready');
       }
     }
 
@@ -531,7 +537,7 @@ function copyEl(id,btn){
 </html>`);
 
   } catch (err) {
-    process.stderr.write(`[auth] Callback error: ${err.message}\n`);
+    logger.error({ err: err.message }, 'callback_error');
     res.status(500).send(`
       <html><body style="font-family:sans-serif;padding:40px">
         <h2>Something went wrong</h2>
@@ -566,7 +572,7 @@ app.post('/auth/bridge/start', (req, res) => {
   saveBridgeSessions(bridgeSessions);
 
   const loginUrl = `${GATEWAY_URL}/auth/login?nonce=${nonce}`;
-  process.stderr.write(`[auth] Bridge session started for ${linux_user} (nonce: ${nonce.slice(0, 16)}...)\n`);
+  logger.info({ linuxUser: linux_user, nonce: nonce.slice(0, 16) }, 'bridge_session_started');
 
   res.json({ nonce, client_secret: clientSecret, login_url: loginUrl });
 });
@@ -617,7 +623,7 @@ app.get('/auth/bridge/poll/:nonce', (req, res) => {
     const apiKey = session.apiKey;
     delete bridgeSessions[nonce];
     saveBridgeSessions(bridgeSessions);
-    process.stderr.write(`[auth] Bridge session completed for ${session.linuxUser}\n`);
+    logger.info({ linuxUser: session.linuxUser }, 'bridge_session_completed');
 
     return res.json({ status: 'ready', api_key: apiKey });
   }
@@ -642,5 +648,5 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'suitecrm-mc
 const PORT = parseInt(process.env.PORT || '3100', 10);
 const BIND_HOST = (process.env.BIND_HOST || '127.0.0.1').trim();
 app.listen(PORT, BIND_HOST, () => {
-  process.stderr.write(`[auth] Listening on ${BIND_HOST}:${PORT}\n`);
+  logger.info({ host: BIND_HOST, port: PORT }, 'listening');
 });
