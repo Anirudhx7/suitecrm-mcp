@@ -35,7 +35,7 @@ jobs:
           promtool check rules monitoring/prometheus/rules.yml
       - name: Validate Alertmanager config
         run: |
-          sudo apt-get install -y prometheus-alertmanager 2>/dev/null | tail -1
+          sudo apt-get install -y prometheus-alertmanager
           amtool check-config monitoring/alertmanager/alertmanager.yml
 
   publish:
