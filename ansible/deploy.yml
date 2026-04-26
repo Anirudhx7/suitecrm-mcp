@@ -339,14 +339,3 @@
     - name: Show entities.json status
       debug:
         msg: "entities.json: {{ entities_result.stdout | trim }}"
-
-    # ── auth.env REQUIRED_GROUP_* ─────────────────────────────────
-    - name: Sync REQUIRED_GROUP entries in auth.env
-      lineinfile:
-        path: /etc/suitecrm-mcp/auth.env
-        regexp: "^REQUIRED_GROUP_{{ item.entity_code | upper }}="
-        line: "REQUIRED_GROUP_{{ item.entity_code | upper }}={{ item.group | default(item.entity_code ~ '_users') }}"
-      loop: "{{ groups['crm_vms'] | map('extract', hostvars) | list }}"
-      loop_control:
-        label: "{{ item.entity_code }}"
-      notify: restart auth
