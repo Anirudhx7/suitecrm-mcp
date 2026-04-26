@@ -472,13 +472,38 @@ function toNvl(obj) {
   return Object.entries(obj).map(([n, v]) => ({ name: n, value: String(v ?? '') }));
 }
 
-const MODULE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const MAX_QUERY_LEN = 2000;
+const MODULE_RE    = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const IDENT_RE     = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const UUID_RE      = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_QUERY_LEN    = 2000;
+const MAX_ORDER_BY_LEN = 200;
+const MAX_RESULTS_CAP  = 100;
+const MAX_FIELDS       = 50;
 
 function validateModule(module) {
   if (!module || !MODULE_RE.test(module)) {
     throw new McpError(ErrorCode.InvalidParams, `Invalid module name: ${module}`);
   }
+}
+
+function validateId(id) {
+  if (!id || !UUID_RE.test(String(id))) {
+    throw new McpError(ErrorCode.InvalidParams, `Invalid record ID (expected UUID): ${id}`);
+  }
+}
+
+function validateIdent(name, label = 'field') {
+  if (!name || !IDENT_RE.test(String(name))) {
+    throw new McpError(ErrorCode.InvalidParams, `Invalid ${label} name: ${name}`);
+  }
+}
+
+function validateFieldList(fields) {
+  if (!Array.isArray(fields)) return;
+  if (fields.length > MAX_FIELDS) {
+    throw new McpError(ErrorCode.InvalidParams, `Too many fields (max ${MAX_FIELDS})`);
+  }
+  for (const f of fields) validateIdent(f, 'field');
 }
 
 function validateQuery(query) {
@@ -487,17 +512,33 @@ function validateQuery(query) {
   }
 }
 
+function validateOrderBy(order_by) {
+  if (typeof order_by === 'string' && order_by.length > MAX_ORDER_BY_LEN) {
+    throw new McpError(ErrorCode.InvalidParams, `order_by exceeds maximum length of ${MAX_ORDER_BY_LEN} characters`);
+  }
+}
+
+function coerceNumeric(val, defaultVal, min, max) {
+  const n = Number.isInteger(val) ? val : parseInt(val, 10);
+  if (!Number.isFinite(n)) return defaultVal;
+  return Math.max(min, Math.min(max, n));
+}
+
 async function searchRecords(sid, { module, query='', fields=[], max_results=20, offset=0, order_by='' }) {
   validateModule(module);
   validateQuery(query);
+  validateOrderBy(order_by);
+  validateFieldList(fields);
+  const safeMax    = coerceNumeric(max_results, 20, 1, MAX_RESULTS_CAP);
+  const safeOffset = coerceNumeric(offset, 0, 0, 1_000_000);
   const r = await crmCall(sid, 'get_entry_list', {
     module_name: module,
     query,
     order_by,
-    offset,
+    offset: safeOffset,
     select_fields: fields,
     link_name_to_fields_array: [],
-    max_results: Math.min(max_results, 100),
+    max_results: safeMax,
     deleted: 0,
     favorites: false,
   });
@@ -537,6 +578,8 @@ async function searchText(sid, { search_string, modules=['Accounts','Contacts','
 
 async function getRecord(sid, { module, id, fields=[] }) {
   validateModule(module);
+  validateId(id);
+  validateFieldList(fields);
   const r = await crmCall(sid, 'get_entry', {
     module_name: module,
     id,
@@ -559,6 +602,7 @@ async function createRecord(sid, { module, fields }) {
 
 async function updateRecord(sid, { module, id, fields }) {
   validateModule(module);
+  validateId(id);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: [{ name: 'id', value: id }, ...toNvl(fields)],
@@ -568,6 +612,7 @@ async function updateRecord(sid, { module, id, fields }) {
 
 async function deleteRecord(sid, { module, id }) {
   validateModule(module);
+  validateId(id);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: [
@@ -591,6 +636,11 @@ async function countRecords(sid, { module, query='' }) {
 
 async function getRelationships(sid, { module, id, link_field, related_fields=[], max_results=20, offset=0 }) {
   validateModule(module);
+  validateId(id);
+  validateIdent(link_field, 'link_field');
+  validateFieldList(related_fields);
+  const safeMax    = coerceNumeric(max_results, 20, 1, MAX_RESULTS_CAP);
+  const safeOffset = coerceNumeric(offset, 0, 0, 1_000_000);
   const r = await crmCall(sid, 'get_relationships', {
     module_name: module,
     module_id: id,
@@ -600,8 +650,8 @@ async function getRelationships(sid, { module, id, link_field, related_fields=[]
     related_module_link_name_to_fields_array: [],
     deleted: 0,
     order_by: '',
-    offset,
-    limit: max_results,
+    offset: safeOffset,
+    limit: safeMax,
   });
   return {
     records: flatList(r.entry_list),
@@ -611,7 +661,11 @@ async function getRelationships(sid, { module, id, link_field, related_fields=[]
 
 async function linkRecords(sid, { module, id, link_field, related_ids }) {
   validateModule(module);
+  validateId(id);
+  validateIdent(link_field, 'link_field');
   const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
+  if (ids.length > 100) throw new McpError(ErrorCode.InvalidParams, 'Too many related_ids (max 100)');
+  for (const rid of ids) validateId(rid);
   const r = await crmCall(sid, 'set_relationship', {
     module_name: module,
     module_id: id,
@@ -625,7 +679,11 @@ async function linkRecords(sid, { module, id, link_field, related_ids }) {
 
 async function unlinkRecords(sid, { module, id, link_field, related_ids }) {
   validateModule(module);
+  validateId(id);
+  validateIdent(link_field, 'link_field');
   const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
+  if (ids.length > 100) throw new McpError(ErrorCode.InvalidParams, 'Too many related_ids (max 100)');
+  for (const rid of ids) validateId(rid);
   const r = await crmCall(sid, 'set_relationship', {
     module_name: module,
     module_id: id,
@@ -1059,6 +1117,9 @@ app.post('/messages', messagesRL, async (req, res) => {
   const session = loadSessions()[token];
   if (!session || session.sub !== subBySid.get(sid)) {
     return res.status(403).json({ error: 'Token does not match session owner' });
+  }
+  if (session.expiresAt < Date.now()) {
+    return res.status(401).json({ error: 'Session expired' });
   }
 
   await t.handlePostMessage(req, res);

@@ -274,13 +274,13 @@
     },
     {
       "id": 14,
-      "title": "Connection Capacity",
+      "title": "Active Connections (cap 100)",
       "type": "stat",
       "gridPos": { "x": 8, "y": 31, "w": 8, "h": 4 },
       "targets": [
         {
           "expr": "sum(suitecrm_mcp_active_connections{entity=~\"$entity\"})",
-          "legendFormat": "active / 100"
+          "legendFormat": "connections"
         }
       ],
       "options": {
@@ -290,7 +290,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
+          "unit": "short",
           "thresholds": {
             "mode": "absolute",
             "steps": [
