@@ -467,6 +467,8 @@ def install_auth_service(auth_cfg):
         f"SESSION_TTL_DAYS={auth_cfg.get('SESSION_TTL_DAYS', '30')}",
         "PORT=3100",
         "BIND_HOST=127.0.0.1",
+        "METRICS_PORT=9091",
+        "METRICS_BIND=127.0.0.1",
         "",
     ]
     write_file(AUTH_ENV_FILE, "\n".join(lines), mode="600")
@@ -699,6 +701,8 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             f"SUITECRM_CODE={code}",
             f"PORT={port}",
             "BIND_HOST=127.0.0.1",
+            f"METRICS_PORT={port + 6000}",
+            "METRICS_BIND=127.0.0.1",
             "NODE_NO_WARNINGS=1",
         ]
         if data.get("group"):
@@ -713,6 +717,8 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             f"SUITECRM_PREFIX={prefix}",
             f"PORT={port}",
             "BIND_HOST=127.0.0.1",
+            f"METRICS_PORT={port + 6000}",
+            "METRICS_BIND=127.0.0.1",
             "NODE_NO_WARNINGS=1",
         ]
         if data.get("group"):

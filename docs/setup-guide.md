@@ -5,15 +5,25 @@ End-to-end guide for deploying suitecrm-mcp v3.1+ from scratch.
 ## Overview
 
 ```
-[Identity Provider]          [Gateway VM]              [CRM VMs]
-  Auth0 / Azure AD  <-JWT->  suitecrm-mcp gateway  ->  SuiteCRM REST API
-                             /etc/suitecrm-mcp/
-                               user-profiles.json
-                               entities.json
+[Identity Provider]          [Gateway VM]                        [CRM VMs]
+  Auth0 / Azure AD  <------> suitecrm-mcp-auth (port 3100)
+                               OAuth2 login, API key issuance
+                               /etc/suitecrm-mcp/sessions.json
+
+                             suitecrm-mcp-crm1 (port 3101)  ->  CRM A REST API
+                               validates Bearer token          /service/v4_1/rest.php
+                               proxies MCP tool calls
+
+                             suitecrm-mcp-crm2 (port 3102)  ->  CRM B REST API
+                               /etc/suitecrm-mcp/
+                                 user-profiles.json
+                                 entities.json
 
 [User's machine]
   Claude Desktop / Claude Code / OpenClaw
-    sends Bearer token  --->  Gateway validates token, proxies to CRM
+    1. visits /auth/login  --->  auth service  --->  IdP login
+    2. receives API key
+    3. Bearer token on SSE  -->  entity gateway  -->  CRM
 ```
 
 **What the gateway does:**

@@ -26,6 +26,18 @@ function atomicWrite(path, data) {
   renameSync(tmp, path);
 }
 
+function parseCookies(req) {
+  const list = {};
+  const raw = req.headers.cookie;
+  if (!raw) return list;
+  for (const part of raw.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 0) continue;
+    list[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return list;
+}
+
 
 const execFileAsync = promisify(execFile);
 
@@ -216,7 +228,14 @@ app.get('/auth/login', (req, res) => {
     scope:         'openid profile email offline_access',
     audience:      AUTH0_AUDIENCE,
   });
-  if (nonce) params.set('state', nonce);
+  let state;
+  if (nonce) {
+    state = nonce;
+  } else {
+    state = randomBytes(16).toString('hex');
+    res.cookie('oa_state', state, { httpOnly: true, sameSite: 'lax', maxAge: 300000 });
+  }
+  params.set('state', state);
   res.redirect(`https://${AUTH0_DOMAIN}/authorize?${params}`);
 });
 
@@ -227,6 +246,21 @@ app.get('/auth/callback', async (req, res) => {
   const error_description = qs(req.query.error_description);
   const state             = qs(req.query.state);
   const nonce = NONCE_RE.test(state) ? state : '';
+
+  // CSRF check for direct browser logins (bridge flow uses nonce, already validated below)
+  if (!nonce) {
+    const cookies = parseCookies(req);
+    const expected = cookies.oa_state || '';
+    if (!expected || state !== expected) {
+      return res.status(400).send(`
+        <html><body style="font-family:sans-serif;padding:40px">
+          <h2>Invalid login state</h2>
+          <p>The login session has expired or was tampered with. Please try again.</p>
+          <p><a href="/auth/login">Back to login</a></p>
+        </body></html>`);
+    }
+    res.clearCookie('oa_state');
+  }
 
   if (error) {
     return res.status(400).send(`

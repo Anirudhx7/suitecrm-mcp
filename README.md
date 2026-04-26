@@ -142,6 +142,7 @@ services:
     working_dir: /app
     ports:
       - "127.0.0.1:3100:3100"
+      - "127.0.0.1:9091:9091"   # auth metrics (Prometheus)
     environment:
       AUTH0_DOMAIN: your-tenant.auth0.com
       AUTH0_CLIENT_ID: your-client-id
@@ -150,12 +151,15 @@ services:
       GATEWAY_PUBLIC_URL: https://mcp.yourdomain.com
       SESSION_TTL_DAYS: "30"
       PORT: "3100"
+      METRICS_PORT: "9091"
+      METRICS_BIND: "0.0.0.0"
     restart: unless-stopped
 
   suitecrm-mcp-crm1:
     image: ghcr.io/anirudhx7/suitecrm-mcp:v4.2.0
     ports:
       - "127.0.0.1:3101:3101"   # expose via reverse proxy only
+      - "127.0.0.1:9101:9090"   # entity metrics (Prometheus)
     environment:
       SUITECRM_ENDPOINT: https://crm1.example.com/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm_crm1
@@ -173,6 +177,7 @@ services:
     image: ghcr.io/anirudhx7/suitecrm-mcp:v4.2.0
     ports:
       - "127.0.0.1:3102:3102"   # expose via reverse proxy only
+      - "127.0.0.1:9102:9090"   # entity metrics (Prometheus)
     environment:
       SUITECRM_ENDPOINT: https://crm2.example.com/legacy/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm_crm2
@@ -366,7 +371,9 @@ curl http://YOUR_SERVER:3101/health/deep
 
 ### Prometheus metrics
 
-The gateway exposes a Prometheus metrics endpoint on a separate port (default 9090, localhost only). Metrics are per-entity and include:
+Two components expose Prometheus metrics on separate ports (localhost only).
+
+**Gateway entity** (default port 9090 for single-entity; `port + 6000` for multi-entity systemd installs):
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -380,22 +387,36 @@ The gateway exposes a Prometheus metrics endpoint on a separate port (default 90
 | `suitecrm_mcp_circuit_breaker_state` | Gauge | 0=closed, 1=half-open, 2=open |
 | `suitecrm_mcp_circuit_breaker_openings_total` | Counter | Circuit breaker trip events |
 
+**Auth service** (default port 9091):
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `suitecrm_auth_logins_total` | Counter | OAuth2 login completions by result (new/reused/error) |
+| `suitecrm_auth_bridge_sessions_total` | Counter | Bridge session events (started/completed/expired) |
+| `suitecrm_auth_sessions_active` | Gauge | Non-expired gateway sessions currently stored |
+
 ```bash
-# Scrape metrics (systemd)
+# Scrape gateway metrics (single-entity systemd)
 curl http://127.0.0.1:9090/metrics
 
-# Scrape metrics (Docker - use container name or host.docker.internal)
-curl http://127.0.0.1:9090/metrics
+# Scrape auth service metrics
+curl http://127.0.0.1:9091/metrics
 ```
 
-The included `docker-compose.yml` starts a Prometheus + Grafana stack that scrapes the gateway automatically. Set `GRAFANA_PASSWORD` in your environment and visit `http://localhost:3000`.
+The included `docker-compose.yml` starts a Prometheus + Grafana stack that scrapes both services automatically. Set `GRAFANA_PASSWORD` in your environment and visit `http://localhost:3000`.
 
-For systemd installs, add a scrape target to `monitoring/prometheus.yml`:
+For systemd installs, add scrape targets to `monitoring/prometheus.yml`:
 ```yaml
 scrape_configs:
-  - job_name: suitecrm-mcp
+  - job_name: suitecrm-mcp-auth
     static_configs:
-      - targets: ['127.0.0.1:9090']
+      - targets: ['127.0.0.1:9091']
+  - job_name: suitecrm-mcp-crm1
+    static_configs:
+      - targets: ['127.0.0.1:9101']   # port 3101 + 6000
+  - job_name: suitecrm-mcp-crm2
+    static_configs:
+      - targets: ['127.0.0.1:9102']   # port 3102 + 6000
 ```
 
 ### Circuit breaker
