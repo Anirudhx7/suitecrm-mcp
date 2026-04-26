@@ -14,6 +14,7 @@ import { rateLimit } from 'express-rate-limit';
 import https from 'https';
 import http from 'http';
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
+import pino from 'pino';
 
 const REQUIRED = ['SUITECRM_ENDPOINT', 'SUITECRM_PREFIX', 'PORT', 'AUTH0_DOMAIN', 'AUTH0_AUDIENCE'];
 const missing = REQUIRED.filter(k => !process.env[k]);
@@ -21,6 +22,10 @@ if (missing.length) { console.error(`Missing required env vars: ${missing.join('
 
 const ENDPOINT    = process.env.SUITECRM_ENDPOINT.trim();
 const PREFIX      = process.env.SUITECRM_PREFIX.trim();
+const logger = pino({
+  base: { entity: PREFIX },
+  timestamp: pino.stdTimeFunctions.isoTime,
+});
 const PORT        = parseInt(process.env.PORT, 10);
 const CODE        = (process.env.SUITECRM_CODE || '').trim();
 const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN.trim();
@@ -180,13 +185,13 @@ const circuitBreaker = {
     if (Date.now() - this.lastFailure > CIRCUIT_BREAKER_RESET_MS) {
       this.state = 'HALF_OPEN';
       metricCircuitBreakerState.set({ entity: PREFIX }, 1);
-      process.stderr.write(`[${PREFIX}] Circuit breaker HALF_OPEN\n`);
+      logger.warn({ state: 'HALF_OPEN' }, 'circuit_breaker_state');
       return false;
     }
     return true;
   },
   recordSuccess() {
-    if (this.state !== 'CLOSED') process.stderr.write(`[${PREFIX}] Circuit breaker CLOSED\n`);
+    if (this.state !== 'CLOSED') logger.info({ state: 'CLOSED' }, 'circuit_breaker_state');
     this.state = 'CLOSED'; this.failures = 0;
     metricCircuitBreakerState.set({ entity: PREFIX }, 0);
   },
@@ -196,7 +201,7 @@ const circuitBreaker = {
       this.state = 'OPEN';
       metricCircuitBreakerState.set({ entity: PREFIX }, 2);
       metricCircuitBreakerOpenings.inc({ entity: PREFIX });
-      process.stderr.write(`[${PREFIX}] Circuit breaker OPEN after ${this.failures} failures\n`);
+      logger.warn({ state: 'OPEN', failures: this.failures }, 'circuit_breaker_state');
     }
   },
 };
@@ -209,6 +214,7 @@ const crmSessions = new Map();
 const crmSessionAges = new Map();
 const connCreds = new Map();
 const subBySid = new Map();
+const connLoggers = new Map();
 
 const CRM_SESSION_TTL = 2 * 60 * 60 * 1000;
 setInterval(() => {
@@ -250,6 +256,7 @@ async function jwtMiddleware(req, res, next) {
     if (session) {
       if (session.expiresAt < Date.now()) {
         metricAuthFailures.inc({ entity: PREFIX });
+        logger.warn({ reason: 'session_expired', sub: session.sub }, 'auth_failed');
         return res.status(401).json({ error: 'Session expired' });
       }
       req.auth = {
@@ -263,6 +270,7 @@ async function jwtMiddleware(req, res, next) {
   } catch {}
 
   metricAuthFailures.inc({ entity: PREFIX });
+  logger.warn({ reason: 'invalid_token' }, 'auth_failed');
   return res.status(401).json({ error: 'Invalid token' });
 }
 
@@ -397,7 +405,8 @@ async function crmCall(sid, method, params) {
     return result;
   } catch (err) {
     if (err.code === 11) {
-      process.stderr.write(`[${PREFIX}] Session expired - re-logging in\n`);
+      const _cLog = connLoggers.get(sid) || logger;
+      _cLog.info({ sid }, 'crm_session_expired_renewing');
       metricSessionRenewals.inc({ entity: PREFIX });
       const sub = subBySid.get(sid) || sid;
       crmSessions.delete(`${sub}:${CODE}`);
@@ -792,7 +801,10 @@ function createMcpServer(sid) {
 
   srv.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args = {} } = req.params;
+    const cLog = connLoggers.get(sid) || logger;
+    const callStart = Date.now();
     const end = metricToolDuration.startTimer({ entity: PREFIX, tool: name });
+    cLog.info({ audit: true, tool: name, args }, 'tool_call');
     try {
       let result;
       if (name === `${PREFIX}_search`) result = await searchRecords(sid, args);
@@ -812,10 +824,12 @@ function createMcpServer(sid) {
 
       end();
       metricToolCalls.inc({ entity: PREFIX, tool: name, status: 'success' });
+      cLog.info({ audit: true, tool: name, status: 'success', durationMs: Date.now() - callStart }, 'tool_done');
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
       end();
       metricToolCalls.inc({ entity: PREFIX, tool: name, status: 'error' });
+      cLog.error({ audit: true, tool: name, status: 'error', err: err.message }, 'tool_error');
       return {
         content: [{ type: 'text', text: `Error: ${err.message}` }],
         isError: true,
@@ -845,7 +859,8 @@ const sseRL = rateLimit({
   handler: (req, res, next, options) => {
     const key = req.rateLimit?.key || req.ip;
     metricRateLimited.inc({ entity: PREFIX, route: 'sse' });
-    process.stderr.write(`[${PREFIX}] Rate limit hit on sse for ${key}\n`);
+    const sessEmail = (() => { try { return loadSessions()[req.headers.authorization?.slice(7)?.trim()]?.email; } catch { return undefined; } })();
+    logger.warn({ route: 'sse', sub: key, email: sessEmail }, 'rate_limit_hit');
     res.status(options.statusCode).json(options.message);
   },
 });
@@ -858,7 +873,7 @@ const messagesRL = rateLimit({
   handler: (req, res, next, options) => {
     const key = req.rateLimit?.key || req.ip;
     metricRateLimited.inc({ entity: PREFIX, route: 'messages' });
-    process.stderr.write(`[${PREFIX}] Rate limit hit on messages for ${key}\n`);
+    logger.warn({ route: 'messages', sub: key }, 'rate_limit_hit');
     res.status(options.statusCode).json(options.message);
   },
 });
@@ -952,17 +967,23 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   transports.set(sid, transport);
   subBySid.set(sid, req.auth.sub);
 
+  const connLogger = logger.child({ sub: req.auth.sub, email: req.auth.email, sessionId: sid });
+  connLoggers.set(sid, connLogger);
+  connLogger.info('sse_connected');
+
   metricActiveConnections.set({ entity: PREFIX }, transports.size);
   metricConnections.inc({ entity: PREFIX });
 
   ensureCrmSession(sid).catch(err => {
-    process.stderr.write(`[${PREFIX}] Initial CRM login failed for session ${sid}: ${err.message}\n`);
+    connLogger.error({ err: err.message }, 'crm_login_failed');
   });
 
   res.on('close', () => {
+    connLogger.info('sse_disconnected');
     transports.delete(sid);
     connCreds.delete(sid);
     subBySid.delete(sid);
+    connLoggers.delete(sid);
     metricActiveConnections.set({ entity: PREFIX }, transports.size);
   });
 
@@ -976,14 +997,14 @@ app.post('/messages', messagesRL, async (req, res) => {
 });
 
 process.on('SIGTERM', () => {
-  process.stderr.write(`[${PREFIX}] SIGTERM received - shutting down\n`);
+  logger.info({ connections: transports.size }, 'sigterm_shutdown');
   for (const [, t] of transports) t.close?.();
   process.exit(0);
 });
 
 const BIND_HOST = (process.env.BIND_HOST || '127.0.0.1').trim();
 app.listen(PORT, BIND_HOST, () => {
-  process.stderr.write(`[${PREFIX}] Listening on ${BIND_HOST}:${PORT}\n`);
+  logger.info({ host: BIND_HOST, port: PORT }, 'server_listening');
 });
 
 // ---------------------------------------------------------------------------
@@ -998,5 +1019,5 @@ const metricsServer = http.createServer(async (req, res) => {
   }
 });
 metricsServer.listen(METRICS_PORT, METRICS_BIND, () => {
-  process.stderr.write(`[${PREFIX}] Metrics on ${METRICS_BIND}:${METRICS_PORT}/metrics\n`);
+  logger.info({ host: METRICS_BIND, port: METRICS_PORT }, 'metrics_listening');
 });

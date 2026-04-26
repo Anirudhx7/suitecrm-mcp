@@ -1,7 +1,7 @@
 {
   "title": "SuiteCRM MCP Gateway",
   "uid": "suitecrm-mcp",
-  "version": 2,
+  "version": 3,
   "schemaVersion": 38,
   "refresh": "30s",
   "time": { "from": "now-1h", "to": "now" },
@@ -852,6 +852,57 @@
           }
         ]
       }
+    },
+    {
+      "id": 41,
+      "title": "Logs",
+      "type": "row",
+      "gridPos": { "x": 0, "y": 107, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 42,
+      "title": "Gateway Logs",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 108, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "{service=\"suitecrm-mcp\", entity=~\"$entity\"}",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 43,
+      "title": "Audit Log (audit=true entries only)",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 118, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "{service=\"suitecrm-mcp\"} | json | audit = \"true\"",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
     }
   ]
 }
