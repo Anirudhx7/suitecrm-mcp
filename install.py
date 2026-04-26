@@ -596,7 +596,7 @@ def setup_crm_host(code, host_cfg):
         warn(f"  [{code}] tools/create-api-user.sh not found - run from the repo root")
         return False
 
-    ssh_opts = ["-i", ssh_key, "-o", "StrictHostKeyChecking=no",
+    ssh_opts = ["-i", ssh_key, "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "ConnectTimeout=15", "-o", "BatchMode=yes"]
     target = f"{ssh_user}@{ssh_host}"
 
