@@ -6,7 +6,21 @@
   "tags": ["suitecrm", "fleet"],
   "refresh": "30s",
   "time": { "from": "now-1h", "to": "now" },
-  "templating": { "list": [] },
+  "templating": { "list": [
+    {
+      "name": "entity",
+      "label": "Entity",
+      "type": "query",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "query": { "query": "label_values(suitecrm_mcp_tool_calls_total, entity)", "refId": "StandardVariableQuery" },
+      "refresh": 2,
+      "multi": true,
+      "includeAll": true,
+      "allValue": ".*",
+      "sort": 1,
+      "hide": 0
+    }
+  ] },
   "panels": [
     {
       "id": 1,

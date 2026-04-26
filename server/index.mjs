@@ -860,15 +860,14 @@ const sseRL = rateLimit({
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
     if (token) {
       const sess = loadSessions()[token];
-      if (sess?.sub) return sess.sub;
+      if (sess?.sub) { req._rlSess = sess; return sess.sub; }
     }
     return req.ip;
   },
   handler: (req, res, next, options) => {
     const key = req.rateLimit?.key || req.ip;
     metricRateLimited.inc({ entity: PREFIX, route: 'sse' });
-    const sessEmail = (() => { try { return loadSessions()[req.headers.authorization?.slice(7)?.trim()]?.email; } catch { return undefined; } })();
-    logger.warn({ route: 'sse', sub: key, email: sessEmail }, 'rate_limit_hit');
+    logger.warn({ route: 'sse', sub: key, email: req._rlSess?.email }, 'rate_limit_hit');
     res.status(options.statusCode).json(options.message);
   },
 });
