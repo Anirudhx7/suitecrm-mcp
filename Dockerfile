@@ -14,5 +14,6 @@ EXPOSE 3101
 # a Prometheus container on the same Docker network can reach them by service name.
 EXPOSE 9090
 EXPOSE 9091
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:3101/health || exit 1
+# Healthcheck defined per-service in docker-compose (auth=3100, gateway=3101).
+# No default here — hardcoding either port would be wrong for the other service.
 CMD ["node", "index.mjs"]
