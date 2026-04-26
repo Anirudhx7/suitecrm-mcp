@@ -3,19 +3,19 @@
 Claude Code connects directly to the gateway via SSE using a gateway-issued API key.
 No CRM credentials are stored on your machine.
 
-## How authentication works
+## 🔐 How authentication works
 
 1. Visit the gateway URL in your browser and log in with your corporate account
 2. The success page shows your personal API key
 3. Run the `claude mcp add` command shown on the success page - or paste the key into the command below
 
-## Prerequisites
+## 📋 Prerequisites
 
 - Gateway v3.0+ installed and running (see [README](../README.md))
 - Claude Code CLI installed (`npm install -g @anthropic-ai/claude-code`)
 - Your API key from `https://YOUR_GATEWAY/auth/login`
 
-## Get your API key
+## 🔑 Get your API key
 
 1. Visit `https://YOUR_GATEWAY/auth/login` (or just `https://YOUR_GATEWAY` - it redirects)
 2. Log in with your corporate account
@@ -23,7 +23,7 @@ No CRM credentials are stored on your machine.
 
 The success page shows the exact command with your key already embedded.
 
-## Single entity
+## 🔌 Single entity
 
 ```bash
 claude mcp add suitecrm \
@@ -32,7 +32,7 @@ claude mcp add suitecrm \
   https://mcp.yourcompany.com/sse
 ```
 
-## Multi entity
+## 🌐 Multi entity
 
 Run once per entity. Each gets its own MCP server entry:
 
@@ -50,7 +50,7 @@ claude mcp add suitecrm_crm2 \
 
 The same API key works for all entities you have access to.
 
-## Verify
+## ✅ Verify
 
 ```bash
 claude mcp list
@@ -65,7 +65,7 @@ claude
 
 Claude should call `suitecrm_search` automatically.
 
-## Manage entries
+## 🗂️ Manage entries
 
 ```bash
 # List all MCP servers
@@ -75,7 +75,7 @@ claude mcp list
 claude mcp remove suitecrm
 ```
 
-## Rotating your API key
+## 🔄 Rotating your API key
 
 If your key is compromised or expired:
 
@@ -90,7 +90,7 @@ claude mcp add suitecrm \
   https://mcp.yourcompany.com/sse
 ```
 
-## Troubleshooting
+## 🔧 Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|

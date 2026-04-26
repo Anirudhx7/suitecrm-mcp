@@ -18,7 +18,7 @@ the agent is running), and polls in the background. Once the user clicks the lin
 and logs in, the token is saved and all subsequent tool calls work silently.
 No CLI needed on the OpenClaw machine.
 
-## Prerequisites
+## 📋 Prerequisites
 
 - A dedicated Ubuntu VM or server for the gateway
 - OpenClaw installed on the client machine (Node.js required)
@@ -26,7 +26,7 @@ No CLI needed on the OpenClaw machine.
 
 ---
 
-## Step 1 - Install the gateway (gateway machine)
+## 1️⃣ Step 1 - Install the gateway (gateway machine)
 
 **Single entity** (one CRM):
 
@@ -53,7 +53,7 @@ Let's Encrypt. Without it, API keys travel unencrypted.
 
 ---
 
-## Step 2 - Install the bridge (OpenClaw machine)
+## 2️⃣ Step 2 - Install the bridge (OpenClaw machine)
 
 Copy `install-bridge.py` from the gateway machine to the OpenClaw machine, then run:
 
@@ -92,7 +92,7 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
 
 ---
 
-## Step 3 - Restart OpenClaw
+## 3️⃣ Step 3 - Restart OpenClaw
 
 ```bash
 sudo systemctl restart openclaw-USERNAME
@@ -100,7 +100,7 @@ sudo systemctl restart openclaw-USERNAME
 
 ---
 
-## Step 4 - Authenticate (per user, triggered on first tool call)
+## 4️⃣ Step 4 - Authenticate (per user, triggered on first tool call)
 
 Authentication is lazy -- nothing happens at startup. The first time a user asks
 the agent to do something with SuiteCRM, the flow starts automatically:
@@ -139,7 +139,7 @@ action required.
 
 ---
 
-## Verify
+## ✅ Verify
 
 OpenClaw should now expose 13 tools per entity:
 - `suitecrm_mycrm_search`
@@ -152,7 +152,7 @@ Test prompt: `"List the first 5 accounts in the CRM"` - OpenClaw should call
 
 ---
 
-## Re-authenticating
+## 🔄 Re-authenticating
 
 If the token expires (default 90 days) or is revoked by an admin:
 
@@ -165,7 +165,7 @@ If the token expires (default 90 days) or is revoked by an admin:
 
 ---
 
-## Revoking a user's token (operators)
+## 🚫 Revoking a user's token (operators)
 
 Two methods are available. Both require admin credentials on the gateway.
 
@@ -194,7 +194,7 @@ tool call when it receives HTTP 401 from the gateway.
 
 ---
 
-## Updating the bridge
+## ⬆️ Updating the bridge
 
 To reinstall bridge plugins without wiping the saved token (e.g. after a gateway upgrade):
 
@@ -206,7 +206,7 @@ sudo python3 install-bridge.py --update \
 
 ---
 
-## Removing the bridge
+## 🗑️ Removing the bridge
 
 ```bash
 sudo python3 install-bridge.py \
@@ -220,7 +220,7 @@ deregisters them from `openclaw.json`.
 
 ---
 
-## Troubleshooting
+## 🔧 Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|

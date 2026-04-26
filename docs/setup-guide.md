@@ -2,7 +2,7 @@
 
 End-to-end guide for deploying suitecrm-mcp v3.1+ from scratch.
 
-## Overview
+## 📖 Overview
 
 ```
 [Identity Provider]          [Gateway VM]                        [CRM VMs]
@@ -34,7 +34,7 @@ End-to-end guide for deploying suitecrm-mcp v3.1+ from scratch.
 
 ---
 
-## Step 1 - Identity provider
+## 1️⃣ Step 1 - Identity provider
 
 Set up Auth0 or Azure AD before installing the gateway. The installer will prompt
 for the credentials you collect here.
@@ -48,7 +48,7 @@ Minimum you need before continuing:
 
 ---
 
-## Step 2 - Prepare the gateway VM
+## 2️⃣ Step 2 - Prepare the gateway VM
 
 Requirements:
 - Ubuntu 20.04+ (or Debian 11+)
@@ -64,7 +64,7 @@ cd suitecrm-mcp
 
 ---
 
-## Step 3 - Configure entities
+## 3️⃣ Step 3 - Configure entities
 
 Copy and edit the entities config:
 
@@ -106,7 +106,7 @@ done
 
 ---
 
-## Step 4 - Install the gateway
+## 4️⃣ Step 4 - Install the gateway
 
 ```bash
 sudo python3 install.py \
@@ -140,7 +140,7 @@ sudo python3 install.py \
 
 ---
 
-## Step 5 - Prepare CRM accounts (LDAP/SSO users only)
+## 5️⃣ Step 5 - Prepare CRM accounts (LDAP/SSO users only)
 
 If your users authenticate via LDAP or SSO, they have no local SuiteCRM password.
 The gateway needs a local password to call the REST API on their behalf.
@@ -165,7 +165,7 @@ User Management > Edit User > Advanced tab > API Access = Yes.
 
 ---
 
-## Step 6 - Configure SSH provisioning (optional)
+## 6️⃣ Step 6 - Configure SSH provisioning (optional)
 
 If you want the gateway to automatically provision CRM accounts when users first
 log in via OAuth, configure SSH access from the gateway VM to each CRM VM:
@@ -208,7 +208,7 @@ Restart the service: `sudo systemctl restart suitecrm-mcp-crm1`
 
 ---
 
-## Step 7 - Test the auth flow
+## 7️⃣ Step 7 - Test the auth flow
 
 ```bash
 # Check services are running
@@ -230,7 +230,7 @@ You should see the success page with your API key.
 
 ---
 
-## Step 8 - Connect clients
+## 8️⃣ Step 8 - Connect clients
 
 - **Claude Desktop**: [docs/connect-claude-desktop.md](connect-claude-desktop.md)
 - **Claude Code**: [docs/connect-claude-code.md](connect-claude-code.md)
@@ -238,7 +238,7 @@ You should see the success page with your API key.
 
 ---
 
-## Admin operations
+## 🛠️ Admin operations
 
 ### Periodic session cleanup
 
@@ -298,7 +298,7 @@ sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --em
 
 ---
 
-## File layout after install
+## 📁 File layout after install
 
 ```
 /opt/suitecrm-mcp/           gateway server code
