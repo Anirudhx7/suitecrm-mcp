@@ -783,8 +783,15 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000).unref();
 
-// Purge expired gateway tokens from sessions.json every hour. Tokens are also
-// cleaned on each OAuth callback, but long-idle deployments accumulate stale entries.
+// Purge expired gateway tokens from sessions.json every hour. Also runs once on
+// startup so stale tokens from a prior run are cleared immediately.
+;(() => {
+  const sessions = loadSessions();
+  const before = Object.keys(sessions).length;
+  cleanExpiredSessions(sessions);
+  const removed = before - Object.keys(sessions).length;
+  if (removed > 0) { saveSessions(sessions); logger.info({ removed }, 'gateway_sessions_purged'); }
+})();
 setInterval(() => {
   const sessions = loadSessions();
   const before = Object.keys(sessions).length;
