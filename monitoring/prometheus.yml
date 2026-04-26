@@ -14,6 +14,12 @@ scrape_configs:
         labels:
           entity: default
 
+  - job_name: suitecrm-mcp-auth
+    static_configs:
+      - targets: ['suitecrm-mcp-auth:9091']
+        labels:
+          service: auth
+
   # Multi-entity example (systemd installs - Prometheus runs on same host)
   # Uncomment and adjust targets/labels for your entity codes and ports
   #

@@ -8,6 +8,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomBytes } from 'crypto';
 import pino from 'pino';
+import { Registry, Counter, Gauge, collectDefaultMetrics } from 'prom-client';
+import http from 'http';
 
 function escHtml(s) {
   return String(s)
@@ -49,6 +51,35 @@ const NS = AUTH0_AUDIENCE + '/';
 const logger = pino({
   base: { service: 'suitecrm-mcp-auth' },
   timestamp: pino.stdTimeFunctions.isoTime,
+});
+
+const metricsRegistry = new Registry();
+collectDefaultMetrics({ register: metricsRegistry });
+
+const metricLogins = new Counter({
+  name: 'suitecrm_auth_logins_total',
+  help: 'OAuth2 login completions',
+  labelNames: ['result'],
+  registers: [metricsRegistry],
+});
+
+const metricBridgeSessions = new Counter({
+  name: 'suitecrm_auth_bridge_sessions_total',
+  help: 'Bridge session events',
+  labelNames: ['event'],
+  registers: [metricsRegistry],
+});
+
+new Gauge({
+  name: 'suitecrm_auth_sessions_active',
+  help: 'Non-expired gateway sessions currently stored',
+  registers: [metricsRegistry],
+  collect() {
+    this.reset();
+    const now = Date.now();
+    const sessions = loadSessions();
+    this.set(Object.values(sessions).filter(s => s.expiresAt > now).length);
+  },
 });
 
 // 64-char hex string (output of randomBytes(32).toString('hex'))
@@ -238,6 +269,7 @@ app.get('/auth/callback', async (req, res) => {
       for (let i = 1; i < userSessions.length; i++) delete sessions[userSessions[i][0]];
       if (userSessions.length > 1) saveSessions(sessions);
       logger.info({ email, daysLeft }, 'session_reused');
+      metricLogins.inc({ result: 'reused' });
     } else {
       apiKey = randomBytes(32).toString('hex');
       sessions[apiKey] = {
@@ -251,6 +283,7 @@ app.get('/auth/callback', async (req, res) => {
       daysLeft = SESSION_TTL_DAYS;
       saveSessions(sessions);
       logger.info({ email }, 'session_created');
+      metricLogins.inc({ result: 'new' });
     }
 
     if (nonce) {
@@ -538,6 +571,7 @@ function copyEl(id,btn){
 
   } catch (err) {
     logger.error({ err: err.message }, 'callback_error');
+    metricLogins.inc({ result: 'error' });
     res.status(500).send(`
       <html><body style="font-family:sans-serif;padding:40px">
         <h2>Something went wrong</h2>
@@ -573,6 +607,7 @@ app.post('/auth/bridge/start', (req, res) => {
 
   const loginUrl = `${GATEWAY_URL}/auth/login?nonce=${nonce}`;
   logger.info({ linuxUser: linux_user, nonce: nonce.slice(0, 16) }, 'bridge_session_started');
+  metricBridgeSessions.inc({ event: 'started' });
 
   res.json({ nonce, client_secret: clientSecret, login_url: loginUrl });
 });
@@ -597,6 +632,7 @@ app.get('/auth/bridge/poll/:nonce', (req, res) => {
   if (session.expiresAt < Date.now()) {
     delete bridgeSessions[nonce];
     saveBridgeSessions(bridgeSessions);
+    metricBridgeSessions.inc({ event: 'expired' });
     return res.status(410).json({ status: 'expired' });
   }
 
@@ -624,6 +660,7 @@ app.get('/auth/bridge/poll/:nonce', (req, res) => {
     delete bridgeSessions[nonce];
     saveBridgeSessions(bridgeSessions);
     logger.info({ linuxUser: session.linuxUser }, 'bridge_session_completed');
+    metricBridgeSessions.inc({ event: 'completed' });
 
     return res.json({ status: 'ready', api_key: apiKey });
   }
@@ -649,4 +686,13 @@ const PORT = parseInt(process.env.PORT || '3100', 10);
 const BIND_HOST = (process.env.BIND_HOST || '127.0.0.1').trim();
 app.listen(PORT, BIND_HOST, () => {
   logger.info({ host: BIND_HOST, port: PORT }, 'listening');
+});
+
+const METRICS_PORT = parseInt(process.env.METRICS_PORT || '9091', 10);
+const METRICS_BIND = (process.env.METRICS_BIND || '127.0.0.1').trim();
+http.createServer(async (_req, res) => {
+  res.writeHead(200, { 'Content-Type': metricsRegistry.contentType });
+  res.end(await metricsRegistry.metrics());
+}).listen(METRICS_PORT, METRICS_BIND, () => {
+  logger.info({ host: METRICS_BIND, port: METRICS_PORT }, 'metrics_listening');
 });

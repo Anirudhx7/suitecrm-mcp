@@ -1,7 +1,7 @@
 {
   "title": "SuiteCRM MCP - Fleet Overview",
   "uid": "suitecrm-mcp-fleet",
-  "version": 1,
+  "version": 2,
   "schemaVersion": 39,
   "tags": ["suitecrm", "fleet"],
   "refresh": "30s",
@@ -304,6 +304,98 @@
         "wrapLogMessage": false
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 12,
+      "title": "Auth",
+      "type": "row",
+      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 13,
+      "title": "Auth Service Health",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 39, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "up{job=\"suitecrm-mcp-auth\"}",
+          "legendFormat": "auth"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Logins Today",
+      "type": "stat",
+      "gridPos": { "x": 4, "y": 39, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "sum(increase(suitecrm_auth_logins_total[24h]))",
+          "legendFormat": "logins"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Active Gateway Sessions",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 39, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "suitecrm_auth_sessions_active",
+          "legendFormat": "sessions"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      }
     }
   ]
 }

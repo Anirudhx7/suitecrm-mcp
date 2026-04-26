@@ -1,7 +1,7 @@
 {
   "title": "SuiteCRM MCP Gateway",
   "uid": "suitecrm-mcp",
-  "version": 3,
+  "version": 4,
   "schemaVersion": 38,
   "refresh": "30s",
   "time": { "from": "now-1h", "to": "now" },
@@ -903,6 +903,74 @@
         "wrapLogMessage": true
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 44,
+      "title": "Auth Service Logs",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 128, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "{service=\"suitecrm-mcp-auth\"} | json",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 45,
+      "title": "Connection Rate / min",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 136, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(suitecrm_mcp_connections_total{entity=~\"$entity\"}[5m]) * 60",
+          "legendFormat": "{{entity}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      }
+    },
+    {
+      "id": 46,
+      "title": "Circuit Breaker Openings (24h)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 136, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(suitecrm_mcp_circuit_breaker_openings_total{entity=~\"$entity\"}[24h])",
+          "legendFormat": "{{entity}}"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
     }
   ]
 }
