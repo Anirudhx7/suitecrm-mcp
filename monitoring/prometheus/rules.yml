@@ -22,9 +22,13 @@ groups:
 
       - alert: SuiteCRMHighErrorRate
         expr: >
-          sum by (entity) (rate(suitecrm_mcp_tool_calls_total{status="error"}[5m]))
-          /
-          sum by (entity) (rate(suitecrm_mcp_tool_calls_total[5m])) > 0.10
+          (
+            sum by (entity) (rate(suitecrm_mcp_tool_calls_total{status="error"}[5m]))
+            /
+            sum by (entity) (rate(suitecrm_mcp_tool_calls_total[5m]))
+          ) > 0.10
+          and
+          sum by (entity) (rate(suitecrm_mcp_tool_calls_total[5m])) > 0
         for: 5m
         labels:
           severity: warning

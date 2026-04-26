@@ -486,7 +486,11 @@ curl http://127.0.0.1:9090/metrics
 curl http://127.0.0.1:9091/metrics
 ```
 
-The included `docker-compose.yml` starts a Prometheus + Grafana stack that scrapes both services automatically. Set `GRAFANA_PASSWORD` in your environment and visit `http://localhost:3000`.
+The included `docker-compose.yml` starts a Prometheus + Grafana + Loki stack that scrapes both services automatically. Set `GRAFANA_PASSWORD` in your environment and visit `http://localhost:3000`.
+
+Two dashboards are provisioned automatically:
+- **suitecrm-mcp** — per-entity view: 33 panels across system health, users/sessions, CRM backend, security, and tool breakdown rows
+- **suitecrm-mcp-fleet** — multi-entity overview: all entities at a glance (circuit breaker state, connection counts, error rates, latency)
 
 For systemd installs, add scrape targets to `monitoring/prometheus.yml`:
 ```yaml
