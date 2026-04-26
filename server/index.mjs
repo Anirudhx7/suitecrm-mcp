@@ -318,13 +318,15 @@ function profileMiddleware(req, res, next) {
 }
 
 function groupAccessMiddleware(req, res, next) {
-  const userGroups = req.auth[`${NS}groups`] || [];
-  const hasGroup = userGroups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase());
-  if (!hasGroup) {
-    return res.status(403).json({
-      error: `Not in group "${REQUIRED_GROUP}"`,
-      your_groups: userGroups,
-    });
+  if (REQUIRED_GROUP) {
+    const userGroups = req.auth[`${NS}groups`] || [];
+    const hasGroup = userGroups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase());
+    if (!hasGroup) {
+      return res.status(403).json({
+        error: `Not in group "${REQUIRED_GROUP}"`,
+        your_groups: userGroups,
+      });
+    }
   }
   const creds = req.crmProfile?.entities?.[CODE];
   if (!creds?.user || !creds?.pass) {
