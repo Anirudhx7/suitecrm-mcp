@@ -690,6 +690,10 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
     tls_skip = data.get("tls_skip", False)
     behind_proxy = is_multi or data.get("_behind_proxy", False)
 
+    metrics_port = port + 6000
+    if metrics_port > 65535:
+        error(f"Entity port {port} too high: derived metrics port {metrics_port} exceeds 65535 (max entity port: 59535)")
+
     if is_multi:
         env_path = f"{ENV_DIR}/{code}.env"
         svc_name = f"suitecrm-mcp-{code}"
@@ -701,7 +705,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             f"SUITECRM_CODE={code}",
             f"PORT={port}",
             "BIND_HOST=127.0.0.1",
-            f"METRICS_PORT={port + 6000}",
+            f"METRICS_PORT={metrics_port}",
             "METRICS_BIND=127.0.0.1",
             "NODE_NO_WARNINGS=1",
         ]
@@ -717,7 +721,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             f"SUITECRM_PREFIX={prefix}",
             f"PORT={port}",
             "BIND_HOST=127.0.0.1",
-            f"METRICS_PORT={port + 6000}",
+            f"METRICS_PORT={metrics_port}",
             "METRICS_BIND=127.0.0.1",
             "NODE_NO_WARNINGS=1",
         ]

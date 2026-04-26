@@ -33,7 +33,9 @@ function parseCookies(req) {
   for (const part of raw.split(';')) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
-    list[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+    try {
+      list[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+    } catch { /* ignore malformed cookie values */ }
   }
   return list;
 }
@@ -233,7 +235,8 @@ app.get('/auth/login', (req, res) => {
     state = nonce;
   } else {
     state = randomBytes(16).toString('hex');
-    res.cookie('oa_state', state, { httpOnly: true, sameSite: 'lax', maxAge: 300000 });
+    // secure: true so browsers only send cookie over HTTPS; matches GATEWAY_URL protocol
+    res.cookie('oa_state', state, { httpOnly: true, sameSite: 'lax', secure: GATEWAY_URL.startsWith('https://'), maxAge: 300000 });
   }
   params.set('state', state);
   res.redirect(`https://${AUTH0_DOMAIN}/authorize?${params}`);
@@ -252,6 +255,7 @@ app.get('/auth/callback', async (req, res) => {
     const cookies = parseCookies(req);
     const expected = cookies.oa_state || '';
     if (!expected || state !== expected) {
+      logger.warn({ state: state.slice(0, 8) }, 'csrf_state_mismatch');
       return res.status(400).send(`
         <html><body style="font-family:sans-serif;padding:40px">
           <h2>Invalid login state</h2>

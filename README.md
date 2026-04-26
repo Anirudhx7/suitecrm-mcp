@@ -152,7 +152,7 @@ services:
       SESSION_TTL_DAYS: "30"
       PORT: "3100"
       METRICS_PORT: "9091"
-      METRICS_BIND: "0.0.0.0"
+      METRICS_BIND: "0.0.0.0"   # 0.0.0.0 required so the Prometheus container can reach it by service name
     restart: unless-stopped
 
   suitecrm-mcp-crm1:
@@ -168,6 +168,7 @@ services:
       AUTH0_AUDIENCE: https://your-api-identifier
       REQUIRED_GROUP: crm1_users
       PORT: "3101"
+      METRICS_BIND: "0.0.0.0"   # 0.0.0.0 required so the Prometheus container can reach it by service name
     depends_on:
       suitecrm-mcp-auth:
         condition: service_healthy
@@ -186,6 +187,7 @@ services:
       AUTH0_AUDIENCE: https://your-api-identifier
       REQUIRED_GROUP: crm2_users
       PORT: "3102"
+      METRICS_BIND: "0.0.0.0"   # 0.0.0.0 required so the Prometheus container can reach it by service name
     depends_on:
       suitecrm-mcp-auth:
         condition: service_healthy
