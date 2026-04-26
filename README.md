@@ -129,6 +129,14 @@ To update to a newer pinned release, change the image tag in `docker-compose.yml
 docker compose pull && docker compose up -d
 ```
 
+> **Upgrading from pre-v4.3.1:** v4.3.1 changed the image to create `/etc/suitecrm-mcp` with correct ownership for the `appuser` account. If you have an existing `suitecrm-state` named volume created by an older image, recreate it so the new ownership takes effect:
+> ```bash
+> docker compose down
+> docker volume rm suitecrm-mcp_suitecrm-state
+> docker compose up -d
+> ```
+> All persistent state (sessions, profiles) lives in this volume. Recreating it clears those files - users will need to log in again.
+
 For self-signed CRM certificates, add `NODE_TLS_REJECT_UNAUTHORIZED: "0"` to the environment block. For HTTPS termination (required for OAuth in production), put a reverse proxy (nginx, Caddy) in front.
 
 **Test gateway health:**
