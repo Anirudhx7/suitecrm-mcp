@@ -34,5 +34,3 @@ scrape_configs:
           level:
           entity:
           audit:
-      - output:
-          source: msg

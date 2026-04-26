@@ -470,7 +470,24 @@ function toNvl(obj) {
   return Object.entries(obj).map(([n, v]) => ({ name: n, value: String(v ?? '') }));
 }
 
+const MODULE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const MAX_QUERY_LEN = 2000;
+
+function validateModule(module) {
+  if (!module || !MODULE_RE.test(module)) {
+    throw new McpError(ErrorCode.InvalidParams, `Invalid module name: ${module}`);
+  }
+}
+
+function validateQuery(query) {
+  if (typeof query === 'string' && query.length > MAX_QUERY_LEN) {
+    throw new McpError(ErrorCode.InvalidParams, `Query exceeds maximum length of ${MAX_QUERY_LEN} characters`);
+  }
+}
+
 async function searchRecords(sid, { module, query='', fields=[], max_results=20, offset=0, order_by='' }) {
+  validateModule(module);
+  validateQuery(query);
   const r = await crmCall(sid, 'get_entry_list', {
     module_name: module,
     query,
@@ -517,6 +534,7 @@ async function searchText(sid, { search_string, modules=['Accounts','Contacts','
 }
 
 async function getRecord(sid, { module, id, fields=[] }) {
+  validateModule(module);
   const r = await crmCall(sid, 'get_entry', {
     module_name: module,
     id,
@@ -529,6 +547,7 @@ async function getRecord(sid, { module, id, fields=[] }) {
 }
 
 async function createRecord(sid, { module, fields }) {
+  validateModule(module);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: toNvl(fields),
@@ -537,6 +556,7 @@ async function createRecord(sid, { module, fields }) {
 }
 
 async function updateRecord(sid, { module, id, fields }) {
+  validateModule(module);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: [{ name: 'id', value: id }, ...toNvl(fields)],
@@ -545,6 +565,7 @@ async function updateRecord(sid, { module, id, fields }) {
 }
 
 async function deleteRecord(sid, { module, id }) {
+  validateModule(module);
   const r = await crmCall(sid, 'set_entry', {
     module_name: module,
     name_value_list: [
@@ -556,6 +577,8 @@ async function deleteRecord(sid, { module, id }) {
 }
 
 async function countRecords(sid, { module, query='' }) {
+  validateModule(module);
+  validateQuery(query);
   const r = await crmCall(sid, 'get_entries_count', {
     module_name: module,
     query,
@@ -565,6 +588,7 @@ async function countRecords(sid, { module, query='' }) {
 }
 
 async function getRelationships(sid, { module, id, link_field, related_fields=[], max_results=20, offset=0 }) {
+  validateModule(module);
   const r = await crmCall(sid, 'get_relationships', {
     module_name: module,
     module_id: id,
@@ -584,6 +608,7 @@ async function getRelationships(sid, { module, id, link_field, related_fields=[]
 }
 
 async function linkRecords(sid, { module, id, link_field, related_ids }) {
+  validateModule(module);
   const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
   const r = await crmCall(sid, 'set_relationship', {
     module_name: module,
@@ -597,6 +622,7 @@ async function linkRecords(sid, { module, id, link_field, related_ids }) {
 }
 
 async function unlinkRecords(sid, { module, id, link_field, related_ids }) {
+  validateModule(module);
   const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
   const r = await crmCall(sid, 'set_relationship', {
     module_name: module,
@@ -610,6 +636,7 @@ async function unlinkRecords(sid, { module, id, link_field, related_ids }) {
 }
 
 async function getModuleFields(sid, { module }) {
+  validateModule(module);
   const r = await crmCall(sid, 'get_module_fields', {
     module_name: module,
     fields: [],
@@ -1020,8 +1047,18 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
 });
 
 app.post('/messages', messagesRL, async (req, res) => {
-  const t = transports.get(req.query.sessionId);
+  const sid = req.query.sessionId;
+  const t = transports.get(sid);
   if (!t) return res.status(404).json({ error: 'Session not found' });
+
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!token) return res.status(401).json({ error: 'Bearer token required' });
+  const session = loadSessions()[token];
+  if (!session || session.sub !== subBySid.get(sid)) {
+    return res.status(403).json({ error: 'Token does not match session owner' });
+  }
+
   await t.handlePostMessage(req, res);
 });
 

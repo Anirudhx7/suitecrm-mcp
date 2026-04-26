@@ -165,6 +165,22 @@ function decodeJwtPayload(token) {
   return JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
 }
 
+async function verifyAndDecodeAccessToken(accessToken) {
+  // Validate token server-side via Auth0 userinfo (rejects tampered/expired tokens)
+  const uiRes = await fetch(`https://${AUTH0_DOMAIN}/userinfo`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!uiRes.ok) throw new Error(`Access token rejected by Auth0: ${uiRes.status}`);
+
+  const payload = decodeJwtPayload(accessToken);
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp && payload.exp < now) throw new Error('Token expired');
+  if (payload.iss && payload.iss !== `https://${AUTH0_DOMAIN}/`) {
+    throw new Error(`Issuer mismatch: got ${payload.iss}`);
+  }
+  return payload;
+}
+
 async function provisionCrmAccounts(sub, email, sam, userGroups) {
   let crmHosts = {};
   try { crmHosts = JSON.parse(readFileSync(CRM_HOSTS_FILE, 'utf8')); } catch {}
@@ -280,7 +296,7 @@ app.get('/auth/callback', async (req, res) => {
 
   try {
     const tokens  = await exchangeCode(code);
-    const payload = decodeJwtPayload(tokens.access_token);
+    const payload = await verifyAndDecodeAccessToken(tokens.access_token);
 
     const sub        = payload.sub;
     const sam        = payload[`${NS}samaccountname`] || '';
@@ -726,7 +742,9 @@ app.get('/auth/bridge/poll/:nonce', bridgePollLimiter, (req, res) => {
 
 // POST /auth/logout -> invalidate session
 app.post('/auth/logout', (req, res) => {
-  const token    = qs(req.query.token) || qs(req.headers['x-gateway-token']);
+  const authHeader = req.headers.authorization || '';
+  const token = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '')
+    || qs(req.headers['x-gateway-token']);
   const sessions = loadSessions();
   if (API_KEY_RE.test(token) && Object.hasOwn(sessions, token)) {
     delete sessions[token];
