@@ -7,7 +7,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
@@ -808,7 +808,8 @@ function createMcpServer(sid) {
 
   srv.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args = {} } = req.params;
-    const cLog = connLoggers.get(sid) || logger;
+    const reqId = randomUUID();
+    const cLog = (connLoggers.get(sid) || logger).child({ reqId });
     const callStart = Date.now();
     const end = metricToolDuration.startTimer({ entity: PREFIX, tool: name });
     cLog.info({ audit: true, tool: name, args }, 'tool_call');
