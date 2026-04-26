@@ -22,9 +22,17 @@ jobs:
         with:
           node-version: '20'
       - name: Check server syntax
-        run: node --check server/index.mjs
+        run: |
+          node --check server/index.mjs
+          node --check server/auth.mjs
       - name: Check installer syntax
         run: python3 -m py_compile install.py install-bridge.py
+      - name: Validate docker-compose config
+        run: GRAFANA_PASSWORD=dummy docker compose config --quiet
+      - name: Validate Prometheus rules
+        run: |
+          sudo apt-get install -y prometheus 2>/dev/null | tail -1
+          promtool check rules monitoring/prometheus/rules.yml
 
   publish:
     runs-on: ubuntu-latest
