@@ -8,8 +8,9 @@ set -euo pipefail
 CANDIDATES=()
 while IFS= read -r -d '' f; do
   CANDIDATES+=("$f")
-done < <(find /var/www /srv /opt /home -maxdepth 8 -name 'config.php' -print0 2>/dev/null | \
-         xargs -0 grep -l 'sugar_config' 2>/dev/null || true)
+done < <(find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o \
+         -name 'config.php' -readable -print0 2>/dev/null | \
+         xargs -0 grep -l 'dbconfig\|sugar_config' 2>/dev/null || true)
 
 if [[ ${#CANDIDATES[@]} -eq 0 ]]; then
   echo "ERROR: No SuiteCRM config.php found under /var/www /srv /opt /home" >&2
@@ -22,12 +23,15 @@ BEST_COUNT=-1
 for f in "${CANDIDATES[@]}"; do
   COUNT=$(php -r "
     @include('$f');
-    if (empty(\$sugar_config['db_name'])) { echo -1; exit; }
+    \$db_host = \$sugar_config['dbconfig']['db_host_name'] ?? \$sugar_config['db_host_name'] ?? '';
+    \$db_name = \$sugar_config['dbconfig']['db_name'] ?? \$sugar_config['db_name'] ?? '';
+    \$db_user = \$sugar_config['dbconfig']['db_user_name'] ?? \$sugar_config['db_user_name'] ?? '';
+    \$db_pass = \$sugar_config['dbconfig']['db_password'] ?? \$sugar_config['db_password'] ?? '';
+    if (empty(\$db_name)) { echo -1; exit; }
     try {
       \$pdo = new PDO(
-        'mysql:host=' . (\$sugar_config['db_host_name'] ?? 'localhost') . ';dbname=' . \$sugar_config['db_name'],
-        \$sugar_config['db_user_name'] ?? '',
-        \$sugar_config['db_password'] ?? '',
+        'mysql:host=' . \$db_host . ';dbname=' . \$db_name,
+        \$db_user, \$db_pass,
         [PDO::ATTR_TIMEOUT => 3, PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
       );
       echo (int)\$pdo->query('SELECT COUNT(*) FROM users WHERE deleted=0 AND status=\"Active\"')->fetchColumn();
