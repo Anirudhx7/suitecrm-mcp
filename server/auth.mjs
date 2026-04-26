@@ -726,6 +726,20 @@ app.listen(PORT, BIND_HOST, () => {
   logger.info({ host: BIND_HOST, port: PORT }, 'listening');
 });
 
+// Purge stale bridge-session nonces every hour. Nonces are also cleaned on
+// each /auth/start and /auth/poll call, but periodic cleanup covers cases where
+// users abandon the flow without polling.
+setInterval(() => {
+  const bs = loadBridgeSessions();
+  const before = Object.keys(bs).length;
+  cleanExpiredBridgeSessions(bs);
+  const removed = before - Object.keys(bs).length;
+  if (removed > 0) {
+    saveBridgeSessions(bs);
+    logger.info({ removed }, 'bridge_sessions_purged');
+  }
+}, 60 * 60 * 1000).unref();
+
 const METRICS_PORT = parseInt(process.env.METRICS_PORT || '9091', 10);
 const METRICS_BIND = (process.env.METRICS_BIND || '127.0.0.1').trim();
 http.createServer(async (req, res) => {

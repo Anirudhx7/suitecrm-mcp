@@ -83,6 +83,11 @@ MD5 is cryptographically broken. This is a protocol constraint, not a gateway bu
 
 **Mitigation:** Always run the gateway behind HTTPS.
 
+**SAST note:** `tools/mcp-admin` uses `hashlib.md5()` with a `# nosec B324` suppression
+comment (Bandit format). Non-Bandit scanners (Semgrep, CodeQL, etc.) will still flag this
+line. It is intentional and safe in context - the MD5 is required by the SuiteCRM REST
+protocol and is transmitted over TLS.
+
 ### LDAP / SSO users
 
 SuiteCRM's v4_1 REST API only authenticates against local database passwords. LDAP and SSO
