@@ -103,6 +103,32 @@ See the Known Limitations section in README.md.
 tokens. Store it only in `/etc/suitecrm-mcp/auth.env` (mode 600). Do not include it in
 Docker images, version control, or log output.
 
+### Prometheus metrics contain user identifiers
+
+The per-user Prometheus gauges (`suitecrm_mcp_user_crm_session_active`,
+`suitecrm_mcp_user_gateway_session_active`) include `sub`, `email`, and
+`crm_user` labels. These labels are user identifiers and constitute PII in
+most jurisdictions.
+
+**Mitigations already in place:**
+- Metrics are bound to `127.0.0.1` by default (`METRICS_BIND` env var).
+- In Docker, the metrics port is on an internal Docker network accessible only by Prometheus.
+- Prometheus itself should be bound to `127.0.0.1` (default in `docker-compose.yml`).
+
+**If this is a concern for your deployment:** restrict Prometheus scrape access with
+`basic_auth` or a firewall rule, or replace per-user gauges with aggregate counts
+(`suitecrm_mcp_profiles_configured`, `suitecrm_mcp_gateway_sessions_active`) which
+carry no PII.
+
+### Audit logs include tool call metadata
+
+Tool calls are logged with `audit: true` in the structured log. Field values in
+`name_value_list` (create/update), `search_params`, and free-text `query` arguments
+are redacted. Field names, module names, and record IDs are retained.
+
+Audit logs are shipped to Loki by Promtail in the Docker monitoring stack. Apply
+Loki retention policies and access controls appropriate to your data classification.
+
 ### NodeSource bootstrap
 
 The Node.js installer uses `curl https://deb.nodesource.com/setup_lts.x | bash` to set up

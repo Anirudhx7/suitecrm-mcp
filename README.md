@@ -109,6 +109,13 @@ For production, pin to a release tag such as `v4.2.2` instead of floating on `la
 curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v4.2.2/docker-compose.yml
 ```
 
+Create your entity config (the auth service reads this to build MCP client commands):
+
+```bash
+cp entities.example.json entities.json
+# edit entities.json - set endpoint, port, group for your CRM
+```
+
 Edit `docker-compose.yml` and fill in `SUITECRM_ENDPOINT`, `AUTH0_*` vars, and `GATEWAY_PUBLIC_URL`, then:
 
 ```bash

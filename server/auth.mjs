@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto';
 import pino from 'pino';
 import { Registry, Counter, Gauge, collectDefaultMetrics } from 'prom-client';
 import http from 'http';
+import rateLimit from 'express-rate-limit';
 
 function escHtml(s) {
   return String(s)
@@ -623,8 +624,24 @@ function copyEl(id,btn){
 // SECURE BRIDGE AUTH ENDPOINTS (v3.1+)
 // ========================================================================
 
+const bridgeStartLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many bridge session requests, try again later' },
+});
+
+const bridgePollLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many poll requests, slow down' },
+});
+
 // POST /auth/bridge/start -> creates nonce session for bridge
-app.post('/auth/bridge/start', (req, res) => {
+app.post('/auth/bridge/start', bridgeStartLimiter, (req, res) => {
   const { linux_user } = req.body;
   if (!linux_user || typeof linux_user !== 'string') {
     return res.status(400).json({ error: 'Missing or invalid linux_user' });
@@ -651,7 +668,7 @@ app.post('/auth/bridge/start', (req, res) => {
 });
 
 // GET /auth/bridge/poll/:nonce -> bridge polls this with X-Bridge-Secret
-app.get('/auth/bridge/poll/:nonce', (req, res) => {
+app.get('/auth/bridge/poll/:nonce', bridgePollLimiter, (req, res) => {
   const nonce        = qs(req.params.nonce);
   const clientSecret = qs(req.headers['x-bridge-secret']);
 

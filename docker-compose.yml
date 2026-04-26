@@ -9,6 +9,9 @@ services:
     working_dir: /app
     ports:
       - "127.0.0.1:3100:3100"
+    volumes:
+      - suitecrm-state:/etc/suitecrm-mcp
+      - ./entities.json:/etc/suitecrm-mcp/entities.json:ro   # copy from entities.example.json and edit
     environment:
       AUTH0_DOMAIN: your-tenant.auth0.com
       AUTH0_CLIENT_ID: your-client-id
@@ -36,6 +39,8 @@ services:
     image: ghcr.io/anirudhx7/suitecrm-mcp:v4.2.2
     ports:
       - "127.0.0.1:3101:3101"   # change to "3101:3101" only behind a reverse proxy
+    volumes:
+      - suitecrm-state:/etc/suitecrm-mcp   # shared with auth service: sessions + user-profiles
     environment:
       SUITECRM_ENDPOINT: https://crm.example.com/legacy/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm
@@ -113,6 +118,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  suitecrm-state:     # shared runtime state: sessions.json, user-profiles.json
   prometheus_data:
   grafana_data:
   loki_data:
