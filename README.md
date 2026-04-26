@@ -1,8 +1,40 @@
-# suitecrm-mcp
+# <a name="top"></a>suitecrm-mcp
 
 An open-source MCP (Model Context Protocol) gateway for SuiteCRM. Lets AI assistants - Claude, OpenAI, or any MCP-compatible client - read and write your CRM data over a persistent SSE connection.
 
 Built from a real production deployment. CData's version is commercial. This one isn't.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/Anirudhx7/suitecrm-mcp?color=369eff&labelColor=black&logo=github&style=flat-square)](https://github.com/Anirudhx7/suitecrm-mcp/releases)
+[![CI](https://github.com/Anirudhx7/suitecrm-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Anirudhx7/suitecrm-mcp/actions/workflows/ci.yml)
+[![GitHub Stars](https://img.shields.io/github/stars/Anirudhx7/suitecrm-mcp?style=social)](https://github.com/Anirudhx7/suitecrm-mcp)
+[![Issues](https://img.shields.io/github/issues/Anirudhx7/suitecrm-mcp?color=ff80eb&labelColor=black&style=flat-square)](https://github.com/Anirudhx7/suitecrm-mcp/issues)
+
+---
+
+## Table of Contents
+
+| | Section |
+|---|---|
+| | [Features](#features) |
+| | [Tools](#tools) |
+| | [Architecture](#architecture) |
+| | [Prerequisites](#prerequisites) |
+| | [SuiteCRM API User Setup](#suitecrm-api-user-setup) |
+| | [Docker](#docker) |
+| | [Quick Start - Single CRM](#quick-start---single-crm) |
+| | [Multi-Entity Install](#multi-entity-install) |
+| | [Configuration](#configuration) |
+| | [Health Checks and Monitoring](#health-checks-and-monitoring) |
+| | [TLS](#tls) |
+| | [Connecting a Client](#connecting-a-client) |
+| | [Troubleshooting](#troubleshooting) |
+| | [Supported SuiteCRM Versions](#supported-suitecrm-versions) |
+| | [Known Limitations](#known-limitations) |
+| | [Security Notes](#security-notes) |
+| | [License](#license) |
+
+---
 
 ## Features
 
@@ -14,6 +46,10 @@ Built from a real production deployment. CData's version is commercial. This one
 - **Session auto-renewal** - CRM sessions re-authenticate transparently on expiry
 - **Unified installer** - one script handles single CRM (no nginx) or N CRMs behind nginx, with interactive OAuth setup
 - **Entity-prefixed tools** - run multiple CRM instances side-by-side without name collisions
+
+<p align="right"><a href="#top">↑ back to top</a></p>
+
+---
 
 ## Tools
 
@@ -36,6 +72,8 @@ Built from a real production deployment. CData's version is commercial. This one
 Replace `{prefix}` with your configured `SUITECRM_PREFIX` (default: `suitecrm`).
 
 Supported modules include: Accounts, Contacts, Leads, Opportunities, Cases, Calls, Meetings, Tasks, Notes, Emails, Documents, Campaigns, AOS_Quotes, AOS_Invoices, AOS_Products, AOS_Contracts, AOR_Reports, AOW_WorkFlow, SecurityGroups - and any custom modules in your instance.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
 
 ---
 
@@ -73,6 +111,8 @@ flowchart TB
 
 Users log in once via Auth0 or Azure AD; the gateway issues a personal API key. MCP clients attach it as `Authorization: Bearer <key>` on every request. CRM credentials never leave the gateway. Multiple CRM instances are supported - each gets its own port and tool namespace (`suitecrm_crm1_*`, `suitecrm_crm2_*`).
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## Prerequisites
@@ -81,6 +121,8 @@ Users log in once via Auth0 or Azure AD; the gateway issues a personal API key. 
 - Python 3.8+
 - Root / sudo access
 - Node.js is installed automatically if missing
+
+<p align="right"><a href="#top">↑ back to top</a></p>
 
 ---
 
@@ -96,6 +138,8 @@ Before connecting, make sure your CRM user has API access enabled:
 If API access isn't enabled, the gateway returns HTTP 401 with `CRM authentication failed: Invalid Login` immediately on connection - this is the most common first-run failure.
 
 For production: create a dedicated API user with only the module permissions your AI assistant needs. Don't use the admin account.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
 
 ---
 
@@ -148,6 +192,9 @@ curl http://localhost:3101/health
 
 Each container handles exactly one CRM entity. For N entities, add N service blocks to `docker-compose.yml`, each on its own port.
 
+<details>
+<summary><strong>Full multi-entity compose example (two entities)</strong></summary>
+
 ```yaml
 services:
 
@@ -176,7 +223,7 @@ services:
       - "127.0.0.1:3101:3101"   # expose via reverse proxy only
       - "127.0.0.1:9101:9090"   # entity metrics (Prometheus)
     environment:
-      SUITECRM_ENDPOINT: https://crm1.example.com/service/v4_1/rest.php
+      SUITECRM_ENDPOINT: https://crm1.example.com/legacy/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm_crm1
       SUITECRM_CODE: crm1
       AUTH0_DOMAIN: your-tenant.auth0.com
@@ -211,6 +258,8 @@ services:
     restart: unless-stopped
 ```
 
+</details>
+
 What changes per entity:
 - Service name (`suitecrm-mcp-crm1`, `suitecrm-mcp-crm2`, ...)
 - `SUITECRM_ENDPOINT` - the REST API URL for that specific CRM (the path after the domain varies by SuiteCRM installation)
@@ -222,6 +271,8 @@ What stays the same across all entities:
 - The auth service (`suitecrm-mcp-auth`) is shared; entity containers depend on it
 
 Put a reverse proxy (nginx, Caddy) in front to route `/crm1/` to port 3101, `/crm2/` to port 3102, and `/auth/` to any one instance. For production use with multiple CRMs, `install.py --config entities.json` handles all of this automatically on a Linux host.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
 
 ---
 
@@ -254,6 +305,8 @@ curl https://mcp.yourserver.com/health
 After adding the MCP server config (see [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md)) and restarting Claude Desktop, click the hammer icon. You should see 13 tools: `suitecrm_search`, `suitecrm_get`, etc.
 
 Try a test prompt: `"List the first 5 accounts in the CRM"` - Claude should call `suitecrm_search` automatically.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
 
 ---
 
@@ -313,6 +366,8 @@ sudo python3 install.py --add --config entities.json
 sudo python3 install.py --remove crm2
 ```
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## Configuration
@@ -362,6 +417,8 @@ sudo python3 install.py --remove crm2
 
 Keys become the entity code (nginx path prefix, tool prefix suffix, service name). Ports must be unique.
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## Health Checks and Monitoring
@@ -392,7 +449,8 @@ curl http://YOUR_SERVER:3101/health/deep
 
 Two components expose Prometheus metrics on separate ports (localhost only).
 
-**Gateway entity** (default port 9090 for single-entity; `port + 6000` for multi-entity systemd installs):
+<details>
+<summary><strong>Gateway entity metrics</strong> (default port 9090)</summary>
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -406,13 +464,18 @@ Two components expose Prometheus metrics on separate ports (localhost only).
 | `suitecrm_mcp_circuit_breaker_state` | Gauge | 0=closed, 1=half-open, 2=open |
 | `suitecrm_mcp_circuit_breaker_openings_total` | Counter | Circuit breaker trip events |
 
-**Auth service** (default port 9091):
+</details>
+
+<details>
+<summary><strong>Auth service metrics</strong> (default port 9091)</summary>
 
 | Metric | Type | Description |
 |--------|------|-------------|
 | `suitecrm_auth_logins_total` | Counter | OAuth2 login completions by result (new/reused/error) |
 | `suitecrm_auth_bridge_sessions_total` | Counter | Bridge session events (started/completed/expired) |
 | `suitecrm_auth_sessions_active` | Gauge | Non-expired gateway sessions currently stored |
+
+</details>
 
 ```bash
 # Scrape gateway metrics (single-entity systemd)
@@ -446,6 +509,8 @@ This prevents a slow or unresponsive CRM from tying up connections and causing c
 
 The current state appears in both `/health` and `{prefix}_server_info` tool responses.
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## TLS
@@ -469,6 +534,8 @@ If your SuiteCRM uses a self-signed certificate, add `"tls_skip": true` to the e
 
 Only use this on trusted internal networks. Never expose a TLS-skipping gateway to the public internet.
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## Connecting a Client
@@ -491,6 +558,8 @@ variants, and verification are in the guides above.
 (installed via `install.py`) and a bridge plugin runs locally on the OpenClaw
 machine (installed via `install-bridge.py`). The bridge proxies all 13 SuiteCRM
 tools through to the gateway. The OpenClaw guide covers both components end to end.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
 
 ---
 
@@ -521,6 +590,8 @@ curl https://mcp.yourserver.com/health
 - `ECONNREFUSED` - service isn't running; `journalctl -u suitecrm-mcp`
 - SSE connection drops - normal for long idle periods; clients reconnect automatically
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## Supported SuiteCRM Versions
@@ -548,6 +619,8 @@ curl -s -X POST "https://YOUR-PATH/service/v4_1/rest.php" \
 # Should return: {"flavor":"CE","version":"...","gmt_time":"..."}
 ```
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## Known Limitations
@@ -568,6 +641,8 @@ bash tools/create-api-user.sh --csv users.csv
 
 This is a SuiteCRM REST API limitation, not specific to this gateway.
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## Security Notes
@@ -581,8 +656,18 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 
 See [SECURITY.md](SECURITY.md) for full details on controls and known limitations.
 
+<p align="right"><a href="#top">↑ back to top</a></p>
+
 ---
 
 ## License
 
-<a href="https://github.com/Anirudhx7/suitecrm-mcp/blob/55c7985e1d67dd2fd49f6c793608d2380c107a7e/LICENSE">MIT</a> 
+[MIT](LICENSE)
+
+---
+
+<div align="center">
+
+Built by [Anirudhx7](https://github.com/Anirudhx7) · Part of [AgentLayer](https://github.com/Anirudhx7)
+
+</div>
