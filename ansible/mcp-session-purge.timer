@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily purge of expired SuiteCRM MCP sessions
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

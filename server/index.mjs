@@ -10,7 +10,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } fr
 import { createHash, randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import express from 'express';
-import { rateLimit } from 'express-rate-limit';
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
 import https from 'https';
 import http from 'http';
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
@@ -217,6 +217,7 @@ const circuitBreaker = {
 // In-memory state
 // ---------------------------------------------------------------------------
 const transports = new Map();
+const subToSid   = new Map(); // sub -> most recent sid, used to evict stale connections on reconnect
 const crmSessions = new Map();
 const crmSessionAges = new Map();
 const connCreds = new Map();
@@ -733,7 +734,7 @@ async function getModuleFields(sid, { module }) {
       required: f.required,
       options: f.options ? Object.keys(f.options) : undefined,
     })),
-    relationships: (r.link_fields || []).map(l => ({
+    relationships: Object.values(r.link_fields || {}).map(l => ({
       name: l.name,
       related_module: l.module,
     })),
@@ -762,6 +763,187 @@ async function serverInfo(sid) {
     active_connections: transports.size,
     circuit_breaker: circuitBreaker.state.toLowerCase(),
   };
+}
+
+async function logCall(sid, { name, status = 'Held', direction = 'Outbound', duration_hours = 0, duration_minutes = 15, date_start, description = '', assigned_user_id, contact_ids = [], account_ids = [] }) {
+  if (!name || typeof name !== 'string') throw new McpError(ErrorCode.InvalidParams, 'name is required');
+  if (!date_start) throw new McpError(ErrorCode.InvalidParams, 'date_start is required (format: YYYY-MM-DD HH:MM:SS)');
+  const fields = [
+    { name: 'name',             value: name },
+    { name: 'status',           value: status },
+    { name: 'direction',        value: direction },
+    { name: 'duration_hours',   value: String(duration_hours) },
+    { name: 'duration_minutes', value: String(duration_minutes) },
+    { name: 'date_start',       value: date_start },
+    { name: 'description',      value: description },
+  ];
+  if (assigned_user_id) fields.push({ name: 'assigned_user_id', value: assigned_user_id });
+  const r = await crmCall(sid, 'set_entry', { module_name: 'Calls', name_value_list: fields });
+  const callId = r.id;
+  const linked = { contacts: 0, accounts: 0 };
+  if (contact_ids.length) {
+    for (const cid of contact_ids) validateId(cid);
+    await crmCall(sid, 'set_relationship', { module_name: 'Calls', module_id: callId, link_field_name: 'contacts', related_ids: contact_ids, name_value_list: [], delete: 0 });
+    linked.contacts = contact_ids.length;
+  }
+  if (account_ids.length) {
+    for (const aid of account_ids) validateId(aid);
+    await crmCall(sid, 'set_relationship', { module_name: 'Calls', module_id: callId, link_field_name: 'accounts', related_ids: account_ids, name_value_list: [], delete: 0 });
+    linked.accounts = account_ids.length;
+  }
+  return { id: callId, module: 'Calls', created: true, linked };
+}
+
+async function createTask(sid, { name, status = 'Not Started', priority = 'Medium', date_due, date_start, description = '', assigned_user_id, contact_id, parent_type, parent_id }) {
+  if (!name || typeof name !== 'string') throw new McpError(ErrorCode.InvalidParams, 'name is required');
+  if (contact_id) validateId(contact_id);
+  if (parent_id) validateId(parent_id);
+  if (parent_type) validateModule(parent_type);
+  const nvl = [
+    { name: 'name',        value: name },
+    { name: 'status',      value: status },
+    { name: 'priority',    value: priority },
+    { name: 'description', value: description },
+  ];
+  if (date_due)          nvl.push({ name: 'date_due',          value: date_due });
+  if (date_start)        nvl.push({ name: 'date_start',        value: date_start });
+  if (assigned_user_id)  nvl.push({ name: 'assigned_user_id',  value: assigned_user_id });
+  if (contact_id)        nvl.push({ name: 'contact_id',        value: contact_id });
+  if (parent_type)       nvl.push({ name: 'parent_type',       value: parent_type });
+  if (parent_id)         nvl.push({ name: 'parent_id',         value: parent_id });
+  const r = await crmCall(sid, 'set_entry', { module_name: 'Tasks', name_value_list: nvl });
+  return { id: r.id, module: 'Tasks', created: true };
+}
+
+async function createLinkedNote(sid, { name, description = '', parent_type, parent_id, contact_id, assigned_user_id }) {
+  if (!name || typeof name !== 'string') throw new McpError(ErrorCode.InvalidParams, 'name is required');
+  if (parent_id) validateId(parent_id);
+  if (contact_id) validateId(contact_id);
+  if (parent_type) validateModule(parent_type);
+  const nvl = [
+    { name: 'name',        value: name },
+    { name: 'description', value: description },
+  ];
+  if (parent_type)      nvl.push({ name: 'parent_type',      value: parent_type });
+  if (parent_id)        nvl.push({ name: 'parent_id',        value: parent_id });
+  if (contact_id)       nvl.push({ name: 'contact_id',       value: contact_id });
+  if (assigned_user_id) nvl.push({ name: 'assigned_user_id', value: assigned_user_id });
+  const r = await crmCall(sid, 'set_entry', { module_name: 'Notes', name_value_list: nvl });
+  return { id: r.id, module: 'Notes', created: true };
+}
+
+async function getRecordActivities(sid, { module, id, types = ['calls', 'meetings', 'tasks', 'notes'], max_results = 10 }) {
+  validateModule(module);
+  validateId(id);
+  const safeMax = coerceNumeric(max_results, 10, 1, MAX_RESULTS_CAP);
+  const validTypes = ['calls', 'meetings', 'tasks', 'notes'];
+  const requestedTypes = types.filter(t => validTypes.includes(t));
+  if (requestedTypes.length === 0) throw new McpError(ErrorCode.InvalidParams, `types must include at least one of: ${validTypes.join(', ')}`);
+  const out = {};
+  for (const type of requestedTypes) {
+    try {
+      const r = await crmCall(sid, 'get_relationships', {
+        module_name: module,
+        module_id: id,
+        link_field_name: type,
+        related_module_query: '',
+        related_fields: ['id', 'name', 'status', 'date_start', 'date_due', 'date_entered', 'description'],
+        related_module_link_name_to_fields_array: [],
+        deleted: 0,
+        order_by: '',
+        offset: 0,
+        limit: safeMax,
+      });
+      out[type] = flatList(r.entry_list);
+    } catch {
+      out[type] = [];
+    }
+  }
+  return out;
+}
+
+async function getMany(sid, { module, ids, fields = [] }) {
+  validateModule(module);
+  if (!Array.isArray(ids) || ids.length === 0) throw new McpError(ErrorCode.InvalidParams, 'ids must be a non-empty array');
+  if (ids.length > 100) throw new McpError(ErrorCode.InvalidParams, 'Too many ids (max 100)');
+  for (const id of ids) validateId(id);
+  validateFieldList(fields);
+  const r = await crmCall(sid, 'get_entries', {
+    module_name: module,
+    ids,
+    select_fields: fields,
+    link_name_to_fields_array: [],
+  });
+  return { module, records: flatList(r.entry_list), count: (r.entry_list || []).length };
+}
+
+async function bulkUpsert(sid, { module, records }) {
+  validateModule(module);
+  if (!Array.isArray(records) || records.length === 0) throw new McpError(ErrorCode.InvalidParams, 'records must be a non-empty array');
+  if (records.length > 100) throw new McpError(ErrorCode.InvalidParams, 'Too many records (max 100)');
+  for (const rec of records) validateFieldsObject(rec);
+  const r = await crmCall(sid, 'set_entries', {
+    module_name: module,
+    name_value_lists: records.map(fields => toNvl(fields)),
+  });
+  return { ids: r.ids || [], count: (r.ids || []).length };
+}
+
+async function getDropdownValues(sid, { dropdown_name } = {}) {
+  const r = await crmCall(sid, 'get_language_definition', {
+    modules: ['app_list_strings'],
+    MD5: false,
+  });
+  const als = r?.app_list_strings || {};
+  if (dropdown_name) {
+    if (!als[dropdown_name]) throw new McpError(ErrorCode.InvalidParams, `Dropdown not found: ${dropdown_name}`);
+    return { dropdown_name, values: als[dropdown_name] };
+  }
+  return { available_dropdowns: Object.keys(als), count: Object.keys(als).length };
+}
+
+async function getRecent(sid, { modules = ['Accounts', 'Contacts', 'Leads'], max_results = 10 }) {
+  for (const m of modules) validateModule(m);
+  const safeMax = coerceNumeric(max_results, 10, 1, MAX_RESULTS_CAP);
+  const r = await crmCall(sid, 'get_last_viewed', { module_names: modules });
+  const items = Array.isArray(r) ? r : [];
+  return {
+    items: items.slice(0, safeMax).map(i => ({
+      id: i.id,
+      module: i.module_name,
+      name: i.item_summary || i.name,
+      viewed_at: i.date_entered,
+    })),
+    count: Math.min(items.length, safeMax),
+  };
+}
+
+async function getNoteAttachment(sid, { id }) {
+  validateId(id);
+  const r = await crmCall(sid, 'get_note_attachment', { id });
+  const att = r.note_attachment || {};
+  return {
+    id: att.id,
+    filename: att.filename,
+    file_mime_type: att.file_mime_type,
+    file_base64: att.file || null,
+  };
+}
+
+async function setNoteAttachment(sid, { id, filename, file_base64, file_mime_type }) {
+  validateId(id);
+  if (!filename || typeof filename !== 'string') throw new McpError(ErrorCode.InvalidParams, 'filename is required');
+  if (!file_base64 || typeof file_base64 !== 'string') throw new McpError(ErrorCode.InvalidParams, 'file_base64 is required');
+  const note = { id, filename, file: file_base64 };
+  if (file_mime_type) note.file_mime_type = file_mime_type;
+  const r = await crmCall(sid, 'set_note_attachment', { note });
+  return { id: r.id, attached: true };
+}
+
+async function getUpcomingActivities(sid) {
+  const r = await crmCall(sid, 'get_upcoming_activities', {});
+  const items = Array.isArray(r) ? r : [];
+  return { activities: items, count: items.length };
 }
 
 const TOOLS = [
@@ -927,6 +1109,159 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: `${PREFIX}_get_many`,
+    description: 'Fetch multiple records by ID list in one call',
+    inputSchema: {
+      type: 'object',
+      required: ['module', 'ids'],
+      properties: {
+        module: { type: 'string' },
+        ids: { type: 'array', items: { type: 'string' }, maxItems: 100 },
+        fields: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_bulk_upsert`,
+    description: 'Create or update multiple records in one call. Include "id" in a record\'s fields to update it, omit to create.',
+    inputSchema: {
+      type: 'object',
+      required: ['module', 'records'],
+      properties: {
+        module: { type: 'string' },
+        records: {
+          type: 'array',
+          items: { type: 'object', additionalProperties: { type: 'string' } },
+          maxItems: 100,
+        },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_get_dropdown_values`,
+    description: 'List all available dropdown names, or get key→label values for a specific dropdown (e.g. account_type_dom, industry_dom)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dropdown_name: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_get_recent`,
+    description: 'Get recently viewed records for the current user',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        modules: { type: 'array', items: { type: 'string' } },
+        max_results: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_get_note_attachment`,
+    description: 'Download a file attachment from a Notes record. Returns filename and base64-encoded file content.',
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      properties: {
+        id: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_set_note_attachment`,
+    description: 'Upload a file attachment to an existing Notes record. File must be base64-encoded.',
+    inputSchema: {
+      type: 'object',
+      required: ['id', 'filename', 'file_base64'],
+      properties: {
+        id: { type: 'string' },
+        filename: { type: 'string' },
+        file_base64: { type: 'string' },
+        file_mime_type: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_get_upcoming_activities`,
+    description: 'Get upcoming calls, meetings, and tasks for the current user',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: `${PREFIX}_log_call`,
+    description: 'Create a logged call (Held) or scheduled call and optionally link it to contacts and/or accounts in one step',
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'date_start'],
+      properties: {
+        name:             { type: 'string' },
+        status:           { type: 'string', enum: ['Planned', 'Held', 'Not Held'], default: 'Held' },
+        direction:        { type: 'string', enum: ['Inbound', 'Outbound'], default: 'Outbound' },
+        duration_hours:   { type: 'number', default: 0 },
+        duration_minutes: { type: 'number', enum: [0, 15, 30, 45], default: 15 },
+        date_start:       { type: 'string', description: 'YYYY-MM-DD HH:MM:SS' },
+        description:      { type: 'string' },
+        assigned_user_id: { type: 'string' },
+        contact_ids:      { type: 'array', items: { type: 'string' } },
+        account_ids:      { type: 'array', items: { type: 'string' } },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_create_task`,
+    description: 'Create a task and optionally link it to a contact and/or a parent record (Account, Contact, Lead, etc.)',
+    inputSchema: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name:             { type: 'string' },
+        status:           { type: 'string', enum: ['Not Started', 'In Progress', 'Completed', 'Pending Input', 'Deferred'], default: 'Not Started' },
+        priority:         { type: 'string', enum: ['High', 'Medium', 'Low'], default: 'Medium' },
+        date_due:         { type: 'string', description: 'YYYY-MM-DD HH:MM:SS' },
+        date_start:       { type: 'string', description: 'YYYY-MM-DD HH:MM:SS' },
+        description:      { type: 'string' },
+        assigned_user_id: { type: 'string' },
+        contact_id:       { type: 'string' },
+        parent_type:      { type: 'string', description: 'Module name of parent record e.g. Accounts, Contacts, Leads' },
+        parent_id:        { type: 'string' },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_create_note`,
+    description: 'Create a note and optionally link it to a parent record (Account, Contact, Lead, etc.) and/or a contact',
+    inputSchema: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name:             { type: 'string' },
+        description:      { type: 'string' },
+        parent_type:      { type: 'string', description: 'Module name of parent record e.g. Accounts, Contacts, Leads' },
+        parent_id:        { type: 'string' },
+        contact_id:       { type: 'string' },
+        assigned_user_id: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: `${PREFIX}_get_record_activities`,
+    description: 'Get activity history for a record — calls, meetings, tasks, and/or notes linked to it',
+    inputSchema: {
+      type: 'object',
+      required: ['module', 'id'],
+      properties: {
+        module:      { type: 'string' },
+        id:          { type: 'string' },
+        types:       { type: 'array', items: { type: 'string', enum: ['calls', 'meetings', 'tasks', 'notes'] }, default: ['calls', 'meetings', 'tasks', 'notes'] },
+        max_results: { type: 'number' },
+      },
+    },
+  },
 ];
 
 function createMcpServer(sid) {
@@ -959,6 +1294,17 @@ function createMcpServer(sid) {
       else if (name === `${PREFIX}_get_module_fields`) result = await getModuleFields(sid, args);
       else if (name === `${PREFIX}_list_modules`) result = await listModules(sid);
       else if (name === `${PREFIX}_server_info`) result = await serverInfo(sid);
+      else if (name === `${PREFIX}_get_many`) result = await getMany(sid, args);
+      else if (name === `${PREFIX}_bulk_upsert`) result = await bulkUpsert(sid, args);
+      else if (name === `${PREFIX}_get_dropdown_values`) result = await getDropdownValues(sid, args);
+      else if (name === `${PREFIX}_get_recent`) result = await getRecent(sid, args);
+      else if (name === `${PREFIX}_get_note_attachment`) result = await getNoteAttachment(sid, args);
+      else if (name === `${PREFIX}_set_note_attachment`) result = await setNoteAttachment(sid, args);
+      else if (name === `${PREFIX}_get_upcoming_activities`) result = await getUpcomingActivities(sid);
+      else if (name === `${PREFIX}_log_call`) result = await logCall(sid, args);
+      else if (name === `${PREFIX}_create_task`) result = await createTask(sid, args);
+      else if (name === `${PREFIX}_create_note`) result = await createLinkedNote(sid, args);
+      else if (name === `${PREFIX}_get_record_activities`) result = await getRecordActivities(sid, args);
       else throw new McpError(ErrorCode.MethodNotFound, `Unknown: ${name}`);
 
       end();
@@ -983,9 +1329,9 @@ function createMcpServer(sid) {
 // Rate limiters
 // ---------------------------------------------------------------------------
 const sseRL = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 20,
+  windowMs: 60 * 1000, max: 60,
   standardHeaders: true, legacyHeaders: false,
-  message: { error: 'Too many connection attempts - try again in 15 minutes' },
+  message: { error: 'Too many connection attempts - try again shortly' },
   keyGenerator: (req) => {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
@@ -993,7 +1339,7 @@ const sseRL = rateLimit({
       const sess = loadSessions()[token];
       if (sess?.sub) { req._rlSess = sess; return sess.sub; }
     }
-    return req.ip;
+    return ipKeyGenerator(req);
   },
   handler: (req, res, next, options) => {
     const key = req.rateLimit?.key || req.ip;
@@ -1007,7 +1353,7 @@ const messagesRL = rateLimit({
   windowMs: 60 * 1000, max: 100,
   standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many tool calls - slow down' },
-  keyGenerator: (req) => subBySid.get(req.query.sessionId) || req.ip,
+  keyGenerator: (req) => subBySid.get(req.query.sessionId) || ipKeyGenerator(req),
   handler: (req, res, next, options) => {
     const key = req.rateLimit?.key || req.ip;
     metricRateLimited.inc({ entity: PREFIX, route: 'messages' });
@@ -1030,6 +1376,7 @@ const deepHealthRL = rateLimit({
 // Express app
 // ---------------------------------------------------------------------------
 const app = express();
+app.set('trust proxy', 1);
 app.use((req, res, next) =>
   req.path === '/messages' ? next() : express.json()(req, res, next)
 );
@@ -1101,6 +1448,18 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   const sid = transport.sessionId;
   const srv = createMcpServer(sid);
 
+  // Evict any previous stale connection for this user
+  const prevSid = subToSid.get(req.auth.sub);
+  if (prevSid && transports.has(prevSid)) {
+    connLoggers.get(prevSid)?.info('sse_evicted_by_reconnect');
+    transports.get(prevSid).close?.();
+    transports.delete(prevSid);
+    connCreds.delete(prevSid);
+    subBySid.delete(prevSid);
+    connLoggers.delete(prevSid);
+  }
+  subToSid.set(req.auth.sub, sid);
+
   connCreds.set(sid, req.crmCreds);
   transports.set(sid, transport);
   subBySid.set(sid, req.auth.sub);
@@ -1122,6 +1481,7 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
     connCreds.delete(sid);
     subBySid.delete(sid);
     connLoggers.delete(sid);
+    if (subToSid.get(req.auth.sub) === sid) subToSid.delete(req.auth.sub);
     metricActiveConnections.set({ entity: PREFIX }, transports.size);
   });
 

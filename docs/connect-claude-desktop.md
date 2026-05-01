@@ -84,7 +84,7 @@ Fully quit and relaunch Claude Desktop (menu bar > Quit, then reopen).
 
 ## ✅ Verify
 
-Click the hammer icon in the bottom-left of the chat window. You should see 13 tools:
+Click the hammer icon in the bottom-left of the chat window. You should see 24 tools:
 `suitecrm_search`, `suitecrm_get`, etc. (or `suitecrm_crm1_search` for multi entity).
 
 Test prompt: `"List the first 5 accounts in the CRM"` - Claude should call `suitecrm_search` automatically.

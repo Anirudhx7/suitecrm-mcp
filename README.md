@@ -39,7 +39,7 @@ Built from a real production deployment. CData's version is commercial. This one
 
 ## <a name="features"></a>✨ Features
 
-- **13 tools** covering the full CRUD surface: search, get, create, update, delete, count, relationships, module introspection
+- **24 tools** covering full CRUD, activity logging (calls, tasks, notes), bulk operations, file attachments, dropdown introspection, and more
 - **SSE transport** - compatible with Claude Desktop, Claude Code, OpenClaw, and any MCP client that supports HTTP+SSE
 - **OAuth2/OIDC authentication** - users log in via Auth0, Azure AD, or any OIDC provider; the gateway issues personal, revocable API keys
 - **No credentials on client machines** - MCP clients hold only an opaque API key; CRM passwords live on the gateway
@@ -59,15 +59,26 @@ Built from a real production deployment. CData's version is commercial. This one
 | `{prefix}_search` | Search records using SQL WHERE clause |
 | `{prefix}_search_text` | Full-text search across modules |
 | `{prefix}_get` | Get a single record by UUID |
+| `{prefix}_get_many` | Fetch up to 100 records by ID list in one call |
 | `{prefix}_create` | Create a new record |
 | `{prefix}_update` | Update an existing record |
 | `{prefix}_delete` | Soft-delete a record |
 | `{prefix}_count` | Count records matching a query |
+| `{prefix}_bulk_upsert` | Create or update up to 100 records at once |
 | `{prefix}_get_relationships` | Get related records via a link field |
 | `{prefix}_link_records` | Create a relationship between records |
 | `{prefix}_unlink_records` | Remove a relationship |
 | `{prefix}_get_module_fields` | Get field definitions for a module |
+| `{prefix}_get_dropdown_values` | List all dropdowns or get key→label values for one |
 | `{prefix}_list_modules` | List all available CRM modules |
+| `{prefix}_get_recent` | Get recently viewed records for the current user |
+| `{prefix}_get_upcoming_activities` | Get upcoming calls, meetings, and tasks |
+| `{prefix}_get_record_activities` | Get activity history for any record |
+| `{prefix}_log_call` | Create a call and link it to contacts/accounts |
+| `{prefix}_create_task` | Create a task with optional parent record link |
+| `{prefix}_create_note` | Create a note linked to a parent record |
+| `{prefix}_get_note_attachment` | Download a file attachment from a Notes record |
+| `{prefix}_set_note_attachment` | Upload a file attachment to a Notes record |
 | `{prefix}_server_info` | Gateway status and connection info |
 
 Replace `{prefix}` with your configured `SUITECRM_PREFIX` (default: `suitecrm`).
@@ -303,7 +314,7 @@ curl https://mcp.yourserver.com/health
 
 **Verify it's working in Claude Desktop:**
 
-After adding the MCP server config (see [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md)) and restarting Claude Desktop, click the hammer icon. You should see 13 tools: `suitecrm_search`, `suitecrm_get`, etc.
+After adding the MCP server config (see [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md)) and restarting Claude Desktop, click the hammer icon. You should see 24 tools: `suitecrm_search`, `suitecrm_get`, etc.
 
 Try a test prompt: `"List the first 5 accounts in the CRM"` - Claude should call `suitecrm_search` automatically.
 
@@ -355,7 +366,7 @@ curl -s -H "Authorization: Bearer your_api_key_here" \
 
 **6. Connect at:** `http://YOUR_SERVER:8080/<code>/sse` (or `https://your-domain/<code>/sse` if HTTPS is enabled)
 
-**Verify it's working in Claude Desktop:** After restarting Claude Desktop, click the hammer icon. You should see 13 tools per entity: `suitecrm_crm1_search`, `suitecrm_crm2_search`, etc.
+**Verify it's working in Claude Desktop:** After restarting Claude Desktop, click the hammer icon. You should see 24 tools per entity: `suitecrm_crm1_search`, `suitecrm_crm2_search`, etc.
 
 **Add entities later (no downtime on existing):**
 ```bash
@@ -561,7 +572,7 @@ variants, and verification are in the guides above.
 
 **OpenClaw** uses a two-component setup: the gateway runs on a remote server
 (installed via `install.py`) and a bridge plugin runs locally on the OpenClaw
-machine (installed via `install-bridge.py`). The bridge proxies all 13 SuiteCRM
+machine (installed via `install-bridge.py`). The bridge proxies all 24 SuiteCRM
 tools through to the gateway. The OpenClaw guide covers both components end to end.
 
 <p align="right"><a href="#top">↑ back to top</a></p>
