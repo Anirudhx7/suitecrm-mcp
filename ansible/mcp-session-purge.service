@@ -1,0 +1,10 @@
+[Unit]
+Description=Purge expired SuiteCRM MCP sessions
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mcp-admin sessions --purge-expired
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mcp-session-purge

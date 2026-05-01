@@ -141,11 +141,11 @@ action required.
 
 ## ✅ Verify
 
-OpenClaw should now expose 13 tools per entity:
+OpenClaw should now expose 24 tools per entity:
 - `suitecrm_mycrm_search`
 - `suitecrm_mycrm_get`
 - `suitecrm_mycrm_create`
-- ... and 10 more
+- ... and 21 more
 
 Test prompt: `"List the first 5 accounts in the CRM"` - OpenClaw should call
 `suitecrm_mycrm_search` automatically.

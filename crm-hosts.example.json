@@ -1,0 +1,14 @@
+{
+  "crm1": {
+    "ssh_host": "10.0.0.10",
+    "ssh_user": "ubuntu",
+    "ssh_key": "/etc/suitecrm-mcp/ssh-key.pem",
+    "command": "/usr/local/bin/crm-provision-user"
+  },
+  "crm2": {
+    "ssh_host": "10.0.0.11",
+    "ssh_user": "ubuntu",
+    "ssh_key": "/etc/suitecrm-mcp/ssh-key.pem",
+    "command": "SUITECRM_CONFIG=/var/www/crm/config.php /usr/local/bin/crm-provision-user"
+  }
+}

@@ -781,11 +781,11 @@
       "gridPos": { "x": 0, "y": 91, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", tool=~\".*_(search|search_text|get|count|get_relationships|get_module_fields|list_modules|server_info)\"}[5m])) * 60",
+          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", tool=~\".*_(search|search_text|get|get_many|get_relationships|get_module_fields|get_dropdown_values|get_recent|get_note_attachment|get_record_activities|get_upcoming_activities|list_modules|count|server_info)\"}[5m])) * 60",
           "legendFormat": "reads"
         },
         {
-          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", tool=~\".*_(create|update|delete|link_records|unlink_records)\"}[5m])) * 60",
+          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", tool=~\".*_(create|update|delete|bulk_upsert|link_records|unlink_records|log_call|create_task|create_note|set_note_attachment)\"}[5m])) * 60",
           "legendFormat": "writes"
         }
       ],
@@ -806,7 +806,7 @@
       "gridPos": { "x": 12, "y": 91, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "topk(13, sum by (tool) (rate(suitecrm_mcp_tool_calls_total{status=\"error\", entity=~\"$entity\"}[15m])) * 60)",
+          "expr": "topk(24, sum by (tool) (rate(suitecrm_mcp_tool_calls_total{status=\"error\", entity=~\"$entity\"}[15m])) * 60)",
           "legendFormat": "{{tool}}"
         }
       ],

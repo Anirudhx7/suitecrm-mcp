@@ -48,6 +48,9 @@ TOOL_SUFFIXES = [
     "search", "search_text", "get", "create", "update", "delete",
     "count", "get_relationships", "link_records", "unlink_records",
     "get_module_fields", "list_modules", "server_info",
+    "get_many", "bulk_upsert", "get_dropdown_values", "get_recent",
+    "get_note_attachment", "set_note_attachment", "get_upcoming_activities",
+    "log_call", "create_task", "create_note", "get_record_activities",
 ]
 
 def validate_code(c):
