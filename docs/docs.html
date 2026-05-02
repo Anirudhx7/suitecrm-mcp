@@ -1,0 +1,1623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Docs - SuiteCRM-mcp</title>
+  <meta name="description" content="Full documentation for suitecrm-mcp: setup guide, Auth0/Azure AD configuration, and client connection guides." />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-2 -2 28 28' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15.536 11.293a1 1 0 0 0 0 1.414l2.376 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414l-2.377-2.377a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M2.297 11.293a1 1 0 0 0 0 1.414l2.377 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414L6.088 8.916a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M8.916 17.912a1 1 0 0 0 0 1.415l2.377 2.376a1 1 0 0 0 1.414 0l2.377-2.376a1 1 0 0 0 0-1.415l-2.377-2.376a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M8.916 4.674a1 1 0 0 0 0 1.414l2.377 2.376a1 1 0 0 0 1.414 0l2.377-2.376a1 1 0 0 0 0-1.414l-2.377-2.377a1 1 0 0 0-1.414 0z'/%3E%3C/svg%3E" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Docs - SuiteCRM-mcp" />
+  <meta property="og:description" content="Full documentation for SuiteCRM-mcp: setup guide, Auth0/Azure AD configuration, and client connection guides for Claude Desktop, Claude Code, and OpenClaw." />
+  <meta property="og:url" content="https://anirudhx7.github.io/suitecrm-mcp/docs.html" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Docs - SuiteCRM-mcp" />
+  <meta name="twitter:description" content="Setup guide, Auth0/Azure AD config, Claude Desktop, Claude Code, and OpenClaw connection guides for SuiteCRM-mcp." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #080a0e;
+      --bg-card: rgba(13, 16, 24, 0.75);
+      --accent: #c45d25;
+      --accent-amber: #f59e0b;
+      --accent-glow: rgba(196, 93, 37, 0.35);
+      --text-primary: #eceef4;
+      --text-secondary: #9da3b8;
+      --text-muted: #5c6280;
+      --border-subtle: rgba(196, 93, 37, 0.12);
+      --border-medium: rgba(196, 93, 37, 0.25);
+      --border-glass: rgba(255, 255, 255, 0.06);
+      --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      --sidebar-w: 268px;
+      --nav-h: 64px;
+      --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+
+    body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      font-weight: 400;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Grain */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 2;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.5'/%3E%3C/svg%3E");
+      background-size: 280px 280px;
+    }
+
+    /* Gradient mesh */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.10;
+      background:
+        radial-gradient(ellipse at 10% 20%, rgba(196, 93, 37, 0.22) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 70%, rgba(245, 158, 11, 0.14) 0%, transparent 45%);
+    }
+
+    /* Grid overlay */
+    .grid-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(196, 93, 37, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(196, 93, 37, 0.04) 1px, transparent 1px);
+      background-size: 60px 60px;
+    }
+
+    /* Scroll progress */
+    #scroll-progress {
+      position: fixed;
+      top: 0; left: 0;
+      height: 2px;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-amber));
+      z-index: 10002;
+      transition: width 0.1s linear;
+    }
+
+    /* Nav */
+    .top-nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding: 20px 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      background: rgba(8, 10, 14, 0.82);
+      border-bottom: 1px solid var(--border-subtle);
+      z-index: 1000;
+      transition: background 0.5s var(--ease-smooth), box-shadow 0.5s var(--ease-smooth), border-color 0.5s var(--ease-smooth);
+    }
+    .nav-logo {
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: var(--text-primary);
+      text-decoration: none;
+    }
+    .nav-logo span { color: var(--accent); }
+    .nav-links { display: flex; align-items: center; gap: 32px; }
+    .nav-links a {
+      font-size: 13px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.4s var(--ease-smooth);
+      position: relative;
+    }
+    .nav-links a::after {
+      content: '';
+      position: absolute;
+      bottom: -4px; left: 0;
+      height: 1px; width: 0;
+      background: linear-gradient(90deg, var(--accent), var(--accent-amber));
+      transition: width 0.4s var(--ease-smooth);
+    }
+    .nav-links a:hover { color: var(--text-primary); }
+    .nav-links a:hover::after { width: 100%; }
+    .nav-links a.nav-active { color: #e8915a; }
+    .nav-links a.nav-active::after { width: 100%; }
+
+    /* Hamburger (mobile) */
+    .nav-hamburger {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      cursor: pointer;
+      padding: 4px;
+      background: none;
+      border: none;
+    }
+    .nav-hamburger span {
+      display: block;
+      width: 20px;
+      height: 2px;
+      background: var(--text-secondary);
+      border-radius: 2px;
+      transition: all 0.3s;
+    }
+
+    /* Layout */
+    .docs-layout {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      position: relative;
+      z-index: 10;
+      margin-top: var(--nav-h);
+      min-height: calc(100vh - var(--nav-h));
+    }
+
+    /* Sidebar */
+    .sidebar {
+      position: sticky;
+      top: var(--nav-h);
+      height: calc(100vh - var(--nav-h));
+      overflow-y: auto;
+      padding: 28px 0 40px;
+      border-right: 1px solid var(--border-subtle);
+      background: rgba(8, 10, 14, 0.85);
+      backdrop-filter: blur(12px);
+      scrollbar-width: thin;
+      scrollbar-color: rgba(196,93,37,0.2) transparent;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(196,93,37,0.2); border-radius: 2px; }
+
+    .sidebar-group {
+      margin-bottom: 28px;
+      padding: 0 20px;
+    }
+    .sidebar-group-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      padding: 0 8px;
+    }
+    .sidebar-nav { display: flex; flex-direction: column; gap: 1px; }
+    .sidebar-nav a {
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      text-decoration: none;
+      padding: 7px 10px;
+      border-radius: 6px;
+      transition: all 0.2s;
+      position: relative;
+    }
+    .sidebar-nav a:hover { color: #fff; background: rgba(196,93,37,0.1); }
+    .sidebar-nav a.active {
+      color: #e8915a;
+      background: rgba(196, 93, 37, 0.14);
+      font-weight: 700;
+    }
+    .sidebar-nav a.active::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 50%;
+      transform: translateY(-50%);
+      width: 3px; height: 16px;
+      background: var(--accent);
+      border-radius: 0 2px 2px 0;
+    }
+    .sidebar-nav a.sub {
+      font-size: 0.81rem;
+      font-weight: 400;
+      padding-left: 22px;
+      color: var(--text-muted);
+    }
+    .sidebar-nav a.sub:hover { color: var(--text-secondary); background: rgba(196,93,37,0.05); }
+    .sidebar-nav a.sub.active { color: #e8915a; font-weight: 500; }
+
+    /* Main content */
+    .docs-main {
+      flex: 1;
+      min-width: 0;
+      padding: 48px 56px 80px 56px;
+    }
+
+    /* Doc section */
+    .doc-section {
+      padding-bottom: 64px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 64px;
+    }
+    .doc-section:last-child { border-bottom: none; }
+
+    .doc-section h1 {
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-weight: 800;
+      letter-spacing: -0.025em;
+      margin-bottom: 8px;
+      color: var(--text-primary);
+    }
+    .doc-section .section-desc {
+      font-size: 0.95rem;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .doc-section h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.015em;
+      margin: 36px 0 14px;
+    }
+    .doc-section h2:first-of-type { margin-top: 0; }
+    .doc-section h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 24px 0 10px;
+    }
+    .doc-section p {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      line-height: 1.75;
+      margin-bottom: 14px;
+    }
+    .doc-section ul, .doc-section ol {
+      margin: 0 0 14px 20px;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.75;
+    }
+    .doc-section li { margin-bottom: 4px; }
+    .doc-section code {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: #e8915a;
+      background: rgba(196, 93, 37, 0.1);
+      border: 1px solid rgba(196, 93, 37, 0.2);
+      border-radius: 4px;
+      padding: 1px 6px;
+    }
+    .doc-section a { color: #e8915a; text-decoration: underline; text-underline-offset: 3px; }
+    .doc-section a:hover { color: var(--accent-amber); }
+
+    /* Step badge */
+    .step-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .step-badge .step-num {
+      width: 28px; height: 28px;
+      background: rgba(196, 93, 37, 0.15);
+      border: 1px solid rgba(196, 93, 37, 0.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #e8915a;
+      flex-shrink: 0;
+    }
+    .step-badge .step-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+    }
+
+    /* Code block */
+    .code-block {
+      background: rgba(196, 93, 37, 0.05);
+      border: 1px solid rgba(196, 93, 37, 0.2);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 14px 0 20px;
+      position: relative;
+    }
+    .code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      background: rgba(196, 93, 37, 0.08);
+      border-bottom: 1px solid rgba(196, 93, 37, 0.12);
+    }
+    .code-lang {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .copy-btn {
+      font-size: 0.7rem;
+      font-weight: 600;
+      font-family: var(--font-body);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      background: rgba(8, 10, 14, 0.5);
+      border: 1px solid rgba(196, 93, 37, 0.15);
+      border-radius: 4px;
+      padding: 3px 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover { color: var(--text-primary); border-color: rgba(196, 93, 37, 0.4); }
+    .copy-btn.copied { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); }
+    .code-block pre {
+      padding: 18px 20px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 0.83rem;
+      line-height: 1.8;
+      color: #c9cdd8;
+      white-space: pre;
+    }
+    .code-block pre .cm { color: var(--text-muted); font-style: italic; }
+    .code-block pre .kw { color: #7dd3fc; }
+    .code-block pre .st { color: #86efac; }
+    .code-block pre .pn { color: #4ade80; }
+
+    /* Callout */
+    .callout {
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin: 14px 0 20px;
+      font-size: 0.88rem;
+      line-height: 1.65;
+      color: var(--text-secondary);
+    }
+    .callout-info {
+      background: rgba(196, 93, 37, 0.07);
+      border-left: 3px solid var(--accent);
+    }
+    .callout-warn {
+      background: rgba(245, 158, 11, 0.07);
+      border-left: 3px solid var(--accent-amber);
+    }
+    .callout strong { color: #e8915a; font-weight: 600; }
+    .callout code {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: #e8915a;
+      background: rgba(196, 93, 37, 0.12);
+      border: 1px solid rgba(196, 93, 37, 0.2);
+      border-radius: 3px;
+      padding: 1px 5px;
+    }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; margin: 14px 0 20px; border-radius: 8px; border: 1px solid rgba(196,93,37,0.18); }
+    .docs-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .docs-table thead tr { background: rgba(196, 93, 37, 0.1); }
+    .docs-table th {
+      padding: 10px 14px;
+      text-align: left;
+      font-weight: 700;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #e8915a;
+      border-bottom: 1px solid rgba(196,93,37,0.2);
+      white-space: nowrap;
+    }
+    .docs-table td {
+      padding: 10px 14px;
+      color: var(--text-secondary);
+      border-bottom: 1px solid rgba(196,93,37,0.08);
+      vertical-align: top;
+      line-height: 1.6;
+    }
+    .docs-table tbody tr:last-child td { border-bottom: none; }
+    .docs-table tbody tr:hover td { background: rgba(196,93,37,0.04); }
+    .docs-table code {
+      font-family: var(--font-mono);
+      font-size: 0.79rem;
+      color: #e8915a;
+      background: rgba(196, 93, 37, 0.1);
+      border: 1px solid rgba(196, 93, 37, 0.2);
+      border-radius: 3px;
+      padding: 1px 5px;
+    }
+
+    /* Subsection divider */
+    .sub-divider {
+      border: none;
+      border-top: 1px solid var(--border-subtle);
+      margin: 32px 0;
+    }
+
+    /* Inline path pill */
+    .path {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: #7dd3fc;
+      background: rgba(125, 211, 252, 0.08);
+      border: 1px solid rgba(125, 211, 252, 0.15);
+      border-radius: 4px;
+      padding: 1px 6px;
+    }
+
+    /* Mobile sidebar overlay */
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 998;
+    }
+    .sidebar-overlay.visible { display: block; }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .docs-main { padding: 40px 36px 60px; }
+    }
+    @media (max-width: 768px) {
+      .docs-layout { grid-template-columns: 1fr; }
+      .sidebar {
+        display: none;
+        position: fixed;
+        top: var(--nav-h);
+        left: 0;
+        bottom: 0;
+        height: auto;
+        width: min(var(--sidebar-w), 85vw);
+        z-index: 999;
+        background: rgba(8, 10, 14, 0.97);
+      }
+      .sidebar.open { display: block; }
+      .docs-main { padding: 32px 20px 60px; }
+      .top-nav { padding: 16px 20px; }
+      .nav-hamburger { display: flex; }
+      .nav-links a { display: none; }
+      .code-block pre { font-size: 0.76rem; }
+      .docs-table { font-size: 0.78rem; }
+    }
+    /* Sidebar search */
+    .sidebar-search {
+      padding: 0 20px 16px;
+    }
+    .sidebar-search input {
+      width: 100%;
+      padding: 8px 12px;
+      background: rgba(196, 93, 37, 0.06);
+      border: 1px solid rgba(196, 93, 37, 0.2);
+      border-radius: 6px;
+      font-family: var(--font-body);
+      font-size: 0.83rem;
+      color: var(--text-primary);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .sidebar-search input::placeholder { color: var(--text-muted); }
+    .sidebar-search input:focus { border-color: rgba(196, 93, 37, 0.5); }
+    .sidebar-nav a.hidden { display: none; }
+
+    /* Back to top */
+    .back-to-top {
+      position: fixed;
+      bottom: 32px;
+      right: 32px;
+      width: 40px;
+      height: 40px;
+      background: rgba(196, 93, 37, 0.15);
+      border: 1px solid rgba(196, 93, 37, 0.35);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 500;
+      color: #e8915a;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(10px);
+      transition: opacity 0.25s var(--ease-smooth), transform 0.25s var(--ease-smooth), background 0.2s, box-shadow 0.2s;
+    }
+    .back-to-top:hover {
+      background: rgba(196, 93, 37, 0.28);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(196, 93, 37, 0.25);
+    }
+    .back-to-top.visible {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+
+    @keyframes page-in {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    body { animation: page-in 0.25s var(--ease-smooth) both; }
+    body.page-exit {
+      opacity: 0;
+      transition: opacity 0.2s var(--ease-smooth);
+      pointer-events: none;
+    }
+
+    .arch-diagram {
+      background: #080a0e;
+      border: 1px solid rgba(196,93,37,0.2);
+      border-radius: 12px;
+      padding: 12px 10px;
+      overflow-x: auto;
+      margin: 24px 0;
+      max-width: 860px;
+    }
+    .arch-diagram svg { width: 100%; min-width: 420px; display: block; }
+  </style>
+</head>
+<body>
+
+<div id="scroll-progress"></div>
+<button class="back-to-top" id="back-to-top" onclick="smoothScrollTop()" aria-label="Back to top">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+</button>
+<div class="grid-overlay"></div>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- Navigation -->
+<nav class="top-nav">
+  <a href="index.html" class="nav-logo">Suite<span>CRM</span>-mcp</a>
+  <div class="nav-links">
+    <button class="nav-hamburger" onclick="toggleSidebar()" aria-label="Toggle sidebar">
+      <span></span><span></span><span></span>
+    </button>
+    <a href="index.html">Home</a>
+    <a href="docs.html" class="nav-active">Docs</a>
+    <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<div class="docs-layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-search">
+      <input type="text" id="sidebar-search-input" aria-label="Search docs" placeholder="Search docs..." oninput="filterSidebar(this.value)" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-label">Getting Started</div>
+      <nav class="sidebar-nav">
+        <a href="#setup-guide" class="active">Setup Guide</a>
+        <a href="#setup-overview" class="sub">Overview</a>
+        <a href="#setup-install" class="sub">Install steps 1-4</a>
+        <a href="#setup-crm-prep" class="sub">CRM prep (steps 5-6)</a>
+        <a href="#setup-test" class="sub">Test &amp; connect</a>
+        <a href="#setup-admin" class="sub">Admin operations</a>
+        <a href="#setup-files" class="sub">File layout</a>
+        <a href="#auth-setup">Identity Provider</a>
+        <a href="#auth-auth0" class="sub">Auth0</a>
+        <a href="#auth-azure" class="sub">Azure AD</a>
+        <a href="#auth-prompts" class="sub">Installer prompts</a>
+      </nav>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-label">Connect Clients</div>
+      <nav class="sidebar-nav">
+        <a href="#connect-desktop">Claude Desktop</a>
+        <a href="#desktop-config" class="sub">Config &amp; JSON</a>
+        <a href="#desktop-troubleshoot" class="sub">Troubleshooting</a>
+        <a href="#connect-code">Claude Code</a>
+        <a href="#code-commands" class="sub">Commands</a>
+        <a href="#code-troubleshoot" class="sub">Troubleshooting</a>
+        <a href="#connect-openclaw">OpenClaw</a>
+        <a href="#openclaw-install" class="sub">Installation</a>
+        <a href="#openclaw-auth" class="sub">Auth flow</a>
+        <a href="#openclaw-troubleshoot" class="sub">Troubleshooting</a>
+      </nav>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="docs-main">
+
+    <!-- ======================================================= -->
+    <!-- SETUP GUIDE                                              -->
+    <!-- ======================================================= -->
+    <section class="doc-section" id="setup-guide">
+      <h1>Complete Setup Guide</h1>
+      <p class="section-desc">End-to-end guide for deploying suitecrm-mcp v3.1+ from scratch.</p>
+
+      <h2 id="setup-overview">Overview</h2>
+      <div class="arch-diagram">
+        <svg viewBox="0 0 680 410" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif">
+          <defs>
+            <marker id="arr-orange" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#c45d25"/>
+            </marker>
+            <marker id="arr-muted" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#5c6280"/>
+            </marker>
+          </defs>
+
+          <!-- Identity Provider -->
+          <rect x="12" y="30" width="155" height="80" rx="7" fill="#0d1118" stroke="#c45d25" stroke-width="1.5"/>
+          <text x="89" y="64" text-anchor="middle" fill="#e8915a" font-size="11" font-weight="600">Auth0 / Azure AD</text>
+          <text x="89" y="82" text-anchor="middle" fill="#9da3b8" font-size="10">Identity Provider</text>
+
+          <!-- MCP Clients container -->
+          <rect x="242" y="12" width="428" height="108" rx="8" fill="#0d1118" fill-opacity="0.5" stroke="rgba(196,93,37,0.4)" stroke-width="1.5"/>
+          <text x="456" y="32" text-anchor="middle" fill="#eceef4" font-size="11" font-weight="600">MCP Clients</text>
+          <rect x="257" y="40" width="118" height="66" rx="5" fill="#0d1118" stroke="rgba(196,93,37,0.35)" stroke-width="1"/>
+          <text x="316" y="77" text-anchor="middle" fill="#eceef4" font-size="10" font-weight="500">Claude Desktop</text>
+          <rect x="390" y="40" width="108" height="66" rx="5" fill="#0d1118" stroke="rgba(196,93,37,0.35)" stroke-width="1"/>
+          <text x="444" y="77" text-anchor="middle" fill="#eceef4" font-size="10" font-weight="500">Claude Code</text>
+          <rect x="514" y="40" width="140" height="66" rx="5" fill="#0d1118" stroke="rgba(196,93,37,0.35)" stroke-width="1"/>
+          <text x="584" y="77" text-anchor="middle" fill="#eceef4" font-size="10" font-weight="500">OpenClaw</text>
+
+          <!-- Gateway -->
+          <rect x="12" y="182" width="656" height="72" rx="8" fill="#c45d25" fill-opacity="0.12" stroke="#c45d25" stroke-width="2"/>
+          <text x="340" y="212" text-anchor="middle" fill="#e8915a" font-size="12" font-weight="700">suitecrm-mcp gateway</text>
+          <text x="340" y="232" text-anchor="middle" fill="#9da3b8" font-size="10">OAuth2 · API keys · SSE</text>
+
+          <!-- SuiteCRM Instances container -->
+          <rect x="12" y="300" width="656" height="102" rx="8" fill="#0d1118" fill-opacity="0.5" stroke="rgba(196,93,37,0.35)" stroke-width="1.5"/>
+          <text x="340" y="322" text-anchor="middle" fill="#eceef4" font-size="11" font-weight="600">SuiteCRM Instances</text>
+
+          <!-- CRM A cylinder -->
+          <ellipse cx="153" cy="382" rx="44" ry="8" fill="#111420" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <rect x="109" y="334" width="88" height="48" fill="#0d1118"/>
+          <line x1="109" y1="334" x2="109" y2="382" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <line x1="197" y1="334" x2="197" y2="382" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <ellipse cx="153" cy="334" rx="44" ry="8" fill="#0d1118" stroke="rgba(196,93,37,0.5)" stroke-width="1.2"/>
+          <text x="153" y="362" text-anchor="middle" fill="#eceef4" font-size="10.5" font-weight="500">CRM A</text>
+
+          <!-- CRM B cylinder -->
+          <ellipse cx="340" cy="382" rx="44" ry="8" fill="#111420" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <rect x="296" y="334" width="88" height="48" fill="#0d1118"/>
+          <line x1="296" y1="334" x2="296" y2="382" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <line x1="384" y1="334" x2="384" y2="382" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <ellipse cx="340" cy="334" rx="44" ry="8" fill="#0d1118" stroke="rgba(196,93,37,0.5)" stroke-width="1.2"/>
+          <text x="340" y="362" text-anchor="middle" fill="#eceef4" font-size="10.5" font-weight="500">CRM B</text>
+
+          <!-- CRM X cylinder -->
+          <ellipse cx="527" cy="382" rx="44" ry="8" fill="#111420" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <rect x="483" y="334" width="88" height="48" fill="#0d1118"/>
+          <line x1="483" y1="334" x2="483" y2="382" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <line x1="571" y1="334" x2="571" y2="382" stroke="rgba(196,93,37,0.4)" stroke-width="1"/>
+          <ellipse cx="527" cy="334" rx="44" ry="8" fill="#0d1118" stroke="rgba(196,93,37,0.5)" stroke-width="1.2"/>
+          <text x="527" y="362" text-anchor="middle" fill="#eceef4" font-size="10.5" font-weight="500">CRM X</text>
+
+          <!-- IdP -> Gateway (dashed) -->
+          <line x1="89" y1="110" x2="89" y2="180" stroke="#5c6280" stroke-width="1.3" stroke-dasharray="4,3" marker-end="url(#arr-muted)"/>
+          <text x="96" y="150" fill="#9da3b8" font-size="9">issues API key on login</text>
+
+          <!-- MCP Clients -> Gateway -->
+          <line x1="456" y1="120" x2="456" y2="180" stroke="#c45d25" stroke-width="1.5" marker-end="url(#arr-orange)"/>
+          <text x="462" y="157" fill="#9da3b8" font-size="9">Bearer token</text>
+
+          <!-- Gateway -> SuiteCRM -->
+          <line x1="340" y1="254" x2="340" y2="298" stroke="#c45d25" stroke-width="1.5" marker-end="url(#arr-orange)"/>
+          <text x="348" y="280" fill="#9da3b8" font-size="9">v4_1 REST API</text>
+        </svg>
+      </div>
+      <p>What the gateway does:</p>
+      <ul>
+        <li>Handles OAuth2 login (Authorization Code flow)</li>
+        <li>Issues personal, revocable API keys to authenticated users</li>
+        <li>Provisions CRM accounts via SSH on first login (if configured)</li>
+        <li>Proxies MCP tool calls to the appropriate SuiteCRM instance</li>
+      </ul>
+
+      <hr class="sub-divider" />
+      <h2 id="setup-install">Steps 1-4: Install</h2>
+
+      <div class="step-badge"><div class="step-num">1</div><span class="step-label">Identity Provider</span></div>
+      <p>Set up Auth0 or Azure AD <strong>before</strong> installing the gateway. The installer will prompt for the credentials you collect here.</p>
+      <p>See <a href="#auth-setup">Identity Provider Setup</a> for step-by-step instructions. Minimum required:</p>
+      <ul>
+        <li>OIDC issuer URL</li>
+        <li>OAuth client ID and client secret</li>
+        <li>Redirect URI registered: <code>https://YOUR_GATEWAY_DOMAIN/auth/callback</code></li>
+      </ul>
+
+      <div class="step-badge" style="margin-top:24px;"><div class="step-num">2</div><span class="step-label">Prepare the Gateway VM</span></div>
+      <p>Requirements: Ubuntu 20.04+ (or Debian 11+), public IP or domain, ports 80 and 443 open, SSH access to CRM VMs if using SSH provisioning.</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>git clone https://github.com/Anirudhx7/suitecrm-mcp.git
+cd suitecrm-mcp</pre>
+      </div>
+
+      <div class="step-badge"><div class="step-num">3</div><span class="step-label">Configure Entities</span></div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>cp entities.example.json entities.json</pre>
+      </div>
+      <p>Edit <code>entities.json</code>:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">json</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>{
+  "crm1": {
+    "label": "Main CRM",
+    "endpoint": "https://crm.yourcompany.com/legacy/service/v4_1/rest.php",
+    "port": 3101,
+    "group": "CRM-Main"
+  }
+}</pre>
+      </div>
+      <ul>
+        <li><code>endpoint</code> - full REST API URL. If unsure, leave as the base URL and the installer auto-detects the correct path.</li>
+        <li><code>group</code> - the JWT claim value a user must have to access this entity. Must match a role/group in your identity provider.</li>
+        <li><code>port</code> - each entity gets its own port (3101, 3102, ...). With nginx these are internal-only.</li>
+      </ul>
+      <p>Finding your REST API path:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>for path in /service/v4_1/rest.php /legacy/service/v4_1/rest.php /crm/service/v4_1/rest.php; do
+  curl -sf -X POST "https://crm.example.com$path" \
+    --data-urlencode 'method=get_server_info' \
+    --data-urlencode 'input_type=JSON' \
+    --data-urlencode 'response_type=JSON' \
+    --data-urlencode 'rest_data={}' | python3 -m json.tool &amp;&amp; echo "FOUND: $path" &amp;&amp; break
+done</pre>
+      </div>
+
+      <div class="step-badge"><div class="step-num">4</div><span class="step-label">Install the Gateway</span></div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install.py \
+  --config entities.json \
+  --domain mcp.yourcompany.com \
+  --email you@yourcompany.com</pre>
+      </div>
+      <p>The installer will: install Node.js, nginx, and certbot; prompt for OAuth2 configuration; generate a random <code>API_KEY_SECRET</code>; write env files to <code>/etc/suitecrm-mcp/</code>; create and start systemd services; configure nginx with entity routing; and obtain a Let's Encrypt certificate.</p>
+      <p>Non-interactive install (CI/automation):</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install.py \
+  --config entities.json \
+  --domain mcp.yourcompany.com \
+  --email you@yourcompany.com \
+  --oauth-issuer https://your-tenant.auth0.com \
+  --oauth-client-id YOUR_CLIENT_ID \
+  --oauth-client-secret YOUR_CLIENT_SECRET \
+  --oauth-audience https://your-tenant.auth0.com/api/v2/ \
+  --gateway-url https://mcp.yourcompany.com</pre>
+      </div>
+
+      <hr class="sub-divider" />
+      <h2 id="setup-crm-prep">Steps 5-6: CRM Prep</h2>
+
+      <div class="step-badge"><div class="step-num">5</div><span class="step-label">Prepare CRM Accounts (LDAP/SSO users only)</span></div>
+      <p>If users authenticate via LDAP or SSO, they have no local SuiteCRM password. The gateway needs a local password to call the REST API on their behalf.</p>
+      <div class="callout callout-info"><strong>Note:</strong> For local SuiteCRM users, ensure <strong>API access is enabled</strong> in SuiteCRM Admin &gt; User Management &gt; Edit User &gt; Advanced tab &gt; API Access = Yes.</div>
+      <p>Copy <code>tools/crm-provision-user.sh</code> to each CRM VM and run as root:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Single user</span>
+sudo crm-provision-user alice SecurePass123
+
+<span class="cm"># Bulk from CSV (username,password)</span>
+sudo crm-provision-user --csv users.csv</pre>
+      </div>
+
+      <div class="step-badge"><div class="step-num">6</div><span class="step-label">Configure SSH Provisioning (optional)</span></div>
+      <p>Lets the gateway automatically provision CRM accounts when users first log in via OAuth.</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># On the gateway VM, generate a key if you don't have one</span>
+ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N ""
+
+<span class="cm"># Copy to each CRM VM</span>
+ssh-copy-id -i /root/.ssh/id_ed25519.pub root@crm1.internal</pre>
+      </div>
+      <p>Create <code>/etc/suitecrm-mcp/crm-hosts.json</code>:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">json</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>{
+  "crm1": {
+    "ssh_host": "crm1.internal",
+    "ssh_user": "ubuntu",
+    "ssh_key": "/etc/suitecrm-mcp/crm-ssh-key"
+  }
+}</pre>
+      </div>
+      <p>Add to the entity env file (<code>/etc/suitecrm-mcp/crm1.env</code>):</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">env</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>CRM_HOSTS_FILE=/etc/suitecrm-mcp/crm-hosts.json</pre>
+      </div>
+      <p>Restart: <code>sudo systemctl restart suitecrm-mcp-crm1</code></p>
+
+      <hr class="sub-divider" />
+      <h2 id="setup-test">Steps 7-8: Test &amp; Connect</h2>
+
+      <div class="step-badge"><div class="step-num">7</div><span class="step-label">Test the Auth Flow</span></div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Check services are running</span>
+sudo python3 install.py --status
+
+<span class="cm"># Test gateway health</span>
+curl https://mcp.yourcompany.com/health
+
+<span class="cm"># Test auth redirect (should return 302 Location: /auth/login)</span>
+curl -I https://mcp.yourcompany.com/
+
+<span class="cm"># Test OIDC discovery</span>
+curl https://YOUR_OAUTH_ISSUER/.well-known/openid-configuration</pre>
+      </div>
+      <p>Visit <code>https://mcp.yourcompany.com</code> in a browser and complete the login flow. You should see the success page with your API key.</p>
+
+      <div class="step-badge"><div class="step-num">8</div><span class="step-label">Connect Clients</span></div>
+      <ul>
+        <li><a href="#connect-desktop">Claude Desktop setup</a></li>
+        <li><a href="#connect-code">Claude Code setup</a></li>
+        <li><a href="#connect-openclaw">OpenClaw setup</a></li>
+      </ul>
+
+      <hr class="sub-divider" />
+      <h2 id="setup-admin">Admin Operations</h2>
+
+      <h3>Periodic session cleanup</h3>
+      <p><code>sessions.json</code> accumulates expired entries over time. Safe to run at any time:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Purge expired sessions</span>
+python3 tools/mcp-admin sessions --purge-expired
+
+<span class="cm"># Example cron: daily at 2am</span>
+echo "0 2 * * * suitecrm-mcp python3 /opt/suitecrm-mcp/tools/mcp-admin sessions --purge-expired" | sudo crontab -</pre>
+      </div>
+
+      <h3>Manage user profiles and API keys</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>python3 tools/mcp-admin list
+python3 tools/mcp-admin whoami --sub &lt;sub&gt;
+python3 tools/mcp-admin revoke --sub &lt;sub&gt;</pre>
+      </div>
+
+      <h3>Add a user manually (bypass OAuth)</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>python3 tools/mcp-admin add --sub &lt;sub&gt; --entity &lt;entity_code&gt; --user &lt;crm_username&gt; --pass &lt;crm_password&gt;</pre>
+      </div>
+
+      <h3>Update server code without reinstalling</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>git pull
+sudo python3 install.py --update --config entities.json --skip-oauth</pre>
+      </div>
+
+      <h3>Add a new entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Edit entities.json to add the new entry, then:</span>
+sudo python3 install.py --add --config entities.json --skip-oauth</pre>
+      </div>
+
+      <h3>Remove an entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install.py --remove crm2</pre>
+      </div>
+
+      <h3>Enable HTTPS on an existing plain HTTP install</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --email you@example.com --skip-oauth</pre>
+      </div>
+
+      <hr class="sub-divider" />
+      <h2 id="setup-files">File Layout After Install</h2>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">filesystem</span></div>
+        <pre>/opt/suitecrm-mcp/           gateway server code
+  index.mjs
+  auth.mjs
+  package.json
+  node_modules/
+
+/etc/suitecrm-mcp/           config and runtime state (mode 700, owned by suitecrm-mcp)
+  entities.json              entity list (written by installer)
+  auth.env                   env vars for auth service (mode 600)
+  crm1.env                   env vars for entity crm1 (mode 600)
+  user-profiles.json         per-user API keys and CRM creds (mode 600, written at runtime)
+  sessions.json              active gateway sessions (mode 600, written at runtime)
+  crm-hosts.json             SSH host map for provisioning (if configured)
+  domain                     saved domain for nginx rebuild
+
+/etc/systemd/system/
+  suitecrm-mcp-auth.service
+  suitecrm-mcp-crm1.service
+
+/etc/nginx/sites-available/
+  suitecrm-mcp               nginx config with entity and /auth/ routing</pre>
+      </div>
+    </section>
+
+
+    <!-- ======================================================= -->
+    <!-- AUTH SETUP                                               -->
+    <!-- ======================================================= -->
+    <section class="doc-section" id="auth-setup">
+      <h1>Identity Provider Setup</h1>
+      <p class="section-desc">The gateway supports any OIDC-compliant provider. This guide covers Auth0 and Azure AD, the two most common configurations.</p>
+
+      <h2 id="auth-auth0">Auth0</h2>
+
+      <h3>1. Create a Regular Web Application</h3>
+      <ol>
+        <li>Log in to the <a href="https://manage.auth0.com" target="_blank" rel="noopener">Auth0 Dashboard</a></li>
+        <li>Go to <strong>Applications &gt; Applications &gt; Create Application</strong></li>
+        <li>Name it (e.g. <code>SuiteCRM MCP Gateway</code>)</li>
+        <li>Choose <strong>Regular Web Application</strong> - required for Authorization Code flow</li>
+        <li>Click <strong>Create</strong></li>
+      </ol>
+
+      <h3>2. Configure the application</h3>
+      <p>On the <strong>Settings</strong> tab:</p>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Field</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Allowed Callback URLs</td><td><code>https://YOUR_GATEWAY/auth/callback</code></td></tr>
+            <tr><td>Allowed Logout URLs</td><td><code>https://YOUR_GATEWAY</code></td></tr>
+            <tr><td>Allowed Web Origins</td><td><code>https://YOUR_GATEWAY</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Under <strong>Advanced Settings &gt; Grant Types</strong>, ensure <strong>Authorization Code</strong> and <strong>Refresh Token</strong> are checked. Under <strong>Advanced Settings &gt; OAuth</strong>, set JWT Signature Algorithm to <strong>RS256</strong>. Click <strong>Save Changes</strong>.</p>
+
+      <h3>3. Note your credentials</h3>
+      <p>From the Settings tab, copy:</p>
+      <ul>
+        <li><strong>Domain</strong> (e.g. <code>your-tenant.auth0.com</code>) - this is your <code>OAUTH_ISSUER</code></li>
+        <li><strong>Client ID</strong> - this is your <code>OAUTH_CLIENT_ID</code></li>
+        <li><strong>Client Secret</strong> - this is your <code>OAUTH_CLIENT_SECRET</code></li>
+      </ul>
+      <p>For <code>OAUTH_AUDIENCE</code>, use the Auth0 Management API identifier (<code>https://your-tenant.auth0.com/api/v2/</code>) or create a custom API in Auth0 &gt; APIs.</p>
+
+      <h3>4. Configure group/role claims</h3>
+      <p>The gateway reads group membership from the JWT to decide which CRM entities a user can access. Auth0 does not include custom claims by default - add an Action:</p>
+      <ol>
+        <li>Go to <strong>Actions &gt; Flows &gt; Login</strong></li>
+        <li>Click <strong>+</strong> to add a custom action</li>
+        <li>Paste this code:</li>
+      </ol>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">javascript</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>exports.onExecutePostLogin = async (event, api) => {
+  const namespace = 'https://suitecrm-mcp/';
+  api.idToken.setCustomClaim(namespace + 'roles', event.authorization?.roles ?? []);
+  api.accessToken.setCustomClaim(namespace + 'roles', event.authorization?.roles ?? []);
+};</pre>
+      </div>
+      <ol start="4">
+        <li>Deploy the action and add it to the Login flow</li>
+      </ol>
+      <p>Then set <code>OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/roles</code> in the gateway env file.</p>
+      <p>In Auth0 &gt; <strong>User Management &gt; Roles</strong>, create roles matching the <code>group</code> field in your <code>entities.json</code> (e.g. <code>CRM-MyCompany</code>). Assign users to roles.</p>
+
+      <h3>5. Connect Azure AD (optional - corporate SSO)</h3>
+      <ol>
+        <li>In Auth0, go to <strong>Authentication &gt; Enterprise &gt; Microsoft Azure AD</strong></li>
+        <li>Create a new connection using your Azure AD tenant ID, client ID, and secret</li>
+        <li>Enable the connection on your SuiteCRM MCP Gateway application</li>
+        <li>Users will see "Log in with Microsoft" on the Auth0 login page</li>
+      </ol>
+
+      <hr class="sub-divider" />
+      <h2 id="auth-azure">Azure AD (direct, without Auth0)</h2>
+      <p>Use this if you want to skip Auth0 and authenticate directly against Azure AD.</p>
+
+      <h3>1. Register an application</h3>
+      <ol>
+        <li>Go to Azure Portal &gt; App registrations &gt; New registration</li>
+        <li>Name: <code>SuiteCRM MCP Gateway</code></li>
+        <li>Supported account types: <strong>Accounts in this organizational directory only</strong></li>
+        <li>Redirect URI: Web - <code>https://YOUR_GATEWAY/auth/callback</code></li>
+        <li>Click <strong>Register</strong></li>
+      </ol>
+
+      <h3>2. Add a client secret</h3>
+      <p><strong>Certificates &amp; secrets &gt; New client secret</strong> - set an expiry and copy the value immediately.</p>
+
+      <h3>3. Configure token claims</h3>
+      <p><strong>Token configuration &gt; Add optional claim &gt; ID token</strong>: add <code>email</code>, <code>preferred_username</code>.</p>
+      <p>For groups: <strong>Token configuration &gt; Add groups claim</strong>. Select Security groups (or All groups). Under each token type, choose Group ID (object ID) or <code>sAMAccountName</code> if synced from on-prem AD.</p>
+      <div class="callout callout-info"><strong>Note:</strong> Azure AD sends group object IDs by default, not names. Set <code>REQUIRED_GROUP</code> in the entity env to the group's object ID, or configure optional claims to emit <code>onpremisessecurityidentifier</code>.</div>
+
+      <h3>4. Note your credentials</h3>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Gateway env var</th><th>Azure AD value</th></tr></thead>
+          <tbody>
+            <tr><td><code>OAUTH_ISSUER</code></td><td><code>https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0</code></td></tr>
+            <tr><td><code>OAUTH_CLIENT_ID</code></td><td>Application (client) ID</td></tr>
+            <tr><td><code>OAUTH_CLIENT_SECRET</code></td><td>Client secret value</td></tr>
+            <tr><td><code>OAUTH_AUDIENCE</code></td><td>Application (client) ID (same as client ID)</td></tr>
+            <tr><td><code>OAUTH_GROUPS_CLAIM</code></td><td><code>groups</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr class="sub-divider" />
+      <h2 id="auth-prompts">Installer Prompts Reference</h2>
+      <p>When you run <code>sudo python3 install.py</code>, the OAuth section asks:</p>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Prompt</th><th>What to enter</th></tr></thead>
+          <tbody>
+            <tr><td>OIDC issuer URL</td><td>Auth0: <code>https://your-tenant.auth0.com</code> / Azure: <code>https://login.microsoftonline.com/TENANT_ID/v2.0</code></td></tr>
+            <tr><td>OAuth client ID</td><td>From your app registration</td></tr>
+            <tr><td>OAuth client secret</td><td>From your app registration (keep this secret)</td></tr>
+            <tr><td>OAuth audience</td><td>Auth0: your API identifier / Azure AD: your client ID</td></tr>
+            <tr><td>Gateway external URL</td><td><code>https://mcp.yourcompany.com</code> - must match the registered callback origin</td></tr>
+            <tr><td>JWT groups claim</td><td>Auth0 with custom action: <code>https://suitecrm-mcp/roles</code> / Azure AD: <code>groups</code> / default: <code>roles</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Verification</h2>
+      <p>After installation, visit <code>https://YOUR_GATEWAY/auth/login</code>. You should be redirected to your identity provider's login page. After logging in, you should see the success page with your API key.</p>
+      <p>If you see an error, check:</p>
+      <ul>
+        <li>The callback URL registered in your identity provider matches exactly</li>
+        <li><code>OAUTH_ISSUER</code> has no trailing slash</li>
+        <li>The <code>/.well-known/openid-configuration</code> endpoint is reachable from the gateway VM: <code>curl https://YOUR_ISSUER/.well-known/openid-configuration</code></li>
+      </ul>
+    </section>
+
+
+    <!-- ======================================================= -->
+    <!-- CLAUDE DESKTOP                                           -->
+    <!-- ======================================================= -->
+    <section class="doc-section" id="connect-desktop">
+      <h1>Connecting Claude Desktop</h1>
+      <p class="section-desc">Claude Desktop connects directly to the gateway via SSE using a gateway-issued API key. No CRM credentials are stored on your machine.</p>
+
+      <h2>How authentication works</h2>
+      <ol>
+        <li>Your admin installs the gateway and configures an identity provider</li>
+        <li>You visit the gateway URL in your browser and log in with your corporate account</li>
+        <li>The success page shows your personal API key - copy it</li>
+        <li>Paste the key into the Claude Desktop config below</li>
+      </ol>
+      <p>Your API key is tied to your identity. The gateway uses it to look up your CRM account and connect on your behalf. Keys expire after 90 days (configurable by your admin).</p>
+
+      <h2>Prerequisites</h2>
+      <ul>
+        <li>Gateway v3.0+ installed and running</li>
+        <li>Claude Desktop installed</li>
+        <li>Your API key from <code>https://YOUR_GATEWAY/auth/login</code></li>
+      </ul>
+
+      <h2>Get your API key</h2>
+      <ol>
+        <li>Visit <code>https://YOUR_GATEWAY/auth/login</code> (or just <code>https://YOUR_GATEWAY</code> - it redirects)</li>
+        <li>Log in with your corporate account</li>
+        <li>On the success page, expand <strong>Claude Desktop</strong> and copy the config block shown</li>
+      </ol>
+      <div class="callout callout-info">The success page shows the exact JSON block ready to paste - you do not need to construct it manually.</div>
+
+      <h2 id="desktop-config">Config file location</h2>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>OS</th><th>Path</th></tr></thead>
+          <tbody>
+            <tr><td>macOS</td><td><span class="path">~/Library/Application Support/Claude/claude_desktop_config.json</span></td></tr>
+            <tr><td>Windows</td><td><span class="path">%APPDATA%\Claude\claude_desktop_config.json</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Single entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">json</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>{
+  "mcpServers": {
+    "suitecrm": {
+      "type": "sse",
+      "url": "https://mcp.yourcompany.com/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
+      }
+    }
+  }
+}</pre>
+      </div>
+
+      <h3>Multi entity</h3>
+      <p>Add one entry per entity. Each entity gets its own <code>/{code}/sse</code> path:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">json</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>{
+  "mcpServers": {
+    "suitecrm_crm1": {
+      "type": "sse",
+      "url": "https://mcp.yourcompany.com/crm1/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
+      }
+    },
+    "suitecrm_crm2": {
+      "type": "sse",
+      "url": "https://mcp.yourcompany.com/crm2/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
+      }
+    }
+  }
+}</pre>
+      </div>
+      <p>The same API key works for all entities you have access to.</p>
+
+      <h2>Apply changes</h2>
+      <p>Fully quit and relaunch Claude Desktop (menu bar &gt; Quit, then reopen).</p>
+
+      <h2>Verify</h2>
+      <p>Click the hammer icon in the bottom-left of the chat window. You should see 24 tools: <code>suitecrm_search</code>, <code>suitecrm_get</code>, etc. (or <code>suitecrm_crm1_search</code> for multi entity).</p>
+      <p>Test prompt: <em>"List the first 5 accounts in the CRM"</em> - Claude should call <code>suitecrm_search</code> automatically.</p>
+
+      <h2>Rotating your API key</h2>
+      <ol>
+        <li>Visit <code>https://YOUR_GATEWAY/auth/login</code> again - a new key is issued automatically</li>
+        <li>Update <code>Authorization</code> in the config file</li>
+        <li>Restart Claude Desktop</li>
+      </ol>
+      <p>Your admin can also revoke a key immediately via <code>mcp-admin revoke &lt;sub&gt;</code>.</p>
+
+      <h2 id="desktop-troubleshoot">Troubleshooting</h2>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>No hammer icon / tools missing</td><td>Config file path wrong or JSON syntax error</td><td>Validate JSON, check file path</td></tr>
+            <tr><td><code>HTTP 401 Unauthorized</code></td><td>API key invalid or expired</td><td>Re-authenticate at <code>/auth/login</code> and update the config</td></tr>
+            <tr><td><code>HTTP 403 Forbidden</code></td><td>Not in the required group for this entity</td><td>Ask your admin to check your group membership</td></tr>
+            <tr><td><code>Connection refused</code></td><td>Gateway not running</td><td>Check with your admin: <code>systemctl status suitecrm-mcp</code></td></tr>
+            <tr><td><code>429 Too Many Requests</code></td><td>Rate limit hit on /sse (20 req/15 min)</td><td>Wait 15 minutes</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+
+    <!-- ======================================================= -->
+    <!-- CLAUDE CODE                                              -->
+    <!-- ======================================================= -->
+    <section class="doc-section" id="connect-code">
+      <h1>Connecting Claude Code (CLI)</h1>
+      <p class="section-desc">Claude Code connects directly to the gateway via SSE using a gateway-issued API key. No CRM credentials are stored on your machine.</p>
+
+      <h2>How authentication works</h2>
+      <ol>
+        <li>Visit the gateway URL in your browser and log in with your corporate account</li>
+        <li>The success page shows your personal API key</li>
+        <li>Run the <code>claude mcp add</code> command shown on the success page - or paste the key into the command below</li>
+      </ol>
+
+      <h2>Prerequisites</h2>
+      <ul>
+        <li>Gateway v3.0+ installed and running</li>
+        <li>Claude Code CLI installed: <code>npm install -g @anthropic-ai/claude-code</code></li>
+        <li>Your API key from <code>https://YOUR_GATEWAY/auth/login</code></li>
+      </ul>
+
+      <h2>Get your API key</h2>
+      <ol>
+        <li>Visit <code>https://YOUR_GATEWAY/auth/login</code></li>
+        <li>Log in with your corporate account</li>
+        <li>On the success page, expand <strong>Claude Code</strong> and copy the ready-to-run command</li>
+      </ol>
+
+      <h2 id="code-commands">Commands</h2>
+      <h3>Single entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>claude mcp add suitecrm \
+  --transport sse \
+  --header "Authorization:Bearer YOUR_API_KEY_HERE" \
+  https://mcp.yourcompany.com/sse</pre>
+      </div>
+
+      <h3>Multi entity</h3>
+      <p>Run once per entity. Each gets its own MCP server entry:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>claude mcp add suitecrm_crm1 \
+  --transport sse \
+  --header "Authorization:Bearer YOUR_API_KEY_HERE" \
+  https://mcp.yourcompany.com/crm1/sse
+
+claude mcp add suitecrm_crm2 \
+  --transport sse \
+  --header "Authorization:Bearer YOUR_API_KEY_HERE" \
+  https://mcp.yourcompany.com/crm2/sse</pre>
+      </div>
+
+      <h2>Verify</h2>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>claude mcp list</pre>
+      </div>
+      <p>Start a session and test:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>claude
+&gt; List the first 5 accounts in the CRM</pre>
+      </div>
+      <p>Claude should call <code>suitecrm_search</code> automatically.</p>
+
+      <h2>Manage entries</h2>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># List all MCP servers</span>
+claude mcp list
+
+<span class="cm"># Remove an entry</span>
+claude mcp remove suitecrm</pre>
+      </div>
+
+      <h2>Rotating your API key</h2>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Remove the old entry</span>
+claude mcp remove suitecrm
+
+<span class="cm"># Re-authenticate, then re-add with the new key</span>
+claude mcp add suitecrm \
+  --transport sse \
+  --header "Authorization:Bearer YOUR_NEW_API_KEY" \
+  https://mcp.yourcompany.com/sse</pre>
+      </div>
+
+      <h2 id="code-troubleshoot">Troubleshooting</h2>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td><code>HTTP 401 Unauthorized</code></td><td>API key invalid or expired</td><td>Re-authenticate at <code>/auth/login</code> and re-add the entry</td></tr>
+            <tr><td><code>HTTP 403 Forbidden</code></td><td>Not in the required group for this entity</td><td>Ask your admin to check your group membership</td></tr>
+            <tr><td><code>Connection refused</code></td><td>Gateway not running</td><td><code>systemctl status suitecrm-mcp</code> on the gateway machine</td></tr>
+            <tr><td><code>429 Too Many Requests</code></td><td>Rate limit hit on /sse (20 req/15 min)</td><td>Wait 15 minutes</td></tr>
+            <tr><td>TLS error with self-signed cert</td><td><code>NODE_TLS_REJECT_UNAUTHORIZED</code> not set</td><td>Add <code>--tls-skip</code> during gateway install</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+
+    <!-- ======================================================= -->
+    <!-- OPENCLAW                                                 -->
+    <!-- ======================================================= -->
+    <section class="doc-section" id="connect-openclaw">
+      <h1>Connecting OpenClaw</h1>
+      <p class="section-desc">OpenClaw uses a two-machine architecture: a remote gateway and a local bridge plugin.</p>
+
+      <h2>Architecture</h2>
+      <div class="arch-diagram">
+        <svg viewBox="0 0 620 168" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif">
+          <defs>
+            <marker id="arr-oc" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#c45d25"/>
+            </marker>
+          </defs>
+
+          <!-- OpenClaw Machine -->
+          <rect x="10" y="14" width="246" height="140" rx="8" fill="#0d1118" fill-opacity="0.5" stroke="rgba(196,93,37,0.4)" stroke-width="1.5"/>
+          <text x="133" y="38" text-anchor="middle" fill="#eceef4" font-size="11" font-weight="600">OpenClaw Machine</text>
+          <text x="133" y="58" text-anchor="middle" fill="#9da3b8" font-size="9.5">OpenClaw runtime</text>
+          <rect x="28" y="68" width="210" height="38" rx="5" fill="#c45d25" fill-opacity="0.1" stroke="rgba(196,93,37,0.5)" stroke-width="1"/>
+          <text x="133" y="92" text-anchor="middle" fill="#e8915a" font-size="10" font-weight="500">suitecrm-{code} plugin</text>
+          <text x="133" y="132" text-anchor="middle" fill="#5c6280" font-size="8.5">~/.suitecrm-mcp/gateway.token</text>
+
+          <!-- SSE arrow -->
+          <line x1="256" y1="84" x2="362" y2="84" stroke="#c45d25" stroke-width="1.8" marker-end="url(#arr-oc)"/>
+          <text x="309" y="77" text-anchor="middle" fill="#9da3b8" font-size="9">SSE</text>
+
+          <!-- Gateway Machine -->
+          <rect x="365" y="14" width="245" height="140" rx="8" fill="#0d1118" fill-opacity="0.5" stroke="rgba(196,93,37,0.4)" stroke-width="1.5"/>
+          <text x="487" y="38" text-anchor="middle" fill="#eceef4" font-size="11" font-weight="600">Gateway Machine</text>
+          <rect x="383" y="50" width="209" height="40" rx="5" fill="#c45d25" fill-opacity="0.12" stroke="#c45d25" stroke-width="1.5"/>
+          <text x="487" y="75" text-anchor="middle" fill="#e8915a" font-size="10.5" font-weight="600">suitecrm-mcp gateway</text>
+          <line x1="487" y1="90" x2="487" y2="118" stroke="#c45d25" stroke-width="1.3" marker-end="url(#arr-oc)"/>
+          <text x="487" y="138" text-anchor="middle" fill="#9da3b8" font-size="9.5">SuiteCRM REST API</text>
+        </svg>
+      </div>
+      <p>The bridge is a Node.js plugin that OpenClaw loads. It is silent at startup - no auth prompt, no polling. Authentication is triggered lazily the first time a SuiteCRM tool is actually called. The bridge requests a one-time login URL from the gateway, returns it as the tool response, and polls in the background. Once the user clicks the link and logs in, the token is saved and all subsequent tool calls work silently. No CLI needed on the OpenClaw machine.</p>
+
+      <h2>Prerequisites</h2>
+      <ul>
+        <li>A dedicated Ubuntu VM or server for the gateway</li>
+        <li>OpenClaw installed on the client machine (Node.js required)</li>
+        <li>Access to the gateway auth URL in a browser</li>
+      </ul>
+
+      <hr class="sub-divider" />
+      <h2 id="openclaw-install">Installation</h2>
+
+      <div class="step-badge"><div class="step-num">1</div><span class="step-label">Install the gateway (gateway machine)</span></div>
+      <h3>Single entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install.py --url https://crm.example.com --domain mcp.example.com --email you@example.com</pre>
+      </div>
+      <h3>Multi entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>cp entities.example.json entities.json
+<span class="cm"># Edit entities.json: add your CRM codes, labels, ports, endpoints, and group names</span>
+sudo python3 install.py --config entities.json --domain mcp.example.com --email you@example.com</pre>
+      </div>
+      <div class="callout callout-warn"><strong>HTTPS strongly recommended.</strong> The <code>--domain</code> flag enables automatic TLS via Let's Encrypt. Without it, API keys travel unencrypted.</div>
+
+      <div class="step-badge"><div class="step-num">2</div><span class="step-label">Install the bridge (OpenClaw machine)</span></div>
+      <h3>Single entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install-bridge.py \
+  --gateway https://mcp.example.com \
+  --code mycrm \
+  --label "My CRM"</pre>
+      </div>
+      <h3>Multi entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install-bridge.py \
+  --gateway https://mcp.example.com \
+  --entities entities.json</pre>
+      </div>
+      <h3>Specific users only</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install-bridge.py --gateway ... --entities entities.json alice bob</pre>
+      </div>
+      <h3>Agent scoping (optional)</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># All agents in OpenClaw get access</span>
+sudo python3 install-bridge.py --gateway ... --code mycrm --attach all
+
+<span class="cm"># Only specific agents (comma-separated names or IDs)</span>
+sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Support Agent"</pre>
+      </div>
+
+      <div class="step-badge"><div class="step-num">3</div><span class="step-label">Restart OpenClaw</span></div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo systemctl restart openclaw-USERNAME</pre>
+      </div>
+
+      <hr class="sub-divider" />
+      <h2 id="openclaw-auth">Authentication Flow</h2>
+      <p>Authentication is lazy - nothing happens at startup. The first time a user asks the agent to do something with SuiteCRM:</p>
+      <ol>
+        <li><strong>User invokes a SuiteCRM tool</strong> - the bridge detects no token and calls <code>POST /auth/bridge/start</code>.</li>
+        <li><strong>Gateway returns a one-time login URL</strong> tied to a short-lived nonce. The bridge returns this URL as the tool response, visible in Teams chat or wherever the agent runs.</li>
+        <li><strong>User clicks the link</strong> and logs in with their corporate account.</li>
+        <li><strong>Bridge polls in the background</strong> every 3 seconds. Once the gateway resolves the nonce session, the bridge saves the token to <code>~/.suitecrm-mcp/gateway.token</code>.</li>
+        <li><strong>Subsequent tool calls work silently.</strong> Token is stored per-Linux-user.</li>
+        <li><strong>On expiry or revocation</strong>, the bridge receives HTTP 401, clears the saved token, and sends a fresh login URL on the next tool call. No restart needed.</li>
+      </ol>
+
+      <h2>Verify</h2>
+      <p>OpenClaw should now expose 24 tools per entity: <code>suitecrm_mycrm_search</code>, <code>suitecrm_mycrm_get</code>, <code>suitecrm_mycrm_create</code>, and 21 more.</p>
+      <p>Test prompt: <em>"List the first 5 accounts in the CRM"</em> - OpenClaw should call <code>suitecrm_mycrm_search</code> automatically.</p>
+
+      <h2>Re-authenticating</h2>
+      <p>If the token expires (default 90 days) or is revoked: the next tool call returns HTTP 401, the bridge clears the token and calls <code>POST /auth/bridge/start</code>, and returns a fresh login URL. Same flow as first-time auth. No agent restart needed.</p>
+
+      <h2>Revoking a user's token (operators)</h2>
+      <h3>Using mcp-admin (recommended)</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>mcp-admin revoke &lt;sub&gt;</pre>
+      </div>
+      <h3>Using the REST endpoint directly</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>curl -X POST https://mcp.example.com/auth/revoke \
+  -H "X-Admin-Key: your-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{"sub": "user@example.com"}'</pre>
+      </div>
+
+      <h2>Updating the bridge</h2>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install-bridge.py --update \
+  --gateway https://mcp.example.com \
+  --entities entities.json</pre>
+      </div>
+
+      <h2>Removing the bridge</h2>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install-bridge.py \
+  --remove alice bob \
+  --gateway https://mcp.example.com \
+  --entities entities.json</pre>
+      </div>
+
+      <h2 id="openclaw-troubleshoot">Troubleshooting</h2>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>Tool call returns a login URL instead of CRM data</td><td>Expected - first-time auth or token expired</td><td>Click the URL and log in; next tool call works normally</td></tr>
+            <tr><td>Login URL never appears as tool response</td><td>Bridge plugin not loaded</td><td>Check <code>openclaw.json</code> plugins section; re-run installer</td></tr>
+            <tr><td>Login URL expired before user clicked it</td><td>Nonce TTL (15 min) elapsed</td><td>Call any SuiteCRM tool again - a fresh URL is generated</td></tr>
+            <tr><td>Auth polling times out after 15 min</td><td>User did not complete login</td><td>Re-invoke any SuiteCRM tool to get a new login URL</td></tr>
+            <tr><td><code>Token rejected (HTTP 401)</code> in logs</td><td>Token expired or revoked</td><td>Bridge clears token and sends fresh login URL on next tool call</td></tr>
+            <tr><td><code>HTTP 403 Forbidden</code></td><td>User not in required group for entity</td><td>Admin checks group membership in identity provider</td></tr>
+            <tr><td><code>Rate limited (HTTP 429)</code> in logs</td><td>Too many reconnects</td><td>Wait 15 min; backoff is automatic</td></tr>
+            <tr><td><code>Gateway connect failed</code></td><td>Wrong gateway URL or gateway down</td><td>Check <code>--gateway</code> URL; <code>systemctl status suitecrm-mcp-*</code> on gateway</td></tr>
+            <tr><td>TLS error</td><td>Self-signed cert on CRM</td><td>Add <code>--tls-skip</code> during gateway install</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  /* Scroll progress + back to top */
+  const progress = document.getElementById('scroll-progress');
+  const backToTop = document.getElementById('back-to-top');
+  window.addEventListener('scroll', () => {
+    const pct = (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100;
+    progress.style.width = pct + '%';
+    backToTop.classList.toggle('visible', window.scrollY > 400);
+  }, { passive: true });
+
+  /* Cross-page fade transition */
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a[href]');
+    if (!a || a.target === '_blank' || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('#')) return;
+    e.preventDefault();
+    document.body.classList.add('page-exit');
+    setTimeout(() => { location.href = href; }, 220);
+  });
+
+  /* Smooth scroll engine */
+  function smoothScrollTo(targetY) {
+    const start = window.scrollY;
+    const diff = targetY - start;
+    const startTime = performance.now();
+    const duration = 650;
+    function ease(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
+    function step(now) {
+      const p = Math.min((now - startTime) / duration, 1);
+      window.scrollTo(0, start + diff * ease(p));
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+  function smoothScrollTop() { smoothScrollTo(0); }
+
+  /* Intercept all same-page anchor links */
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a[href^="#"]');
+    if (!a) return;
+    const id = a.getAttribute('href').slice(1);
+    if (!id) return;
+    const target = document.getElementById(id);
+    if (!target) return;
+    e.preventDefault();
+    const navH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-h')) || 64;
+    smoothScrollTo(Math.max(0, target.getBoundingClientRect().top + window.scrollY - navH - 16));
+  });
+
+  /* Sidebar search filter */
+  function filterSidebar(query) {
+    const q = query.trim().toLowerCase();
+    document.querySelectorAll('.sidebar-nav a').forEach(a => {
+      a.classList.toggle('hidden', q.length > 0 && !a.textContent.toLowerCase().includes(q));
+    });
+  }
+
+  /* Scroll spy - highlight active sidebar link */
+  const sidebarLinks = document.querySelectorAll('.sidebar-nav a');
+  const linkedIds = new Set([...sidebarLinks].map(a => a.getAttribute('href').slice(1)));
+  const sections = [...document.querySelectorAll('[id]')].filter(el => linkedIds.has(el.id));
+
+  let _lastActive = '';
+  function updateActive() {
+    const threshold = (parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-h')) || 64) + 20;
+    let current = sections[0]?.id ?? '';
+    for (const s of sections) {
+      if (s.getBoundingClientRect().top <= threshold) current = s.id;
+      else break;
+    }
+    if (current === _lastActive) return;
+    _lastActive = current;
+    sidebarLinks.forEach(a => {
+      const isActive = a.getAttribute('href').slice(1) === current;
+      a.classList.toggle('active', isActive);
+      if (isActive) a.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }
+
+  window.addEventListener('scroll', updateActive, { passive: true });
+  updateActive();
+
+  /* Copy block */
+  function copyBlock(btn) {
+    const pre = btn.closest('.code-block').querySelector('pre');
+    const text = pre.textContent.trim();
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    }).catch(() => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    });
+  }
+
+  /* Mobile sidebar */
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('visible');
+  }
+  function closeSidebar() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('visible');
+  }
+
+  /* Close sidebar on link click (mobile) */
+  document.querySelectorAll('.sidebar-nav a').forEach(a => {
+    a.addEventListener('click', () => {
+      if (window.innerWidth <= 768) closeSidebar();
+    });
+  });
+
+  /* Hash navigation on load */
+  if (window.location.hash) {
+    setTimeout(() => {
+      const el = document.querySelector(window.location.hash);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  }
+</script>
+</body>
+</html>
