@@ -1054,6 +1054,7 @@
       .cursor, .cursor-follower { display: none; }
       body { cursor: auto; }
       .btn { cursor: pointer; }
+      #webgl-canvas { display: none; }
       .hiw-flow { grid-template-columns: 1fr; }
       .obs-grid { grid-template-columns: 1fr; }
       .hiw-arrow { display: none; }
@@ -1116,16 +1117,17 @@
         transition-duration: 0.01ms !important;
       }
       #webgl-canvas { display: none; }
-      .grain-overlay { display: none; }
-      .custom-cursor,
-      .cursor-dot { display: none; }
+      body::before { display: none; }
+      .cursor,
+      .cursor-follower { display: none; }
+      body { cursor: auto; }
     }
   </style>
 </head>
 <body>
 
 <div id="scroll-progress"></div>
-<button class="back-to-top" id="back-to-top" onclick="smoothScrollTop()" aria-label="Back to top">
+<button type="button" class="back-to-top" id="back-to-top" onclick="smoothScrollTop()" aria-label="Back to top">
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
 </button>
 <div class="cursor" id="cursor"></div>
@@ -1136,7 +1138,7 @@
 <!-- Navigation -->
 <nav>
   <a href="#hero" class="nav-logo">Suite<span>CRM</span>-mcp</a>
-  <button class="nav-hamburger" id="nav-hamburger" onclick="toggleMobileNav()" aria-label="Toggle navigation">
+  <button type="button" class="nav-hamburger" id="nav-hamburger" onclick="toggleMobileNav()" aria-label="Toggle navigation">
     <span></span><span></span><span></span>
   </button>
   <div class="nav-links" id="nav-links">
@@ -1392,7 +1394,7 @@
 <span class="t-prompt">$ </span>cd suitecrm-mcp
 <span class="t-prompt">$ </span>sudo python3 install.py <span class="t-flag">--domain</span> <span class="t-val">mcp.yourcompany.com</span> <span class="t-flag">--email</span> <span class="t-val">you@example.com</span></div>
               </div>
-              <button class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
+              <button type="button" class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
             </div>
             <p class="step-note">Needs Ubuntu 20.04+ with a public domain. Prompts for CRM URL, OAuth2 config, and IdP credentials. Installs Node, nginx, certbot, and systemd services automatically.</p>
           </div>
@@ -1414,9 +1416,9 @@
           <div class="step-title">Connect your client</div>
         </div>
         <div class="qs-tabs" role="tablist">
-          <button class="qs-tab active" id="qs-tab-desktop" onclick="switchQSTab('desktop')" role="tab" aria-selected="true" aria-controls="qs-panel-desktop">Claude Desktop</button>
-          <button class="qs-tab" id="qs-tab-code" onclick="switchQSTab('code')" role="tab" aria-selected="false" aria-controls="qs-panel-code">Claude Code</button>
-          <button class="qs-tab" id="qs-tab-openclaw" onclick="switchQSTab('openclaw')" role="tab" aria-selected="false" aria-controls="qs-panel-openclaw">OpenClaw</button>
+          <button type="button" class="qs-tab active" id="qs-tab-desktop" onclick="switchQSTab('desktop')" role="tab" aria-selected="true" aria-controls="qs-panel-desktop" tabindex="0">Claude Desktop</button>
+          <button type="button" class="qs-tab" id="qs-tab-code" onclick="switchQSTab('code')" role="tab" aria-selected="false" aria-controls="qs-panel-code" tabindex="-1">Claude Code</button>
+          <button type="button" class="qs-tab" id="qs-tab-openclaw" onclick="switchQSTab('openclaw')" role="tab" aria-selected="false" aria-controls="qs-panel-openclaw" tabindex="-1">OpenClaw</button>
         </div>
 
         <div class="qs-panels-wrap">
@@ -1444,7 +1446,7 @@
   }
 }</div>
             </div>
-            <button class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
+            <button type="button" class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
           </div>
           <p class="step-note" style="margin-bottom:14px;">Quit and relaunch Claude Desktop. Click the hammer icon - 24 SuiteCRM tools appear instantly.</p>
           <a href="docs.html#connect-desktop" class="qs-full-link">Full guide <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
@@ -1464,7 +1466,7 @@
     <span class="t-flag">--header</span> <span class="t-url">"Authorization:Bearer YOUR_API_KEY"</span> \
     <span class="t-url">https://mcp.yourcompany.com/sse</span></div>
             </div>
-            <button class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
+            <button type="button" class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
           </div>
           <p class="step-note" style="margin-bottom:14px;">Start a Claude session and test: <code style="font-size:0.8rem;color:#e8915a;font-family:var(--font-mono)">List the first 5 accounts in the CRM</code></p>
           <a href="docs.html#connect-code" class="qs-full-link">Full guide <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
@@ -1485,7 +1487,7 @@
     <span class="t-flag">--code</span> <span class="t-val">mycrm</span> <span class="t-flag">--label</span> <span class="t-val">"My CRM"</span>
 <span class="t-prompt">$ </span>sudo systemctl restart openclaw-USERNAME</div>
             </div>
-            <button class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
+            <button type="button" class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
           </div>
           <p class="step-note" style="margin-bottom:14px;">Auth is lazy - first tool call returns a one-time login URL. Click it, log in once. All subsequent calls work silently. No CLI needed on the client.</p>
           <a href="docs.html#connect-openclaw" class="qs-full-link">Full guide <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
@@ -1567,6 +1569,7 @@
   }, { passive: true });
 
   /* Custom cursor */
+  if (!prefersReducedMotion) {
   const cursor = document.getElementById('cursor');
   const follower = document.getElementById('cursor-follower');
   let fx = 0, fy = 0, cx = 0, cy = 0, cursorReady = false;
@@ -1590,6 +1593,7 @@
     follower.style.top = fy + 'px';
     requestAnimationFrame(animateCursor);
   })();
+  }
 
   /* IntersectionObserver - staggered fade-up */
   (function() {
@@ -1609,7 +1613,8 @@
   })();
 
   /* Three.js particle network */
-  if (!prefersReducedMotion)
+  const isMobile = window.innerWidth <= 768;
+  if (!prefersReducedMotion && !isMobile)
   (function initWebGL() {
     const canvas = document.getElementById('webgl-canvas');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -1713,6 +1718,7 @@
       const active = n === name;
       tab.classList.toggle('active', active);
       tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.setAttribute('tabindex', active ? '0' : '-1');
       panel.classList.toggle('active', active);
       panel.setAttribute('aria-hidden', active ? 'false' : 'true');
     });
