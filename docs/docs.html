@@ -181,17 +181,11 @@
     .sidebar {
       position: sticky;
       top: var(--nav-h);
-      height: calc(100vh - var(--nav-h));
-      overflow-y: auto;
+      height: fit-content;
       padding: 0 0 40px;
       border-right: 1px solid var(--border-subtle);
-      background: rgba(8, 10, 14, 0.85);
-      backdrop-filter: blur(12px);
-      scrollbar-width: thin;
-      scrollbar-color: rgba(196,93,37,0.2) transparent;
+      background: #080a0e;
     }
-    .sidebar::-webkit-scrollbar { width: 4px; }
-    .sidebar::-webkit-scrollbar-thumb { background: rgba(196,93,37,0.2); border-radius: 2px; }
 
     .sidebar-group {
       margin-bottom: 28px;
@@ -1577,7 +1571,6 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
     sidebarLinks.forEach(a => {
       const isActive = a.getAttribute('href').slice(1) === current;
       a.classList.toggle('active', isActive);
-      if (isActive) a.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
   }
 
