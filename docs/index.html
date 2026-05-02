@@ -1655,6 +1655,9 @@
     document.body.classList.add('page-exit');
     setTimeout(() => { location.href = href; }, 220);
   });
+  window.addEventListener('pageshow', e => {
+    if (e.persisted) document.body.classList.remove('page-exit');
+  });
 
   /* Smooth scroll engine */
   function smoothScrollTo(targetY) {
