@@ -12,6 +12,8 @@ An open-source MCP (Model Context Protocol) gateway for SuiteCRM. Lets AI assist
 
 Built from a real production deployment. CData's version is commercial. This one isn't.
 
+Ships with a full observability stack: Prometheus metrics, Grafana dashboards (33 panels), and Loki log aggregation.
+
 ---
 
 ## Table of Contents
