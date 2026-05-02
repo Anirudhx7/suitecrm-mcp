@@ -11,7 +11,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.4.1",
-    "pino": "^9.0.0",
+    "pino": "^10.3.1",
     "prom-client": "^15.1.3"
   }
 }
