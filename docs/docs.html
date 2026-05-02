@@ -512,7 +512,12 @@
     }
     /* Sidebar search */
     .sidebar-search {
-      padding: 0 20px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--bg-primary);
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--border-subtle);
     }
     .sidebar-search input {
       width: 100%;
