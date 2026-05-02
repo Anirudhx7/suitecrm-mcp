@@ -856,12 +856,15 @@
       border: 1px solid rgba(196, 93, 37, 0.35);
     }
     .qs-tab:hover:not(.active) { color: var(--text-secondary); background: rgba(196, 93, 37, 0.08); }
-    .qs-panel { display: none; max-width: 740px; }
-    .qs-panel.active { display: block; animation: tabIn 0.22s ease forwards; }
-    @keyframes tabIn {
-      from { opacity: 0; transform: translateY(5px); }
-      to   { opacity: 1; transform: translateY(0); }
+    .qs-panels-wrap { display: grid; max-width: 740px; }
+    .qs-panel {
+      grid-area: 1 / 1;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
     }
+    .qs-panel.active { opacity: 1; pointer-events: auto; transform: translateY(0); }
 
     /* Prereq callout */
     .prereq-callout {
@@ -1312,6 +1315,7 @@
           <button class="qs-tab" onclick="switchQSTab('openclaw')" role="tab">OpenClaw</button>
         </div>
 
+        <div class="qs-panels-wrap">
         <!-- Claude Desktop -->
         <div class="qs-panel active" id="tab-desktop">
           <div class="prereq-callout"><strong>Prerequisites:</strong> Claude Desktop installed · API key from Step 02 · Gateway reachable via HTTPS</div>
@@ -1382,6 +1386,7 @@
           <p class="step-note" style="margin-bottom:14px;">Auth is lazy - first tool call returns a one-time login URL. Click it, log in once. All subsequent calls work silently. No CLI needed on the client.</p>
           <a href="docs.html#connect-openclaw" class="qs-full-link">Full guide <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
         </div>
+        </div><!-- end qs-panels-wrap -->
       </div>
 
       <div class="docs-cta fade-up delay-3">
