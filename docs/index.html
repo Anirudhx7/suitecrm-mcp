@@ -1224,6 +1224,7 @@
   </button>
   <div class="nav-links" id="nav-links">
     <a href="#security-model">Security</a>
+    <a href="#observability">Observability</a>
     <a href="#tools">Tools</a>
     <a href="#quickstart">Quick Start</a>
     <a href="docs.html">Docs</a>
@@ -1322,6 +1323,148 @@
         </div>
       </div>
       <p class="obs-footer fade-up" style="margin-top:32px;">Full observability via Prometheus metrics, Grafana dashboards, and Loki log aggregation.</p>
+    </div>
+  </section>
+
+  <hr class="glow-divider" />
+
+  <!-- Observability -->
+  <section id="observability">
+    <div class="wrap">
+      <div class="section-label fade-up">Not a Black Box</div>
+      <h2 class="section-title fade-up">Full visibility into every layer.</h2>
+      <p class="section-sub fade-up">Most MCP gateways ship with nothing. This one includes a complete production observability stack out of the box.</p>
+      <div class="obs-grid">
+        <div class="obs-card fade-up delay-1">
+          <div class="obs-icon">📊</div>
+          <h3>Prometheus</h3>
+          <div class="obs-stat">17 metrics</div>
+          <ul class="obs-list">
+            <li>Request rate and latency histograms per entity</li>
+            <li>Active user and session gauges</li>
+            <li>CRM error codes and circuit breaker state</li>
+            <li>Rate-limit hits and connection rejections</li>
+            <li>Auth token issue, revoke, and verify counters</li>
+          </ul>
+        </div>
+        <div class="obs-card fade-up delay-2">
+          <div class="obs-icon">📈</div>
+          <h3>Grafana</h3>
+          <div class="obs-stat">33-panel dashboard</div>
+          <ul class="obs-list">
+            <li>System health, error rates, and latency panels</li>
+            <li>Per-user and per-session live tables</li>
+            <li>CRM backend health and tool breakdown rows</li>
+            <li>Security events and auth failure tracking</li>
+            <li>Fleet overview for multi-entity deployments</li>
+          </ul>
+        </div>
+        <div class="obs-card fade-up delay-3">
+          <div class="obs-icon">🪵</div>
+          <h3>Loki</h3>
+          <div class="obs-stat">Structured log ingestion</div>
+          <ul class="obs-list">
+            <li>JSON logs via Pino with per-request IDs</li>
+            <li>sub, email, and entity on every log line</li>
+            <li>Promtail tails Docker JSON logs into Loki</li>
+            <li>Search and filter logs in Grafana Explore using LogQL</li>
+            <li>Sensitive fields auto-redacted before logging</li>
+          </ul>
+        </div>
+      </div>
+      <p class="obs-footer fade-up">All three ship in <code>docker-compose.yml</code>. One command starts the full stack.<br>Alerting rules included for circuit breaker open, auth failures, and latency SLO breaches.</p>
+    </div>
+  </section>
+
+  <hr class="glow-divider" />
+
+  <!-- Why Not API -->
+  <section id="why-not-api">
+    <div class="wrap">
+      <div class="section-label fade-up">Comparison</div>
+      <h2 class="section-title fade-up">Why not just call<br>the REST API?</h2>
+      <p class="section-sub fade-up">The v4_1 REST API works. It just puts the burden - and the risk - on every client.</p>
+      <div class="compare-wrap fade-up">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th>Concern</th>
+              <th>Direct SuiteCRM REST</th>
+              <th>suitecrm-mcp gateway</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Auth</td>
+              <td>CRM credentials on every client</td>
+              <td>OAuth/OIDC login, personal API key</td>
+            </tr>
+            <tr>
+              <td>Tool schema</td>
+              <td>Raw JSON, no descriptions</td>
+              <td>24 typed MCP tools with descriptions</td>
+            </tr>
+            <tr>
+              <td>Multi-client</td>
+              <td>Manual per-client setup</td>
+              <td>One gateway, any MCP client</td>
+            </tr>
+            <tr>
+              <td>Key management</td>
+              <td>CRM admin per user</td>
+              <td>Issue / revoke from CLI</td>
+            </tr>
+            <tr>
+              <td>Observability</td>
+              <td>None</td>
+              <td>Prometheus + Grafana + Loki</td>
+            </tr>
+            <tr>
+              <td>Session handling</td>
+              <td>Manual login per call</td>
+              <td>Auto-renew, cached per user</td>
+            </tr>
+            <tr>
+              <td>Audit logging</td>
+              <td>None</td>
+              <td>Structured JSON, redacted</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <hr class="glow-divider" />
+
+  <!-- How It Works -->
+  <section id="how-it-works">
+    <div class="wrap">
+      <div class="section-label fade-up">How it works</div>
+      <h2 class="section-title fade-up">Auth in, tools out.</h2>
+      <p class="section-sub fade-up">Three steps from login to live CRM data in Claude.</p>
+      <div class="hiw-flow fade-up">
+        <div class="hiw-card">
+          <div class="hiw-step-label">Step 1</div>
+          <span class="hiw-icon">🔐</span>
+          <h3>Authenticate</h3>
+          <p>Visit your gateway URL. Log in with your corporate account via Auth0 or Azure AD. Takes 30 seconds.</p>
+        </div>
+        <div class="hiw-arrow">→</div>
+        <div class="hiw-card">
+          <div class="hiw-step-label">Step 2</div>
+          <span class="hiw-icon">🗝️</span>
+          <h3>Get your API key</h3>
+          <p>The success page shows your personal, revocable API key. CRM credentials stay server-side - you never touch them.</p>
+        </div>
+        <div class="hiw-arrow">→</div>
+        <div class="hiw-card">
+          <div class="hiw-step-label">Step 3</div>
+          <span class="hiw-icon">🤖</span>
+          <h3>Connect your client</h3>
+          <p>Paste the key into Claude Desktop, Claude Code, or OpenClaw. 24 SuiteCRM tools load instantly.</p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1427,32 +1570,30 @@
 
   <hr class="glow-divider" />
 
-  <!-- How It Works -->
-  <section id="how-it-works">
+  <!-- Clients -->
+  <section id="clients">
     <div class="wrap">
-      <div class="section-label fade-up">How it works</div>
-      <h2 class="section-title fade-up">Auth in, tools out.</h2>
-      <p class="section-sub fade-up">Three steps from login to live CRM data in Claude.</p>
-      <div class="hiw-flow fade-up">
-        <div class="hiw-card">
-          <div class="hiw-step-label">Step 1</div>
-          <span class="hiw-icon">🔐</span>
-          <h3>Authenticate</h3>
-          <p>Visit your gateway URL. Log in with your corporate account via Auth0 or Azure AD. Takes 30 seconds.</p>
+      <div class="section-label fade-up">Client Support</div>
+      <h2 class="section-title fade-up">Connect anything<br>MCP-compatible.</h2>
+      <p class="section-sub fade-up">Full setup guides for every supported client.</p>
+      <div class="clients-grid">
+        <div class="client-card fade-up delay-1">
+          <div class="client-icon">🖥️</div>
+          <h3>Claude Desktop</h3>
+          <p>Add the SSE endpoint and API key to your Claude Desktop config. Single or multi-entity variants.</p>
+          <a href="docs.html#connect-desktop" class="client-link">Setup guide →</a>
         </div>
-        <div class="hiw-arrow">→</div>
-        <div class="hiw-card">
-          <div class="hiw-step-label">Step 2</div>
-          <span class="hiw-icon">🗝️</span>
-          <h3>Get your API key</h3>
-          <p>The success page shows your personal, revocable API key. CRM credentials stay server-side - you never touch them.</p>
+        <div class="client-card fade-up delay-2">
+          <div class="client-icon">⌨️</div>
+          <h3>Claude Code</h3>
+          <p>Add via <code style="font-size:11px;color:#e8915a;font-family:var(--font-mono)">claude mcp add</code>. Works with single and multi-entity configs out of the box.</p>
+          <a href="docs.html#connect-code" class="client-link">Setup guide →</a>
         </div>
-        <div class="hiw-arrow">→</div>
-        <div class="hiw-card">
-          <div class="hiw-step-label">Step 3</div>
-          <span class="hiw-icon">🤖</span>
-          <h3>Connect your client</h3>
-          <p>Paste the key into Claude Desktop, Claude Code, or OpenClaw. 24 SuiteCRM tools load instantly.</p>
+        <div class="client-card fade-up delay-3">
+          <div class="client-icon">🔌</div>
+          <h3>OpenClaw</h3>
+          <p>Two-component setup - gateway on your server, bridge plugin on the OpenClaw machine. Full guide included.</p>
+          <a href="docs.html#connect-openclaw" class="client-link">Setup guide →</a>
         </div>
       </div>
     </div>
@@ -1460,51 +1601,27 @@
 
   <hr class="glow-divider" />
 
-  <!-- Observability -->
-  <section id="observability">
+  <!-- Production Ready -->
+  <section id="production-ready">
     <div class="wrap">
-      <div class="section-label fade-up">Observability</div>
-      <h2 class="section-title fade-up">Not a black box.</h2>
-      <p class="section-sub fade-up">Most MCP gateways ship with nothing. This one includes a complete production observability stack out of the box.</p>
-      <div class="obs-grid">
-        <div class="obs-card fade-up delay-1">
-          <div class="obs-icon">📊</div>
-          <h3>Prometheus</h3>
-          <div class="obs-stat">17 metrics</div>
-          <ul class="obs-list">
-            <li>Request rate and latency histograms per entity</li>
-            <li>Active user and session gauges</li>
-            <li>CRM error codes and circuit breaker state</li>
-            <li>Rate-limit hits and connection rejections</li>
-            <li>Auth token issue, revoke, and verify counters</li>
-          </ul>
-        </div>
-        <div class="obs-card fade-up delay-2">
-          <div class="obs-icon">📈</div>
-          <h3>Grafana</h3>
-          <div class="obs-stat">33-panel dashboard</div>
-          <ul class="obs-list">
-            <li>System health, error rates, and latency panels</li>
-            <li>Per-user and per-session live tables</li>
-            <li>CRM backend health and tool breakdown rows</li>
-            <li>Security events and auth failure tracking</li>
-            <li>Fleet overview for multi-entity deployments</li>
-          </ul>
-        </div>
-        <div class="obs-card fade-up delay-3">
-          <div class="obs-icon">🪵</div>
-          <h3>Loki</h3>
-          <div class="obs-stat">Structured log ingestion</div>
-          <ul class="obs-list">
-            <li>JSON logs via Pino with per-request IDs</li>
-            <li>sub, email, and entity on every log line</li>
-            <li>Promtail tails Docker JSON logs into Loki</li>
-            <li>Search and filter logs in Grafana Explore using LogQL</li>
-            <li>Sensitive fields auto-redacted before logging</li>
-          </ul>
-        </div>
+      <div class="section-label fade-up">Production Ready</div>
+      <h2 class="section-title fade-up">Ships with everything<br>ops needs.</h2>
+      <p class="section-sub fade-up">Not a prototype. A checklist of what's already in the box.</p>
+      <div class="prod-grid fade-up">
+        <div class="prod-item"><span class="prod-check">+</span> Docker + systemd deployment</div>
+        <div class="prod-item"><span class="prod-check">+</span> Prometheus metrics (17 metrics)</div>
+        <div class="prod-item"><span class="prod-check">+</span> Grafana dashboards (33-panel entity + fleet overview)</div>
+        <div class="prod-item"><span class="prod-check">+</span> Loki log aggregation</div>
+        <div class="prod-item"><span class="prod-check">+</span> Prometheus alerting rules (circuit breaker, auth failures, latency SLO)</div>
+        <div class="prod-item"><span class="prod-check">+</span> Circuit breaker on CRM backend</div>
+        <div class="prod-item"><span class="prod-check">+</span> Per-user rate limiting</div>
+        <div class="prod-item"><span class="prod-check">+</span> TLS / Let's Encrypt support</div>
+        <div class="prod-item"><span class="prod-check">+</span> Multi-entity routing</div>
+        <div class="prod-item"><span class="prod-check">+</span> Systemd sandboxing (NoNewPrivileges, PrivateTmp)</div>
+        <div class="prod-item"><span class="prod-check">+</span> MIT license</div>
+        <div class="prod-item"><span class="prod-check">+</span> Tested on SuiteCRM 8.8.x</div>
       </div>
-      <p class="obs-footer fade-up">All three ship in <code>docker-compose.yml</code>. One command starts the full stack.<br>Alerting rules included for circuit breaker open, auth failures, and latency SLO breaches.</p>
+      <p style="text-align:center;color:var(--text-muted);font-size:0.82rem;margin-top:18px;">Works with any SuiteCRM version supporting the v4_1 REST API.</p>
     </div>
   </section>
 
@@ -1643,122 +1760,6 @@
         </div>
         <a href="docs.html" class="btn btn-secondary" style="white-space:nowrap;flex-shrink:0;">View full docs</a>
       </div>
-    </div>
-  </section>
-
-  <hr class="glow-divider" />
-
-  <!-- Clients -->
-  <section id="clients">
-    <div class="wrap">
-      <div class="section-label fade-up">Client Support</div>
-      <h2 class="section-title fade-up">Connect anything<br>MCP-compatible.</h2>
-      <p class="section-sub fade-up">Full setup guides for every supported client.</p>
-      <div class="clients-grid">
-        <div class="client-card fade-up delay-1">
-          <div class="client-icon">🖥️</div>
-          <h3>Claude Desktop</h3>
-          <p>Add the SSE endpoint and API key to your Claude Desktop config. Single or multi-entity variants.</p>
-          <a href="docs.html#connect-desktop" class="client-link">Setup guide →</a>
-        </div>
-        <div class="client-card fade-up delay-2">
-          <div class="client-icon">⌨️</div>
-          <h3>Claude Code</h3>
-          <p>Add via <code style="font-size:11px;color:#e8915a;font-family:var(--font-mono)">claude mcp add</code>. Works with single and multi-entity configs out of the box.</p>
-          <a href="docs.html#connect-code" class="client-link">Setup guide →</a>
-        </div>
-        <div class="client-card fade-up delay-3">
-          <div class="client-icon">🔌</div>
-          <h3>OpenClaw</h3>
-          <p>Two-component setup - gateway on your server, bridge plugin on the OpenClaw machine. Full guide included.</p>
-          <a href="docs.html#connect-openclaw" class="client-link">Setup guide →</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <hr class="glow-divider" />
-
-  <!-- Why Not API -->
-  <section id="why-not-api">
-    <div class="wrap">
-      <div class="section-label fade-up">Comparison</div>
-      <h2 class="section-title fade-up">Why not just call<br>the REST API?</h2>
-      <p class="section-sub fade-up">The v4_1 REST API works. It just puts the burden - and the risk - on every client.</p>
-      <div class="compare-wrap fade-up">
-        <table class="compare-table">
-          <thead>
-            <tr>
-              <th>Concern</th>
-              <th>Direct SuiteCRM REST</th>
-              <th>suitecrm-mcp gateway</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Auth</td>
-              <td>CRM credentials on every client</td>
-              <td>OAuth/OIDC login, personal API key</td>
-            </tr>
-            <tr>
-              <td>Tool schema</td>
-              <td>Raw JSON, no descriptions</td>
-              <td>24 typed MCP tools with descriptions</td>
-            </tr>
-            <tr>
-              <td>Multi-client</td>
-              <td>Manual per-client setup</td>
-              <td>One gateway, any MCP client</td>
-            </tr>
-            <tr>
-              <td>Key management</td>
-              <td>CRM admin per user</td>
-              <td>Issue / revoke from CLI</td>
-            </tr>
-            <tr>
-              <td>Observability</td>
-              <td>None</td>
-              <td>Prometheus + Grafana + Loki</td>
-            </tr>
-            <tr>
-              <td>Session handling</td>
-              <td>Manual login per call</td>
-              <td>Auto-renew, cached per user</td>
-            </tr>
-            <tr>
-              <td>Audit logging</td>
-              <td>None</td>
-              <td>Structured JSON, redacted</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <hr class="glow-divider" />
-
-  <!-- Production Ready -->
-  <section id="production-ready">
-    <div class="wrap">
-      <div class="section-label fade-up">Production Ready</div>
-      <h2 class="section-title fade-up">Ships with everything<br>ops needs.</h2>
-      <p class="section-sub fade-up">Not a prototype. A checklist of what's already in the box.</p>
-      <div class="prod-grid fade-up">
-        <div class="prod-item"><span class="prod-check">+</span> Docker + systemd deployment</div>
-        <div class="prod-item"><span class="prod-check">+</span> Prometheus metrics (17 metrics)</div>
-        <div class="prod-item"><span class="prod-check">+</span> Grafana dashboards (33-panel entity + fleet overview)</div>
-        <div class="prod-item"><span class="prod-check">+</span> Loki log aggregation</div>
-        <div class="prod-item"><span class="prod-check">+</span> Prometheus alerting rules (circuit breaker, auth failures, latency SLO)</div>
-        <div class="prod-item"><span class="prod-check">+</span> Circuit breaker on CRM backend</div>
-        <div class="prod-item"><span class="prod-check">+</span> Per-user rate limiting</div>
-        <div class="prod-item"><span class="prod-check">+</span> TLS / Let's Encrypt support</div>
-        <div class="prod-item"><span class="prod-check">+</span> Multi-entity routing</div>
-        <div class="prod-item"><span class="prod-check">+</span> Systemd sandboxing (NoNewPrivileges, PrivateTmp)</div>
-        <div class="prod-item"><span class="prod-check">+</span> MIT license</div>
-        <div class="prod-item"><span class="prod-check">+</span> Tested on SuiteCRM 8.8.x</div>
-      </div>
-      <p style="text-align:center;color:var(--text-muted);font-size:0.82rem;margin-top:18px;">Works with any SuiteCRM version supporting the v4_1 REST API.</p>
     </div>
   </section>
 
