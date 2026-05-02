@@ -1732,20 +1732,30 @@ curl http://127.0.0.1:9091/metrics</pre>
   function copyBlock(btn) {
     const pre = btn.closest('.code-block').querySelector('pre');
     const text = pre.textContent.trim();
-    navigator.clipboard.writeText(text).then(() => {
+    const done = () => {
       btn.textContent = 'Copied!';
       btn.classList.add('copied');
       setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
-    }).catch(() => {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
-    });
+    };
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, 99999);
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch(e) {}
+      done();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(fallback);
+    } else {
+      fallback();
+    }
   }
 
   /* Mobile sidebar */
