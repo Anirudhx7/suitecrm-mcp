@@ -108,7 +108,7 @@
       justify-content: space-between;
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      background: rgba(8, 10, 14, 0.82);
+      background: rgba(8, 10, 14, 0.97);
       border-bottom: 1px solid var(--border-subtle);
       z-index: 1000;
       transition: background 0.5s var(--ease-smooth), box-shadow 0.5s var(--ease-smooth), border-color 0.5s var(--ease-smooth);
@@ -1569,6 +1569,7 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
     sidebarLinks.forEach(a => {
       const isActive = a.getAttribute('href').slice(1) === current;
       a.classList.toggle('active', isActive);
+      if (isActive) a.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
   }
 
