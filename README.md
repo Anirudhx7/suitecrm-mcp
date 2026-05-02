@@ -96,6 +96,7 @@ Supported modules include: Accounts, Contacts, Leads, Opportunities, Cases, Call
 ## <a name="architecture"></a>🏗️ Architecture
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear"}}}%%
 flowchart TB
     IdP["🔐 Auth0 / Azure AD\nIdentity Provider"]
 
@@ -109,7 +110,8 @@ flowchart TB
         C1[("CRM A")] ~~~ C2[("CRM B")] ~~~ CX[("CRM X")]
     end
 
-    IdP -.->|"issues API key on login"| GW
+    IdP -.->|"confirms identity (OAuth2 callback)"| GW
+    GW -.->|"issues API key"| Clients
     Clients -->|"Bearer token"| GW
     GW -->|"v4_1 REST API"| CRMs
 

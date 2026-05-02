@@ -647,6 +647,17 @@
         <a href="#openclaw-troubleshoot" class="sub">Troubleshooting</a>
       </nav>
     </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-label">Observability</div>
+      <nav class="sidebar-nav">
+        <a href="#observability">Overview</a>
+        <a href="#obs-stack" class="sub">Starting the stack</a>
+        <a href="#obs-prometheus" class="sub">Prometheus metrics</a>
+        <a href="#obs-grafana" class="sub">Grafana dashboards</a>
+        <a href="#obs-loki" class="sub">Loki &amp; log queries</a>
+        <a href="#obs-alerts" class="sub">Alerting rules</a>
+      </nav>
+    </div>
   </aside>
 
   <!-- Main content -->
@@ -721,7 +732,11 @@
 
           <!-- IdP -> Gateway (dashed) -->
           <line x1="89" y1="110" x2="89" y2="180" stroke="#5c6280" stroke-width="1.3" stroke-dasharray="4,3" marker-end="url(#arr-muted)"/>
-          <text x="96" y="150" fill="#9da3b8" font-size="9">issues API key on login</text>
+          <text x="96" y="150" fill="#9da3b8" font-size="9">confirms identity (OAuth2)</text>
+
+          <!-- Gateway -> Clients (issues API key, dashed) -->
+          <line x1="350" y1="182" x2="350" y2="120" stroke="#5c6280" stroke-width="1.3" stroke-dasharray="4,3" marker-end="url(#arr-muted)"/>
+          <text x="356" y="155" fill="#9da3b8" font-size="9">issues API key</text>
 
           <!-- MCP Clients -> Gateway -->
           <line x1="456" y1="120" x2="456" y2="180" stroke="#c45d25" stroke-width="1.5" marker-end="url(#arr-orange)"/>
@@ -1492,6 +1507,135 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
           </tbody>
         </table>
       </div>
+    </section>
+
+    <!-- ======================================================= -->
+    <!-- OBSERVABILITY                                            -->
+    <!-- ======================================================= -->
+    <section class="doc-section" id="observability">
+      <h1>Observability</h1>
+      <p class="section-desc">Prometheus metrics, Grafana dashboards, and Loki log aggregation - shipped in <code>docker-compose.yml</code> and ready to run alongside the gateway.</p>
+
+      <h2 id="obs-stack">Starting the stack</h2>
+      <p>The full observability stack (Prometheus + Grafana + Loki + Promtail) is bundled in <code>docker-compose.yml</code>. It starts automatically alongside the gateway:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>docker compose up -d</pre>
+      </div>
+      <p>Set <code>GRAFANA_PASSWORD</code> in your environment before starting, then visit <code>http://localhost:3000</code>. Both dashboards are provisioned automatically - no manual import needed.</p>
+      <div class="callout callout-info">
+        <strong>Systemd installs:</strong> the stack runs separately. Start it with <code>docker compose up -d</code> from the repo directory after the gateway is running. Point Prometheus at your gateway's metrics port using <code>monitoring/prometheus.yml</code>.
+      </div>
+
+      <hr class="sub-divider" />
+      <h2 id="obs-prometheus">Prometheus metrics</h2>
+      <p>Two components expose metrics on separate localhost ports. Both are scraped by the bundled Prometheus instance.</p>
+
+      <h3>Gateway entity metrics (default port 9090)</h3>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>suitecrm_mcp_active_connections</code></td><td>Gauge</td><td>Currently open SSE connections</td></tr>
+            <tr><td><code>suitecrm_mcp_connections_total</code></td><td>Counter</td><td>Total SSE connections established</td></tr>
+            <tr><td><code>suitecrm_mcp_tool_calls_total</code></td><td>Counter</td><td>Tool calls by name and status (success/error)</td></tr>
+            <tr><td><code>suitecrm_mcp_tool_duration_seconds</code></td><td>Histogram</td><td>Tool call latency (p50/p95/p99)</td></tr>
+            <tr><td><code>suitecrm_mcp_crm_api_duration_seconds</code></td><td>Histogram</td><td>CRM REST API call latency</td></tr>
+            <tr><td><code>suitecrm_mcp_session_renewals_total</code></td><td>Counter</td><td>CRM session re-authentications</td></tr>
+            <tr><td><code>suitecrm_mcp_auth_failures_total</code></td><td>Counter</td><td>Authentication failures</td></tr>
+            <tr><td><code>suitecrm_mcp_circuit_breaker_state</code></td><td>Gauge</td><td>0 = closed, 1 = half-open, 2 = open</td></tr>
+            <tr><td><code>suitecrm_mcp_circuit_breaker_openings_total</code></td><td>Counter</td><td>Circuit breaker trip events</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Auth service metrics (default port 9091)</h3>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>suitecrm_auth_logins_total</code></td><td>Counter</td><td>OAuth2 login completions by result (new/reused/error)</td></tr>
+            <tr><td><code>suitecrm_auth_bridge_sessions_total</code></td><td>Counter</td><td>Bridge session events (started/completed/expired)</td></tr>
+            <tr><td><code>suitecrm_auth_sessions_active</code></td><td>Gauge</td><td>Non-expired gateway sessions currently stored</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Scrape manually to verify metrics are flowing:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Gateway entity metrics</span>
+curl http://127.0.0.1:9090/metrics
+
+<span class="cm"># Auth service metrics</span>
+curl http://127.0.0.1:9091/metrics</pre>
+      </div>
+
+      <p>For systemd (multi-entity), add each entity's metrics port to <code>monitoring/prometheus.yml</code>:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">yaml</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>scrape_configs:
+  - job_name: suitecrm-mcp-auth
+    static_configs:
+      - targets: ['127.0.0.1:9091']
+  - job_name: suitecrm-mcp-crm1
+    static_configs:
+      - targets: ['127.0.0.1:9101']   <span class="cm"># port 3101 + 6000</span>
+  - job_name: suitecrm-mcp-crm2
+    static_configs:
+      - targets: ['127.0.0.1:9102']   <span class="cm"># port 3102 + 6000</span></pre>
+      </div>
+
+      <hr class="sub-divider" />
+      <h2 id="obs-grafana">Grafana dashboards</h2>
+      <p>Two dashboards are auto-provisioned from <code>monitoring/grafana/dashboards/</code>:</p>
+      <ul>
+        <li><strong>suitecrm-mcp</strong> - per-entity view with 33 panels across 5 rows: system health, users/sessions table, CRM backend (latency, error codes, circuit breaker), security (auth failures, rate limits), and tool call breakdown</li>
+        <li><strong>suitecrm-mcp-fleet</strong> - multi-entity overview showing all entities at a glance: circuit breaker state, active connections, error rates, and latency per entity</li>
+      </ul>
+      <p>Open <code>http://localhost:3000</code>, log in with admin / <code>$GRAFANA_PASSWORD</code>, and both dashboards appear under Dashboards. No manual import or datasource setup needed.</p>
+      <div class="callout callout-info">
+        <strong>Tip:</strong> use Grafana Explore to run ad-hoc queries against Prometheus and Loki side by side. Switch the datasource dropdown between <strong>Prometheus</strong> and <strong>Loki</strong> to correlate a latency spike with the log lines that caused it.
+      </div>
+
+      <hr class="sub-divider" />
+      <h2 id="obs-loki">Loki &amp; log queries</h2>
+      <p>Promtail tails Docker JSON logs and ships them to Loki. All gateway log lines are structured JSON (via pino) - every line includes <code>sub</code> (user identity), <code>entity</code>, <code>reqId</code>, and <code>tool</code> where relevant. Sensitive fields (<code>password</code>, <code>token</code>, <code>fields</code>, <code>search_string</code>) are redacted before logging.</p>
+      <p>Query logs in Grafana Explore (select <strong>Loki</strong> datasource):</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">logql</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># All logs for a specific user</span>
+{job="suitecrm-mcp"} | json | sub="auth0|abc123"
+
+<span class="cm"># All tool calls on a specific entity</span>
+{job="suitecrm-mcp"} | json | entity="crm1" | msg="tool call"
+
+<span class="cm"># Auth failures in the last hour</span>
+{job="suitecrm-mcp"} | json | level="warn" | msg=~"auth.*fail|invalid.*key"
+
+<span class="cm"># Trace a request by ID</span>
+{job="suitecrm-mcp"} | json | reqId="req-xyz"</pre>
+      </div>
+      <div class="callout callout-warn">
+        <strong>Note:</strong> Loki requires Docker Compose - it does not run automatically on systemd installs. Run <code>docker compose up -d loki promtail grafana</code> separately and point Promtail at the journal or log files.
+      </div>
+
+      <hr class="sub-divider" />
+      <h2 id="obs-alerts">Alerting rules</h2>
+      <p>Prometheus alerting rules are in <code>monitoring/prometheus/rules.yml</code> and loaded automatically by the bundled Prometheus. Four rules are configured:</p>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Alert</th><th>Condition</th><th>Severity</th></tr></thead>
+          <tbody>
+            <tr><td>Circuit breaker open</td><td><code>circuit_breaker_state == 2</code> for 1 min</td><td>Critical</td></tr>
+            <tr><td>High auth failure rate</td><td>&gt;10 failures/min for 5 min</td><td>Warning</td></tr>
+            <tr><td>Latency SLO breach</td><td>p99 tool latency &gt; 5s for 5 min</td><td>Warning</td></tr>
+            <tr><td>Session expiry storm</td><td>&gt;20 renewals/min for 3 min</td><td>Warning</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>To wire up notifications (Slack, PagerDuty, email), add an Alertmanager config to <code>docker-compose.yml</code> and point Prometheus at it via <code>alerting.alertmanagers</code> in <code>monitoring/prometheus.yml</code>.</p>
+
     </section>
 
   </main>
