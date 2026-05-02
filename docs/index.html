@@ -1227,12 +1227,9 @@
     <span></span><span></span><span></span>
   </button>
   <div class="nav-links" id="nav-links">
-    <a href="#who-its-for">Who It's For</a>
     <a href="#security-model">Security</a>
-    <a href="#features">Features</a>
     <a href="#tools">Tools</a>
     <a href="#quickstart">Quick Start</a>
-    <a href="#clients">Clients</a>
     <a href="docs.html">Docs</a>
     <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener">GitHub</a>
   </div>
@@ -1313,7 +1310,7 @@
         </div>
         <div class="feature-card fade-up delay-2">
           <h3>OAuth / OIDC Login</h3>
-          <p>Users authenticate through your identity provider (Auth0, Azure AD, or any OIDC provider). The gateway issues a short-lived personal API key on successful login.</p>
+          <p>Users authenticate through your identity provider (Auth0, Azure AD, or any OIDC provider). The gateway issues a revocable personal API key on successful login.</p>
         </div>
         <div class="feature-card fade-up delay-3">
           <h3>API Keys Expire</h3>
@@ -1763,12 +1760,25 @@
         <div class="prod-item"><span class="prod-check">+</span> Multi-entity routing</div>
         <div class="prod-item"><span class="prod-check">+</span> Systemd sandboxing (NoNewPrivileges, PrivateTmp)</div>
         <div class="prod-item"><span class="prod-check">+</span> MIT license</div>
-        <div class="prod-item"><span class="prod-check">+</span> Tested on SuiteCRM v7.x</div>
+        <div class="prod-item"><span class="prod-check">+</span> Tested on SuiteCRM 8.8.x</div>
       </div>
+      <p style="text-align:center;color:var(--text-muted);font-size:0.82rem;margin-top:18px;">Works with any SuiteCRM version supporting the v4_1 REST API.</p>
     </div>
   </section>
 
 </main>
+
+<!-- CTA Band -->
+<section style="padding:64px 0;background:rgba(196,93,37,0.06);border-top:1px solid rgba(196,93,37,0.15);border-bottom:1px solid rgba(196,93,37,0.15);">
+  <div class="wrap" style="text-align:center;">
+    <h2 style="font-size:1.6rem;font-weight:700;color:var(--text-primary);margin:0 0 12px;">Deploy the gateway in five minutes.</h2>
+    <p style="color:var(--text-muted);font-size:1rem;margin:0 0 32px;">One install script. Bring your own identity provider.</p>
+    <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
+      <a href="docs.html" class="btn btn-primary">Read the Docs</a>
+      <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener" class="btn btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+</section>
 
 <!-- Footer -->
 <footer>
