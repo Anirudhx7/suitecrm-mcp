@@ -1196,16 +1196,12 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      * {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-      }
       #webgl-canvas { display: none; }
       body::before { display: none; }
       .cursor,
       .cursor-follower { display: none; }
       body { cursor: auto; }
+      .grain-overlay { animation: none; }
     }
   </style>
 </head>
