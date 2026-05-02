@@ -1,5 +1,6 @@
 # <a name="top"></a>suitecrm-mcp
 
+[![Live Docs](https://img.shields.io/badge/Docs-Live-orange?style=flat-square)](https://anirudhx7.github.io/suitecrm-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/Anirudhx7/suitecrm-mcp?color=369eff&labelColor=black&logo=github&style=flat-square)](https://github.com/Anirudhx7/suitecrm-mcp/releases)
 [![CI](https://github.com/Anirudhx7/suitecrm-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Anirudhx7/suitecrm-mcp/actions/workflows/ci.yml)
