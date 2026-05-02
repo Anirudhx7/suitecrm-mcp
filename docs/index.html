@@ -1653,10 +1653,12 @@
     if (!href || href.startsWith('#')) return;
     e.preventDefault();
     document.body.classList.add('page-exit');
-    setTimeout(() => { location.href = href; }, 220);
+    _navTimer = setTimeout(() => { location.href = href; }, 220);
   });
-  window.addEventListener('pageshow', e => {
-    if (e.persisted) document.body.classList.remove('page-exit');
+  let _navTimer;
+  window.addEventListener('pageshow', () => {
+    clearTimeout(_navTimer);
+    document.body.classList.remove('page-exit');
   });
 
   /* Smooth scroll engine */
