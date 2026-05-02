@@ -104,7 +104,7 @@ flowchart TB
         CD["Claude Desktop"] ~~~ CC["Claude Code"] ~~~ OC["OpenClaw"]
     end
 
-    GW["⚡ suitecrm-mcp gateway\nOAuth2 · API keys · SSE"]
+    GW["⚡ suitecrm-mcp gateway\nOAuth2 login · personal API keys · SSE transport · CRM REST proxy"]
 
     subgraph CRMs["SuiteCRM Instances"]
         C1[("CRM A")] ~~~ C2[("CRM B")] ~~~ CX[("CRM X")]
