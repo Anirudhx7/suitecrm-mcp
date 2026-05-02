@@ -1198,9 +1198,6 @@
     @media (prefers-reduced-motion: reduce) {
       #webgl-canvas { display: none; }
       body::before { display: none; }
-      .cursor,
-      .cursor-follower { display: none; }
-      body { cursor: auto; }
       .grain-overlay { animation: none; }
     }
   </style>
@@ -1807,7 +1804,6 @@
   }, { passive: true });
 
   /* Custom cursor */
-  if (!prefersReducedMotion) {
   const cursor = document.getElementById('cursor');
   const follower = document.getElementById('cursor-follower');
   let fx = 0, fy = 0, cx = 0, cy = 0, cursorReady = false;
@@ -1831,7 +1827,6 @@
     follower.style.top = fy + 'px';
     requestAnimationFrame(animateCursor);
   })();
-  }
 
   /* IntersectionObserver - staggered fade-up */
   (function() {
