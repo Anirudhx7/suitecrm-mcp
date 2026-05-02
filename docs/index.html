@@ -145,7 +145,6 @@
       pointer-events: none;
       z-index: 10001;
       transform: translate(-50%, -50%);
-      mix-blend-mode: difference;
       transition: width 0.2s, height 0.2s, background 0.2s, opacity 0.3s;
     }
     .cursor-follower {
@@ -1195,6 +1194,13 @@
       .prod-grid { grid-template-columns: 1fr; }
     }
 
+    /* CTA band */
+    .cta-band { padding: 64px 0; background: rgba(196,93,37,0.06); border-top: 1px solid rgba(196,93,37,0.15); border-bottom: 1px solid rgba(196,93,37,0.15); }
+    .cta-band .wrap { text-align: center; }
+    .cta-band h2 { font-size: 1.6rem; font-weight: 700; color: var(--text-primary); margin: 0 0 12px; }
+    .cta-band p { color: var(--text-muted); font-size: 1rem; margin: 0 0 32px; }
+    .cta-band-actions { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+
     @media (prefers-reduced-motion: reduce) {
       #webgl-canvas { display: none; }
       body::before { display: none; }
@@ -1225,7 +1231,6 @@
   <div class="nav-links" id="nav-links">
     <a href="#security-model">Security</a>
     <a href="#observability">Observability</a>
-    <a href="#tools">Tools</a>
     <a href="#quickstart">Quick Start</a>
     <a href="docs.html">Docs</a>
     <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener">GitHub</a>
@@ -1766,11 +1771,11 @@
 </main>
 
 <!-- CTA Band -->
-<section style="padding:64px 0;background:rgba(196,93,37,0.06);border-top:1px solid rgba(196,93,37,0.15);border-bottom:1px solid rgba(196,93,37,0.15);">
-  <div class="wrap" style="text-align:center;">
-    <h2 style="font-size:1.6rem;font-weight:700;color:var(--text-primary);margin:0 0 12px;">Deploy the gateway in five minutes.</h2>
-    <p style="color:var(--text-muted);font-size:1rem;margin:0 0 32px;">One install script. Bring your own identity provider.</p>
-    <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
+<section class="cta-band">
+  <div class="wrap">
+    <h2>Deploy the gateway in five minutes.</h2>
+    <p>One install script. Bring your own identity provider.</p>
+    <div class="cta-band-actions">
       <a href="docs.html" class="btn btn-primary">Read the Docs</a>
       <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener" class="btn btn-secondary">View on GitHub</a>
     </div>
