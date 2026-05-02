@@ -96,6 +96,7 @@ Supported modules include: Accounts, Contacts, Leads, Opportunities, Cases, Call
 ## <a name="architecture"></a>🏗️ Architecture
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear"}}}%%
 flowchart TB
     IdP["🔐 Auth0 / Azure AD\nIdentity Provider"]
 
@@ -103,9 +104,7 @@ flowchart TB
         CD["Claude Desktop"] ~~~ CC["Claude Code"] ~~~ OC["OpenClaw"]
     end
 
-    subgraph GW["⚡ suitecrm-mcp gateway"]
-        GW_inner["OAuth2 · API keys · SSE"]
-    end
+    GW["⚡ suitecrm-mcp gateway\nOAuth2 · API keys · SSE"]
 
     subgraph CRMs["SuiteCRM Instances"]
         C1[("CRM A")] ~~~ C2[("CRM B")] ~~~ CX[("CRM X")]
@@ -116,7 +115,7 @@ flowchart TB
     Clients -->|"Bearer token"| GW
     GW -->|"v4_1 REST API"| CRMs
 
-    style GW_inner fill:#2b6cb0,stroke:#63b3ed,stroke-width:1px,color:#fff
+    style GW fill:#2b6cb0,stroke:#63b3ed,stroke-width:2px,color:#fff
     style IdP fill:#2d3748,stroke:#718096,color:#e2e8f0
     style CD fill:#2a4a7f,stroke:#63b3ed,stroke-width:1px,color:#ebf8ff
     style CC fill:#2a4a7f,stroke:#63b3ed,stroke-width:1px,color:#ebf8ff
@@ -126,7 +125,6 @@ flowchart TB
     style CX fill:#553c9a,stroke:#b794f4,stroke-width:1px,color:#faf5ff
     style Clients fill:#0d1b2e,stroke:#4299e1,stroke-width:1px,color:#90cdf4
     style CRMs fill:#1a0533,stroke:#9f7aea,stroke-width:1px,color:#d6bcfa
-    style GW fill:#1a3a5c,stroke:#63b3ed,stroke-width:2px,color:#90cdf4
 ```
 
 Users log in once via Auth0 or Azure AD; the gateway issues a personal API key. MCP clients attach it as `Authorization: Bearer <key>` on every request. CRM credentials never leave the gateway. Multiple CRM instances are supported - each gets its own port and tool namespace (`suitecrm_crm1_*`, `suitecrm_crm2_*`).
