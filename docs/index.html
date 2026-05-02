@@ -16,9 +16,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha512-dLxUelApnYxpLt6K2iomGngnHO83iUvZytA3YjDUCjT0HDOHKXnVYdf3hU4JjM8uEhxf9nD1/ey98U3t2vZ0qQ==" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js" integrity="sha512-16esztaSRplJROstbIIdwX3N97V1+pZvV33ABoG1H2OyTttBxEGkTsoIVsiP1iaTtM8b3+hu2kB6pQ4Clr5yug==" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js" integrity="sha512-Ic9xkERjyZ1xgJ5svx3y0u3xrvfT/uPkV99LBwe68xjy/mGtO+4eURHZBW2xW4SZbFrF1Tf090XqB+EVgXnVjw==" crossorigin="anonymous"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1032,6 +1032,8 @@
         top: var(--nav-h);
         left: 0; right: 0;
         background: rgba(8, 10, 14, 0.98);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
         border-bottom: 1px solid rgba(196, 93, 37, 0.2);
         padding: 12px 20px 20px;
         z-index: 99;
@@ -1105,6 +1107,18 @@
       opacity: 1;
       pointer-events: auto;
       transform: translateY(0);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      #webgl-canvas { display: none; }
+      .grain-overlay { display: none; }
+      .custom-cursor,
+      .cursor-dot { display: none; }
     }
   </style>
 </head>
@@ -1400,14 +1414,14 @@
           <div class="step-title">Connect your client</div>
         </div>
         <div class="qs-tabs" role="tablist">
-          <button class="qs-tab active" onclick="switchQSTab('desktop')" role="tab">Claude Desktop</button>
-          <button class="qs-tab" onclick="switchQSTab('code')" role="tab">Claude Code</button>
-          <button class="qs-tab" onclick="switchQSTab('openclaw')" role="tab">OpenClaw</button>
+          <button class="qs-tab active" id="qs-tab-desktop" onclick="switchQSTab('desktop')" role="tab" aria-selected="true" aria-controls="qs-panel-desktop">Claude Desktop</button>
+          <button class="qs-tab" id="qs-tab-code" onclick="switchQSTab('code')" role="tab" aria-selected="false" aria-controls="qs-panel-code">Claude Code</button>
+          <button class="qs-tab" id="qs-tab-openclaw" onclick="switchQSTab('openclaw')" role="tab" aria-selected="false" aria-controls="qs-panel-openclaw">OpenClaw</button>
         </div>
 
         <div class="qs-panels-wrap">
         <!-- Claude Desktop -->
-        <div class="qs-panel active" id="tab-desktop">
+        <div class="qs-panel active" id="qs-panel-desktop" role="tabpanel" aria-labelledby="qs-tab-desktop" aria-hidden="false">
           <div class="prereq-callout"><strong>Prerequisites:</strong> Claude Desktop installed · API key from Step 02 · Gateway reachable via HTTPS</div>
           <div class="qs-code-wrap">
             <div class="terminal" style="max-width:100%;margin-bottom:0;">
@@ -1437,7 +1451,7 @@
         </div>
 
         <!-- Claude Code -->
-        <div class="qs-panel" id="tab-code">
+        <div class="qs-panel" id="qs-panel-code" role="tabpanel" aria-labelledby="qs-tab-code" aria-hidden="true">
           <div class="prereq-callout"><strong>Prerequisites:</strong> Claude Code CLI installed · API key from Step 02 · Gateway reachable via HTTPS</div>
           <div class="qs-code-wrap">
             <div class="terminal" style="max-width:100%;margin-bottom:0;">
@@ -1457,7 +1471,7 @@
         </div>
 
         <!-- OpenClaw -->
-        <div class="qs-panel" id="tab-openclaw">
+        <div class="qs-panel" id="qs-panel-openclaw" role="tabpanel" aria-labelledby="qs-tab-openclaw" aria-hidden="true">
           <div class="prereq-callout"><strong>Prerequisites:</strong> OpenClaw installed on client machine · Gateway domain configured · Auth0 or Azure AD app created</div>
           <div class="qs-code-wrap">
             <div class="terminal" style="max-width:100%;margin-bottom:0;">
@@ -1537,7 +1551,11 @@
 </footer>
 
 <script>
-  gsap.registerPlugin(ScrollTrigger);
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (!prefersReducedMotion) {
+    gsap.registerPlugin(ScrollTrigger);
+  }
 
   /* Scroll progress + nav class */
   const progress = document.getElementById('scroll-progress');
@@ -1591,6 +1609,7 @@
   })();
 
   /* Three.js particle network */
+  if (!prefersReducedMotion)
   (function initWebGL() {
     const canvas = document.getElementById('webgl-canvas');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -1686,11 +1705,32 @@
   })();
 
   /* Quick Start tabs */
+  const QS_NAMES = ['desktop', 'code', 'openclaw'];
   function switchQSTab(name) {
-    const names = ['desktop', 'code', 'openclaw'];
-    document.querySelectorAll('.qs-tab').forEach((t, i) => t.classList.toggle('active', names[i] === name));
-    document.querySelectorAll('.qs-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+    QS_NAMES.forEach(n => {
+      const tab   = document.getElementById('qs-tab-' + n);
+      const panel = document.getElementById('qs-panel-' + n);
+      const active = n === name;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      panel.classList.toggle('active', active);
+      panel.setAttribute('aria-hidden', active ? 'false' : 'true');
+    });
   }
+
+  /* Keyboard navigation for Quick Start tabs (left/right arrows) */
+  document.querySelector('.qs-tabs').addEventListener('keydown', function(e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const tabs = QS_NAMES.map(n => document.getElementById('qs-tab-' + n));
+    const idx  = tabs.indexOf(document.activeElement);
+    if (idx === -1) return;
+    e.preventDefault();
+    const next = e.key === 'ArrowRight'
+      ? (idx + 1) % tabs.length
+      : (idx - 1 + tabs.length) % tabs.length;
+    switchQSTab(QS_NAMES[next]);
+    tabs[next].focus();
+  });
 
   /* Mobile nav toggle */
   function toggleMobileNav() {
