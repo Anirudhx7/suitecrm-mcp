@@ -1110,6 +1110,91 @@
       transform: translateY(0);
     }
 
+    /* 2-column variant of features grid */
+    .features-grid--2col { grid-template-columns: repeat(2, 1fr); }
+    @media (max-width: 768px) {
+      .features-grid--2col { grid-template-columns: 1fr; }
+    }
+
+    /* Comparison table */
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      max-width: 860px;
+    }
+    .compare-table th {
+      padding: 14px 20px;
+      text-align: left;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-bottom: 1px solid rgba(196, 93, 37, 0.3);
+    }
+    .compare-table th:first-child { color: var(--text-muted); }
+    .compare-table th:nth-child(2) { color: var(--text-muted); }
+    .compare-table th:nth-child(3) { color: #e8915a; }
+    .compare-table td {
+      padding: 12px 20px;
+      color: var(--text-secondary);
+      border-bottom: 1px solid rgba(196, 93, 37, 0.07);
+      vertical-align: top;
+      line-height: 1.5;
+    }
+    .compare-table td:first-child {
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+    }
+    .compare-table td:nth-child(3) {
+      color: var(--text-primary);
+    }
+    .compare-table tr:nth-child(even) td {
+      background: rgba(196, 93, 37, 0.04);
+    }
+    .compare-table tr:hover td {
+      background: rgba(196, 93, 37, 0.08);
+    }
+    .compare-wrap {
+      background: rgba(196, 93, 37, 0.05);
+      border: 1px solid rgba(196, 93, 37, 0.18);
+      border-radius: 4px;
+      overflow: hidden;
+      max-width: 860px;
+      overflow-x: auto;
+    }
+
+    /* Production ready checklist */
+    .prod-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px 24px;
+      max-width: 860px;
+    }
+    .prod-item {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(196, 93, 37, 0.07);
+    }
+    .prod-check {
+      color: #e8915a;
+      font-size: 0.9rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      line-height: 1.5;
+    }
+    @media (max-width: 768px) {
+      .prod-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 480px) {
+      .prod-grid { grid-template-columns: 1fr; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       * {
         animation-duration: 0.01ms !important;
@@ -1142,6 +1227,8 @@
     <span></span><span></span><span></span>
   </button>
   <div class="nav-links" id="nav-links">
+    <a href="#who-its-for">Who It's For</a>
+    <a href="#security-model">Security</a>
     <a href="#features">Features</a>
     <a href="#tools">Tools</a>
     <a href="#quickstart">Quick Start</a>
@@ -1161,8 +1248,7 @@
         <h1 class="hero-title fade-up"><span class="title-crm">SuiteCRM</span><span class="title-x"> × </span><span class="title-agents">AI Agents</span></h1>
         <p class="hero-role fade-up">The open-source MCP gateway for SuiteCRM.</p>
         <p class="hero-desc fade-up">
-          Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes.
-          24 tools. OAuth2/OIDC auth. Production-ready.
+          Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools. OAuth2/OIDC auth. Production-ready.
         </p>
         <div class="hero-actions fade-up">
           <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener" class="btn btn-primary">
@@ -1181,6 +1267,68 @@
           <span class="badge-pill badge-orange">24 tools</span>
         </div>
       </div>
+    </div>
+  </section>
+
+  <hr class="glow-divider" />
+
+  <!-- Who It's For -->
+  <section id="who-its-for">
+    <div class="wrap">
+      <div class="section-label fade-up">Who It's For</div>
+      <h2 class="section-title fade-up">Built for teams<br>that run on SuiteCRM.</h2>
+      <div class="features-grid features-grid--2col">
+        <div class="feature-card fade-up delay-1">
+          <h3>Sales Operations</h3>
+          <p>Give sales reps an AI assistant that searches, updates, and reports on CRM accounts - without exposing API credentials or requiring custom integration work.</p>
+        </div>
+        <div class="feature-card fade-up delay-2">
+          <h3>CRM Administrators</h3>
+          <p>Deploy once, control access by group. Issue and revoke API keys without touching CRM user permissions. Full audit trail included.</p>
+        </div>
+        <div class="feature-card fade-up delay-3">
+          <h3>Internal AI Platform Teams</h3>
+          <p>Add SuiteCRM as a tool in your agent stack. Multi-entity routing means one gateway serves your entire CRM fleet.</p>
+        </div>
+        <div class="feature-card fade-up delay-4">
+          <h3>Support &amp; Account Teams</h3>
+          <p>Let support agents look up accounts, contacts, and opportunities in natural language through Claude, without CRM training or portal access.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="glow-divider" />
+
+  <!-- Security Model -->
+  <section id="security-model">
+    <div class="wrap">
+      <div class="section-label fade-up">Security Model</div>
+      <h2 class="section-title fade-up">Hardened by design.</h2>
+      <p class="section-sub fade-up">Every layer of the auth stack is explicit. Nothing is trusted by default.</p>
+      <div class="features-grid">
+        <div class="feature-card fade-up delay-1">
+          <h3>Credentials Stay Server-Side</h3>
+          <p>CRM username and password are stored in the gateway profile store. Clients only hold a personal API key. No CRM secrets on user machines.</p>
+        </div>
+        <div class="feature-card fade-up delay-2">
+          <h3>OAuth / OIDC Login</h3>
+          <p>Users authenticate through your identity provider (Auth0, Azure AD, or any OIDC provider). The gateway issues a short-lived personal API key on successful login.</p>
+        </div>
+        <div class="feature-card fade-up delay-3">
+          <h3>API Keys Expire</h3>
+          <p>Keys expire after 90 days by default (configurable). Admins can revoke any key immediately. Keys are scoped per user and per entity.</p>
+        </div>
+        <div class="feature-card fade-up delay-4">
+          <h3>Redacted Audit Logs</h3>
+          <p>All tool calls are logged with user sub, entity, and tool name. Sensitive fields - tokens, passwords, search strings - are redacted before writing.</p>
+        </div>
+        <div class="feature-card fade-up delay-5">
+          <h3>Per-Entity Access Control</h3>
+          <p>Group membership controls which CRM entities a user can access. No group, no connection - even with a valid API key.</p>
+        </div>
+      </div>
+      <p class="obs-footer fade-up" style="margin-top:32px;">Full observability via Prometheus metrics, Grafana dashboards, and Loki log aggregation.</p>
     </div>
   </section>
 
@@ -1532,6 +1680,90 @@
           <p>Two-component setup - gateway on your server, bridge plugin on the OpenClaw machine. Full guide included.</p>
           <a href="docs.html#connect-openclaw" class="client-link">Setup guide →</a>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="glow-divider" />
+
+  <!-- Why Not API -->
+  <section id="why-not-api">
+    <div class="wrap">
+      <div class="section-label fade-up">Comparison</div>
+      <h2 class="section-title fade-up">Why not just call<br>the REST API?</h2>
+      <p class="section-sub fade-up">The v4_1 REST API works. It just puts the burden - and the risk - on every client.</p>
+      <div class="compare-wrap fade-up">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th>Concern</th>
+              <th>Direct SuiteCRM REST</th>
+              <th>suitecrm-mcp gateway</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Auth</td>
+              <td>CRM credentials on every client</td>
+              <td>OAuth/OIDC login, personal API key</td>
+            </tr>
+            <tr>
+              <td>Tool schema</td>
+              <td>Raw JSON, no descriptions</td>
+              <td>24 typed MCP tools with descriptions</td>
+            </tr>
+            <tr>
+              <td>Multi-client</td>
+              <td>Manual per-client setup</td>
+              <td>One gateway, any MCP client</td>
+            </tr>
+            <tr>
+              <td>Key management</td>
+              <td>CRM admin per user</td>
+              <td>Issue / revoke from CLI</td>
+            </tr>
+            <tr>
+              <td>Observability</td>
+              <td>None</td>
+              <td>Prometheus + Grafana + Loki</td>
+            </tr>
+            <tr>
+              <td>Session handling</td>
+              <td>Manual login per call</td>
+              <td>Auto-renew, cached per user</td>
+            </tr>
+            <tr>
+              <td>Audit logging</td>
+              <td>None</td>
+              <td>Structured JSON, redacted</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <hr class="glow-divider" />
+
+  <!-- Production Ready -->
+  <section id="production-ready">
+    <div class="wrap">
+      <div class="section-label fade-up">Production Ready</div>
+      <h2 class="section-title fade-up">Ships with everything<br>ops needs.</h2>
+      <p class="section-sub fade-up">Not a prototype. A checklist of what's already in the box.</p>
+      <div class="prod-grid fade-up">
+        <div class="prod-item"><span class="prod-check">+</span> Docker + systemd deployment</div>
+        <div class="prod-item"><span class="prod-check">+</span> Prometheus metrics (17 metrics)</div>
+        <div class="prod-item"><span class="prod-check">+</span> Grafana dashboards (33-panel entity + fleet overview)</div>
+        <div class="prod-item"><span class="prod-check">+</span> Loki log aggregation</div>
+        <div class="prod-item"><span class="prod-check">+</span> Prometheus alerting rules (circuit breaker, auth failures, latency SLO)</div>
+        <div class="prod-item"><span class="prod-check">+</span> Circuit breaker on CRM backend</div>
+        <div class="prod-item"><span class="prod-check">+</span> Per-user rate limiting</div>
+        <div class="prod-item"><span class="prod-check">+</span> TLS / Let's Encrypt support</div>
+        <div class="prod-item"><span class="prod-check">+</span> Multi-entity routing</div>
+        <div class="prod-item"><span class="prod-check">+</span> Systemd sandboxing (NoNewPrivileges, PrivateTmp)</div>
+        <div class="prod-item"><span class="prod-check">+</span> MIT license</div>
+        <div class="prod-item"><span class="prod-check">+</span> Tested on SuiteCRM v7.x</div>
       </div>
     </div>
   </section>
