@@ -23,15 +23,16 @@ Ships with a full observability stack: Prometheus metrics, Grafana dashboards (3
 | ✨ | [Features](#features) |
 | 🛠️ | [Tools](#tools) |
 | 🏗️ | [Architecture](#architecture) |
+| 📊 | [Observability](#observability) |
 | 📋 | [Prerequisites](#prerequisites) |
 | 🔑 | [SuiteCRM API User Setup](#suitecrm-api-user-setup) |
-| 🐳 | [Docker](#docker) |
 | ⚡ | [Quick Start - Single CRM](#quick-start---single-crm) |
 | 🌐 | [Multi-Entity Install](#multi-entity-install) |
+| 🐳 | [Docker](#docker) |
 | ⚙️ | [Configuration](#configuration) |
-| 📊 | [Health Checks and Monitoring](#health-checks-and-monitoring) |
 | 🔒 | [TLS](#tls) |
 | 🔌 | [Connecting a Client](#connecting-a-client) |
+| 📊 | [Health Checks and Monitoring](#health-checks-and-monitoring) |
 | 🔧 | [Troubleshooting](#troubleshooting) |
 | ✅ | [Supported SuiteCRM Versions](#supported-suitecrm-versions) |
 | ⚠️ | [Known Limitations](#known-limitations) |
@@ -130,6 +131,22 @@ Users log in once via Auth0 or Azure AD; the gateway issues a personal API key. 
 
 ---
 
+## <a name="observability"></a>📊 Observability
+
+Ships with a complete observability stack in `docker-compose.yml` - one command starts everything alongside the gateway.
+
+| Component | What you get |
+|-----------|-------------|
+| **Prometheus** | 17 metrics: request rate, latency histograms per entity, active sessions, CRM error codes, circuit breaker state, rate-limit hits, auth counters |
+| **Grafana** | 33-panel entity dashboard (system health, user/session tables, CRM backend, security, tool breakdown) + fleet overview dashboard for multi-entity. Query structured logs and metrics side-by-side in Grafana Explore. |
+| **Loki** | Structured JSON log ingestion via Promtail - search and filter logs by user, entity, or request ID directly in Grafana Explore using LogQL, queryable alongside metrics, sensitive fields auto-redacted |
+
+Alerting rules included for: circuit breaker open, high auth failure rate, latency SLO breach, session expiry storms.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
+
+---
+
 ## <a name="prerequisites"></a>📋 Prerequisites
 
 - Ubuntu 20.04+ or Debian 11+ (the installers use `apt`, `systemd`, and `nginx`)
@@ -153,6 +170,100 @@ Before connecting, make sure your CRM user has API access enabled:
 If API access isn't enabled, the gateway returns HTTP 401 with `CRM authentication failed: Invalid Login` immediately on connection - this is the most common first-run failure.
 
 For production: create a dedicated API user with only the module permissions your AI assistant needs. Don't use the admin account.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
+
+---
+
+## <a name="quick-start---single-crm"></a>⚡ Quick Start - Single CRM
+
+For one CRM with automatic HTTPS and OAuth login.
+
+**Requirements:** Ubuntu/Debian, Python 3.8+, root access, a domain pointing to this server, OAuth app credentials (see [docs/auth0-setup.md](docs/auth0-setup.md))
+
+```bash
+git clone https://github.com/anirudhx7/suitecrm-mcp.git
+cd suitecrm-mcp
+sudo python3 install.py \
+  --url https://your-crm.example.com \
+  --domain mcp.yourserver.com \
+  --email you@example.com
+```
+
+The installer will prompt for OAuth configuration (issuer, client ID/secret, audience, gateway URL), then set up nginx, certbot, and systemd automatically.
+
+After install, users authenticate at `https://mcp.yourserver.com/auth/login` to get their API key.
+
+**Test gateway health:**
+```bash
+curl https://mcp.yourserver.com/health
+```
+
+**Verify it's working in Claude Desktop:**
+
+After adding the MCP server config (see [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md)) and restarting Claude Desktop, click the hammer icon. You should see 24 tools: `suitecrm_search`, `suitecrm_get`, etc.
+
+Try a test prompt: `"List the first 5 accounts in the CRM"` - Claude should call `suitecrm_search` automatically.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
+
+---
+
+## <a name="multi-entity-install"></a>🌐 Multi-Entity Install
+
+For N CRM instances behind nginx - each gets its own port and path.
+
+**1. Copy and fill in the config:**
+```bash
+cp entities.example.json entities.json
+# Edit entities.json with your CRM endpoints and ports
+```
+
+**2. Run the installer:**
+```bash
+sudo python3 install.py --config entities.json
+```
+
+**3. Enable HTTPS (recommended for production):**
+
+Pass `--domain` and `--email`. The installer updates the nginx config with your domain and runs certbot automatically.
+
+```bash
+sudo python3 install.py --config entities.json \
+  --domain mcp.yourserver.com \
+  --email you@example.com
+```
+
+The domain must already point to this server's public IP, and ports 80 and 443 must be open. After this step the gateway is available at `https://mcp.yourserver.com/<code>/sse`.
+
+Once configured, the domain is saved automatically. Later `--add` and `--remove` runs preserve HTTPS without needing `--domain` again.
+
+**4. Open the nginx port** (if using ufw, HTTP-only installs only):
+```bash
+sudo ufw allow 8080/tcp
+```
+
+**5. Test a specific entity:**
+After authenticating at `/auth/login` and getting an API key:
+```bash
+curl -s -H "Authorization: Bearer your_api_key_here" \
+  http://YOUR_SERVER:8080/crm1/test
+# Expected: {"success":true,"crm_user":"...","email":"...","entity":"crm1"}
+```
+
+**6. Connect at:** `http://YOUR_SERVER:8080/<code>/sse` (or `https://your-domain/<code>/sse` if HTTPS is enabled)
+
+**Verify it's working in Claude Desktop:** After restarting Claude Desktop, click the hammer icon. You should see 24 tools per entity: `suitecrm_crm1_search`, `suitecrm_crm2_search`, etc.
+
+**Add entities later (no downtime on existing):**
+```bash
+sudo python3 install.py --add --config entities.json
+```
+
+**Remove an entity:**
+```bash
+sudo python3 install.py --remove crm2
+```
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -291,100 +402,6 @@ Put a reverse proxy (nginx, Caddy) in front to route `/crm1/` to port 3101, `/cr
 
 ---
 
-## <a name="quick-start---single-crm"></a>⚡ Quick Start - Single CRM
-
-For one CRM with automatic HTTPS and OAuth login.
-
-**Requirements:** Ubuntu/Debian, Python 3.8+, root access, a domain pointing to this server, OAuth app credentials (see [docs/auth0-setup.md](docs/auth0-setup.md))
-
-```bash
-git clone https://github.com/anirudhx7/suitecrm-mcp.git
-cd suitecrm-mcp
-sudo python3 install.py \
-  --url https://your-crm.example.com \
-  --domain mcp.yourserver.com \
-  --email you@example.com
-```
-
-The installer will prompt for OAuth configuration (issuer, client ID/secret, audience, gateway URL), then set up nginx, certbot, and systemd automatically.
-
-After install, users authenticate at `https://mcp.yourserver.com/auth/login` to get their API key.
-
-**Test gateway health:**
-```bash
-curl https://mcp.yourserver.com/health
-```
-
-**Verify it's working in Claude Desktop:**
-
-After adding the MCP server config (see [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md)) and restarting Claude Desktop, click the hammer icon. You should see 24 tools: `suitecrm_search`, `suitecrm_get`, etc.
-
-Try a test prompt: `"List the first 5 accounts in the CRM"` - Claude should call `suitecrm_search` automatically.
-
-<p align="right"><a href="#top">↑ back to top</a></p>
-
----
-
-## <a name="multi-entity-install"></a>🌐 Multi-Entity Install
-
-For N CRM instances behind nginx - each gets its own port and path.
-
-**1. Copy and fill in the config:**
-```bash
-cp entities.example.json entities.json
-# Edit entities.json with your CRM endpoints and ports
-```
-
-**2. Run the installer:**
-```bash
-sudo python3 install.py --config entities.json
-```
-
-**3. Enable HTTPS (recommended for production):**
-
-Pass `--domain` and `--email`. The installer updates the nginx config with your domain and runs certbot automatically.
-
-```bash
-sudo python3 install.py --config entities.json \
-  --domain mcp.yourserver.com \
-  --email you@example.com
-```
-
-The domain must already point to this server's public IP, and ports 80 and 443 must be open. After this step the gateway is available at `https://mcp.yourserver.com/<code>/sse`.
-
-Once configured, the domain is saved automatically. Later `--add` and `--remove` runs preserve HTTPS without needing `--domain` again.
-
-**4. Open the nginx port** (if using ufw, HTTP-only installs only):
-```bash
-sudo ufw allow 8080/tcp
-```
-
-**5. Test a specific entity:**
-After authenticating at `/auth/login` and getting an API key:
-```bash
-curl -s -H "Authorization: Bearer your_api_key_here" \
-  http://YOUR_SERVER:8080/crm1/test
-# Expected: {"success":true,"crm_user":"...","email":"...","entity":"crm1"}
-```
-
-**6. Connect at:** `http://YOUR_SERVER:8080/<code>/sse` (or `https://your-domain/<code>/sse` if HTTPS is enabled)
-
-**Verify it's working in Claude Desktop:** After restarting Claude Desktop, click the hammer icon. You should see 24 tools per entity: `suitecrm_crm1_search`, `suitecrm_crm2_search`, etc.
-
-**Add entities later (no downtime on existing):**
-```bash
-sudo python3 install.py --add --config entities.json
-```
-
-**Remove an entity:**
-```bash
-sudo python3 install.py --remove crm2
-```
-
-<p align="right"><a href="#top">↑ back to top</a></p>
-
----
-
 ## <a name="configuration"></a>⚙️ Configuration
 
 ### Single entity - environment variables
@@ -431,6 +448,56 @@ sudo python3 install.py --remove crm2
 ```
 
 Keys become the entity code (nginx path prefix, tool prefix suffix, service name). Ports must be unique.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
+
+---
+
+## <a name="tls"></a>🔒 TLS
+
+### Gateway HTTPS (Let's Encrypt)
+
+Pass `--domain` and `--email` to the installer to enable HTTPS on the gateway itself. The installer sets up nginx as a TLS-terminating reverse proxy and runs certbot to obtain and auto-renew a certificate.
+
+Requirements:
+- Domain must already point to this server's public IP
+- Ports 80 (ACME challenge) and 443 (HTTPS) must be open
+
+If certbot fails during install, the gateway still runs over HTTP. Fix DNS/firewall and re-run:
+```bash
+certbot --nginx -d your.domain.com -m you@example.com --agree-tos --redirect
+```
+
+### Self-Signed CRM Certificates
+
+If your SuiteCRM uses a self-signed certificate, add `"tls_skip": true` to the entity config (multi) or pass `--tls-skip` (single). This sets `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+
+Only use this on trusted internal networks. Never expose a TLS-skipping gateway to the public internet.
+
+<p align="right"><a href="#top">↑ back to top</a></p>
+
+---
+
+## <a name="connecting-a-client"></a>🔌 Connecting a Client
+
+Any MCP client that supports SSE transport with custom request headers will work.
+Each client has a different setup process - see the dedicated guide for your client:
+
+| Client | How it connects | Setup guide |
+|--------|----------------|-------------|
+| Claude Desktop | SSE direct - no bridge needed | [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md) |
+| Claude Code (CLI) | SSE direct - no bridge needed | [docs/connect-claude-code.md](docs/connect-claude-code.md) |
+| OpenClaw | Bridge installer required | [docs/connect-openclaw.md](docs/connect-openclaw.md) |
+
+**Claude Desktop and Claude Code** connect directly to the gateway URL over SSE.
+After installing the gateway, add the SSE endpoint and your CRM credentials to
+your client config. Full steps including single/multi entity configs, HTTPS
+variants, and verification are in the guides above.
+
+**OpenClaw** uses a two-component setup: the gateway runs on a remote server
+(installed via `install.py`) and a bridge plugin runs locally on the OpenClaw
+machine (installed via `install-bridge.py`). The bridge proxies all 24 SuiteCRM
+tools through to the gateway. The OpenClaw guide covers both components end to end.
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -503,8 +570,8 @@ curl http://127.0.0.1:9091/metrics
 The included `docker-compose.yml` starts a Prometheus + Grafana + Loki stack that scrapes both services automatically. Set `GRAFANA_PASSWORD` in your environment and visit `http://localhost:3000`.
 
 Two dashboards are provisioned automatically:
-- **suitecrm-mcp** — per-entity view: 33 panels across system health, users/sessions, CRM backend, security, and tool breakdown rows
-- **suitecrm-mcp-fleet** — multi-entity overview: all entities at a glance (circuit breaker state, connection counts, error rates, latency)
+- **suitecrm-mcp** - per-entity view: 33 panels across system health, users/sessions, CRM backend, security, and tool breakdown rows
+- **suitecrm-mcp-fleet** - multi-entity overview: all entities at a glance (circuit breaker state, connection counts, error rates, latency)
 
 For systemd installs, add scrape targets to `monitoring/prometheus.yml`:
 ```yaml
@@ -527,56 +594,6 @@ The gateway tracks consecutive CRM REST API failures per entity. When the failur
 This prevents a slow or unresponsive CRM from tying up connections and causing cascading timeouts in the MCP client.
 
 The current state appears in both `/health` and `{prefix}_server_info` tool responses.
-
-<p align="right"><a href="#top">↑ back to top</a></p>
-
----
-
-## <a name="tls"></a>🔒 TLS
-
-### Gateway HTTPS (Let's Encrypt)
-
-Pass `--domain` and `--email` to the installer to enable HTTPS on the gateway itself. The installer sets up nginx as a TLS-terminating reverse proxy and runs certbot to obtain and auto-renew a certificate.
-
-Requirements:
-- Domain must already point to this server's public IP
-- Ports 80 (ACME challenge) and 443 (HTTPS) must be open
-
-If certbot fails during install, the gateway still runs over HTTP. Fix DNS/firewall and re-run:
-```bash
-certbot --nginx -d your.domain.com -m you@example.com --agree-tos --redirect
-```
-
-### Self-Signed CRM Certificates
-
-If your SuiteCRM uses a self-signed certificate, add `"tls_skip": true` to the entity config (multi) or pass `--tls-skip` (single). This sets `NODE_TLS_REJECT_UNAUTHORIZED=0`.
-
-Only use this on trusted internal networks. Never expose a TLS-skipping gateway to the public internet.
-
-<p align="right"><a href="#top">↑ back to top</a></p>
-
----
-
-## <a name="connecting-a-client"></a>🔌 Connecting a Client
-
-Any MCP client that supports SSE transport with custom request headers will work.
-Each client has a different setup process - see the dedicated guide for your client:
-
-| Client | How it connects | Setup guide |
-|--------|----------------|-------------|
-| Claude Desktop | SSE direct - no bridge needed | [docs/connect-claude-desktop.md](docs/connect-claude-desktop.md) |
-| Claude Code (CLI) | SSE direct - no bridge needed | [docs/connect-claude-code.md](docs/connect-claude-code.md) |
-| OpenClaw | Bridge installer required | [docs/connect-openclaw.md](docs/connect-openclaw.md) |
-
-**Claude Desktop and Claude Code** connect directly to the gateway URL over SSE.
-After installing the gateway, add the SSE endpoint and your CRM credentials to
-your client config. Full steps including single/multi entity configs, HTTPS
-variants, and verification are in the guides above.
-
-**OpenClaw** uses a two-component setup: the gateway runs on a remote server
-(installed via `install.py`) and a bridge plugin runs locally on the OpenClaw
-machine (installed via `install-bridge.py`). The bridge proxies all 24 SuiteCRM
-tools through to the gateway. The OpenClaw guide covers both components end to end.
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 

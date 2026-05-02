@@ -602,6 +602,45 @@
     .t-url     { color: #e8915a; }
     .t-gap     { display: block; margin-top: 14px; }
 
+    /* Observability */
+    .obs-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+    }
+    .obs-card {
+      background: rgba(196, 93, 37, 0.07);
+      border: 1px solid rgba(196, 93, 37, 0.18);
+      border-radius: 4px;
+      padding: 28px 26px;
+      transition: all 0.35s var(--ease-smooth);
+      position: relative;
+    }
+    .obs-card:hover {
+      border-color: rgba(196, 93, 37, 0.4);
+      background: rgba(196, 93, 37, 0.12);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 32px rgba(196,93,37,0.15);
+      transform: translateY(-5px);
+    }
+    .obs-icon {
+      width: 44px; height: 44px;
+      background: rgba(196, 93, 37, 0.1);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+      font-size: 20px;
+    }
+    .obs-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; color: var(--text-primary); }
+    .obs-stat { font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); font-weight: 600; letter-spacing: 0.04em; margin-bottom: 16px; }
+    .obs-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    .obs-list li { font-size: 0.84rem; color: var(--text-secondary); padding-left: 16px; position: relative; line-height: 1.5; }
+    .obs-list li::before { content: '-'; position: absolute; left: 0; color: rgba(196,93,37,0.5); }
+    .obs-footer { margin-top: 40px; text-align: center; font-size: 0.88rem; color: var(--text-muted); line-height: 1.7; }
+    .obs-footer code { color: #e8915a; font-family: var(--font-mono); font-size: 0.83rem; }
+
     /* Install Steps */
     .install-steps {
       display: flex;
@@ -1014,6 +1053,7 @@
       body { cursor: auto; }
       .btn { cursor: pointer; }
       .hiw-flow { grid-template-columns: 1fr; }
+      .obs-grid { grid-template-columns: 1fr; }
       .hiw-arrow { display: none; }
       .qs-tab { padding: 8px 10px; font-size: 0.72rem; }
       .nav-hamburger { cursor: pointer; }
@@ -1258,6 +1298,56 @@
           <p>Paste the key into Claude Desktop, Claude Code, or OpenClaw. 24 SuiteCRM tools load instantly.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <hr class="glow-divider" />
+
+  <!-- Observability -->
+  <section id="observability">
+    <div class="wrap">
+      <div class="section-label fade-up">Observability</div>
+      <h2 class="section-title fade-up">Not a black box.</h2>
+      <p class="section-sub fade-up">Most MCP gateways ship with nothing. This one includes a complete production observability stack out of the box.</p>
+      <div class="obs-grid">
+        <div class="obs-card fade-up delay-1">
+          <div class="obs-icon">📊</div>
+          <h3>Prometheus</h3>
+          <div class="obs-stat">17 metrics</div>
+          <ul class="obs-list">
+            <li>Request rate and latency histograms per entity</li>
+            <li>Active user and session gauges</li>
+            <li>CRM error codes and circuit breaker state</li>
+            <li>Rate-limit hits and connection rejections</li>
+            <li>Auth token issue, revoke, and verify counters</li>
+          </ul>
+        </div>
+        <div class="obs-card fade-up delay-2">
+          <div class="obs-icon">📈</div>
+          <h3>Grafana</h3>
+          <div class="obs-stat">33-panel dashboard</div>
+          <ul class="obs-list">
+            <li>System health, error rates, and latency panels</li>
+            <li>Per-user and per-session live tables</li>
+            <li>CRM backend health and tool breakdown rows</li>
+            <li>Security events and auth failure tracking</li>
+            <li>Fleet overview for multi-entity deployments</li>
+          </ul>
+        </div>
+        <div class="obs-card fade-up delay-3">
+          <div class="obs-icon">🪵</div>
+          <h3>Loki</h3>
+          <div class="obs-stat">Structured log ingestion</div>
+          <ul class="obs-list">
+            <li>JSON logs via Pino with per-request IDs</li>
+            <li>sub, email, and entity on every log line</li>
+            <li>Promtail tails Docker JSON logs into Loki</li>
+            <li>Search and filter logs in Grafana Explore using LogQL</li>
+            <li>Sensitive fields auto-redacted before logging</li>
+          </ul>
+        </div>
+      </div>
+      <p class="obs-footer fade-up">All three ship in <code>docker-compose.yml</code>. One command starts the full stack.<br>Alerting rules included for circuit breaker open, auth failures, and latency SLO breaches.</p>
     </div>
   </section>
 
