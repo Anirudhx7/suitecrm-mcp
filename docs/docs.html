@@ -163,6 +163,9 @@
       border-radius: 2px;
       transition: all 0.3s;
     }
+    .nav-hamburger.open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+    .nav-hamburger.open span:nth-child(2) { opacity: 0; }
+    .nav-hamburger.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
     /* Layout */
     .docs-layout {
@@ -502,7 +505,7 @@
       .docs-main { padding: 32px 20px 60px; }
       .top-nav { padding: 16px 20px; }
       .nav-hamburger { display: flex; }
-      .nav-links a { display: none; }
+      .nav-links { display: none; }
       .code-block pre { font-size: 0.76rem; }
       .docs-table { font-size: 0.78rem; }
     }
@@ -593,10 +596,10 @@
 <!-- Navigation -->
 <nav class="top-nav">
   <a href="index.html" class="nav-logo">Suite<span>CRM</span>-mcp</a>
+  <button class="nav-hamburger" id="nav-hamburger" onclick="toggleSidebar()" aria-label="Toggle sidebar">
+    <span></span><span></span><span></span>
+  </button>
   <div class="nav-links">
-    <button class="nav-hamburger" onclick="toggleSidebar()" aria-label="Toggle sidebar">
-      <span></span><span></span><span></span>
-    </button>
     <a href="index.html">Home</a>
     <a href="docs.html" class="nav-active">Docs</a>
     <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener">GitHub</a>
@@ -1598,10 +1601,12 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
   function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebar-overlay').classList.toggle('visible');
+    document.getElementById('nav-hamburger').classList.toggle('open');
   }
   function closeSidebar() {
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('sidebar-overlay').classList.remove('visible');
+    document.getElementById('nav-hamburger').classList.remove('open');
   }
 
   /* Close sidebar on link click (mobile) */
