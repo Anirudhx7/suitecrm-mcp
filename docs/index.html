@@ -852,7 +852,11 @@
     }
     .qs-tab:hover:not(.active) { color: var(--text-secondary); background: rgba(196, 93, 37, 0.08); }
     .qs-panel { display: none; max-width: 740px; }
-    .qs-panel.active { display: block; }
+    .qs-panel.active { display: block; animation: tabIn 0.22s ease forwards; }
+    @keyframes tabIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
 
     /* Prereq callout */
     .prereq-callout {
@@ -978,7 +982,7 @@
         align-items: flex-start;
         gap: 0;
         position: fixed;
-        top: 57px;
+        top: var(--nav-h);
         left: 0; right: 0;
         background: rgba(8, 10, 14, 0.98);
         border-bottom: 1px solid rgba(196, 93, 37, 0.2);
@@ -1004,6 +1008,7 @@
       .hiw-flow { grid-template-columns: 1fr; }
       .hiw-arrow { display: none; }
       .qs-tab { padding: 8px 10px; font-size: 0.72rem; }
+      .nav-hamburger { cursor: pointer; }
       .docs-cta { flex-direction: column; align-items: flex-start; }
       .terminal-header { padding: 10px 14px; }
       .terminal-dot { width: 10px; height: 10px; }
@@ -1594,6 +1599,14 @@
     btn.classList.toggle('open');
     links.classList.toggle('mobile-open');
   }
+  document.addEventListener('click', e => {
+    const btn = document.getElementById('nav-hamburger');
+    const links = document.getElementById('nav-links');
+    if (links.classList.contains('mobile-open') && !btn.contains(e.target) && !links.contains(e.target)) {
+      btn.classList.remove('open');
+      links.classList.remove('mobile-open');
+    }
+  });
   /* Close mobile nav on link click */
   document.querySelectorAll('.nav-links a').forEach(a => {
     a.addEventListener('click', () => {
