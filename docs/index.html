@@ -144,8 +144,8 @@
       border-radius: 50%;
       pointer-events: none;
       z-index: 10001;
-      transform: translate(-50%, -50%) translateZ(0);
-      will-change: left, top;
+      transform: translate(-50%, -50%);
+      mix-blend-mode: difference;
       transition: width 0.2s, height 0.2s, background 0.2s, opacity 0.3s;
     }
     .cursor-follower {
@@ -155,9 +155,15 @@
       border-radius: 50%;
       pointer-events: none;
       z-index: 10000;
-      transform: translate(-50%, -50%) translateZ(0);
-      will-change: left, top;
+      transform: translate(-50%, -50%);
       transition: width 0.3s ease, height 0.3s ease, border-color 0.3s ease, background 0.3s ease, opacity 0.3s;
+    }
+    body:has(a:hover) .cursor,
+    body:has(button:hover) .cursor { width: 24px; height: 24px; }
+    body:has(a:hover) .cursor-follower,
+    body:has(button:hover) .cursor-follower {
+      width: 60px; height: 60px;
+      background: rgba(196, 93, 37, 0.05);
     }
     /* All content above overlays */
     nav, main, footer { position: relative; z-index: 10; }
