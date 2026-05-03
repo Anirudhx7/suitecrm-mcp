@@ -16,6 +16,12 @@ CLAUDE.md
 CHANGELOG.md
 .claude/
 
+# Analysis / agent artifacts
+.agents/
+.planning/
+graphify-out/
+.graphify_*.json
+
 # Python
 __pycache__/
 *.pyc

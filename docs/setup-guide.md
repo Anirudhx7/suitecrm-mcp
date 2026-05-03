@@ -222,7 +222,7 @@ curl -I https://mcp.yourcompany.com/
 # Should return: 302 Location: /auth/login
 
 # Test OIDC discovery (gateway startup probe)
-curl https://YOUR_OAUTH_ISSUER/.well-known/openid-configuration
+curl https://YOUR_DOMAIN/.well-known/openid-configuration
 ```
 
 Then visit `https://mcp.yourcompany.com` in a browser and complete the login flow.

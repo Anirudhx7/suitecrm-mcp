@@ -66,6 +66,14 @@ exports.onExecutePostLogin = async (event, api) => {
 
 Then set `OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/groups` in the gateway env file.
 
+**Expected JWT claim shape** (verify with [jwt.io](https://jwt.io) after login):
+```json
+{
+  "https://suitecrm-mcp/groups": ["CRM-MyCompany"]
+}
+```
+The value must match the `group` field in `entities.json` exactly (case-insensitive).
+
 5. In Auth0 > **User Management > Roles**, create roles matching the `group` field
    in your `entities.json` (e.g. `CRM-MyCompany`). Assign users to roles.
 
