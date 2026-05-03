@@ -37,15 +37,15 @@ Click **Save Changes**.
 ### 3. Note your credentials
 
 From the Settings tab, copy:
-- **Domain** (e.g. `your-tenant.auth0.com`) - this is your `OAUTH_ISSUER`
-- **Client ID** - this is your `OAUTH_CLIENT_ID`
-- **Client Secret** - this is your `OAUTH_CLIENT_SECRET`
+- **Domain** (e.g. `your-tenant.auth0.com`) - this is your `AUTH0_DOMAIN`
+- **Client ID** - this is your `AUTH0_CLIENT_ID`
+- **Client Secret** - this is your `AUTH0_CLIENT_SECRET`
 
-For `OAUTH_AUDIENCE`, use the Auth0 Management API identifier
+For `AUTH0_AUDIENCE`, use the Auth0 Management API identifier
 (`https://your-tenant.auth0.com/api/v2/`) or create a custom API in
 Auth0 > APIs.
 
-### 4. Configure group/role claims (required for entity access control)
+### 4. Configure groups claim (required for entity access control)
 
 The gateway reads group membership from the JWT to decide which CRM entities a user
 can access. Auth0 does not include custom claims by default - add an Action:
@@ -57,14 +57,14 @@ can access. Auth0 does not include custom claims by default - add an Action:
 ```javascript
 exports.onExecutePostLogin = async (event, api) => {
   const namespace = 'https://suitecrm-mcp/';
-  api.idToken.setCustomClaim(namespace + 'roles', event.authorization?.roles ?? []);
-  api.accessToken.setCustomClaim(namespace + 'roles', event.authorization?.roles ?? []);
+  api.idToken.setCustomClaim(namespace + 'groups', event.authorization?.roles ?? []);
+  api.accessToken.setCustomClaim(namespace + 'groups', event.authorization?.roles ?? []);
 };
 ```
 
 4. Deploy the action and add it to the Login flow
 
-Then set `OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/roles` in the gateway env file.
+Then set `OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/groups` in the gateway env file.
 
 5. In Auth0 > **User Management > Roles**, create roles matching the `group` field
    in your `entities.json` (e.g. `CRM-MyCompany`). Assign users to roles.
@@ -112,10 +112,10 @@ the `onpremisessecurityidentifier`.
 
 | Gateway env var | Azure AD value |
 |----------------|----------------|
-| `OAUTH_ISSUER` | `https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0` |
-| `OAUTH_CLIENT_ID` | Application (client) ID |
-| `OAUTH_CLIENT_SECRET` | Client secret value |
-| `OAUTH_AUDIENCE` | Application (client) ID (same as client ID) |
+| `AUTH0_DOMAIN` | `login.microsoftonline.com/YOUR_TENANT_ID/v2.0` |
+| `AUTH0_CLIENT_ID` | Application (client) ID |
+| `AUTH0_CLIENT_SECRET` | Client secret value |
+| `AUTH0_AUDIENCE` | Application (client) ID (same as client ID) |
 | `OAUTH_GROUPS_CLAIM` | `groups` |
 
 ---
@@ -126,12 +126,12 @@ When you run `sudo python3 install.py`, the OAuth section asks:
 
 | Prompt | What to enter |
 |--------|--------------|
-| OIDC issuer URL | Auth0: `https://your-tenant.auth0.com` / Azure: `https://login.microsoftonline.com/TENANT_ID/v2.0` |
-| OAuth client ID | From your app registration |
-| OAuth client secret | From your app registration (keep this secret) |
-| OAuth audience | Auth0: your API identifier / Azure AD: your client ID |
-| Gateway external URL | `https://mcp.yourcompany.com` - must match what you registered as the callback origin |
-| JWT groups claim | Auth0 with custom action: `https://suitecrm-mcp/roles` / Azure AD: `groups` / default: `roles` |
+| Auth0 domain | Auth0: `your-tenant.auth0.com` / Azure: `login.microsoftonline.com/TENANT_ID/v2.0` |
+| Auth0 client ID | From your app registration |
+| Auth0 client secret | From your app registration (keep this secret) |
+| Auth0 audience | Auth0: your API identifier / Azure AD: your client ID |
+| Gateway public URL | `https://mcp.yourcompany.com` - must match what you registered as the callback origin |
+| JWT groups claim | Auth0 with custom action: `https://suitecrm-mcp/groups` / Azure AD: `groups` / default: `AUTH0_AUDIENCE + '/groups'` |
 
 ---
 
@@ -143,6 +143,6 @@ the success page with your API key.
 
 If you see an error, check:
 - The callback URL registered in your identity provider matches exactly
-- `OAUTH_ISSUER` has no trailing slash
+- `AUTH0_DOMAIN` has no trailing slash
 - The `/.well-known/openid-configuration` endpoint is reachable from the gateway VM:
-  `curl https://YOUR_ISSUER/.well-known/openid-configuration`
+  `curl https://YOUR_DOMAIN/.well-known/openid-configuration`
