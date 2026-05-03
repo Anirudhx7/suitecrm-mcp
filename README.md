@@ -1,5 +1,7 @@
 # <a name="top"></a>suitecrm-mcp
 
+⚡ **Works with Claude Desktop & Claude Code in under 5 minutes.**
+
 [![Live Docs](https://img.shields.io/badge/Docs-Live-orange?style=flat-square)](https://anirudhx7.github.io/suitecrm-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/Anirudhx7/suitecrm-mcp?color=369eff&labelColor=black&logo=github&style=flat-square)](https://github.com/Anirudhx7/suitecrm-mcp/releases)
@@ -8,11 +10,39 @@
 [![Issues](https://img.shields.io/github/issues/Anirudhx7/suitecrm-mcp?color=ff80eb&labelColor=black&style=flat-square)](https://github.com/Anirudhx7/suitecrm-mcp/issues)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Anirudh%20Mehandru-0077B5?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/anirudh-mehandru/)
 
-An open-source MCP (Model Context Protocol) gateway for SuiteCRM. Lets AI assistants - Claude, OpenAI, or any MCP-compatible client - read and write your CRM data over a persistent SSE connection.
+An open-source MCP (Model Context Protocol) gateway for SuiteCRM. Lets AI assistants like **Claude Desktop**, **Claude Code**, and **OpenClaw** read and write your CRM data via a secure, persistent SSE connection.
 
-Built from a real production deployment. CData's version is commercial. This one isn't.
+Built from a real production deployment. Commercial alternatives are expensive; this one is free and open-source.
 
 Ships with a full observability stack: Prometheus metrics, Grafana dashboards (33 panels), and Loki log aggregation.
+
+<!--
+![Demo: Asking Claude to create a Lead in SuiteCRM](docs/assets/demo-placeholder.gif)
+*(Replace this with a 60-second Loom/GIF showing Claude creating a record in SuiteCRM)*
+-->
+
+---
+
+## 🚀 Why SuiteCRM-MCP?
+
+| Feature | SuiteCRM-MCP (Open Source) | Commercial Alternatives |
+|---------|:---:|:---:|
+| **Price** | **Free Forever** | $1,000s / Year |
+| **Capabilities** | **Full CRUD (24+ tools)** | Often Read-Only / Limited |
+| **Data Privacy** | **100% Self-Hosted** | Third-party Cloud/SaaS |
+| **Complexity** | **5-Min Setup** | Sales calls & Long trials |
+| **Observability** | Full Grafana/Prometheus | Minimal / Closed |
+
+---
+
+## 🛡️ Enterprise Trust & Security
+
+Built for production environments where data integrity and privacy are non-negotiable.
+
+- **Zero-Trust for Credentials:** CRM passwords **never** leave the gateway server. MCP clients (like Claude) hold only an opaque, revocable API key.
+- **Identity First:** Seamlessly integrates with **Auth0**, **Azure AD**, or any OIDC provider.
+- **Audit Ready:** Every tool call is logged with structured JSON (Loki), allowing you to see exactly what your AI agents are doing in real-time.
+- **Circuit Breaker Protection:** Automatically shields your CRM from cascading failures if the backend becomes unresponsive.
 
 ---
 
@@ -665,7 +695,7 @@ curl -s -X POST "https://YOUR-PATH/service/v4_1/rest.php" \
 
 **LDAP / SSO users cannot authenticate via the REST API**
 
-SuiteCRM's v4_1 REST API only authenticates against local database passwords. If your organisation uses LDAP, Active Directory, or SSO, users who log into the CRM web UI via those providers will not have a local password set - and the gateway will return `CRM login failed: Invalid Login` for them even with correct credentials.
+SuiteCRM's v4_1 REST API only authenticates against local database passwords. If your organisation uses LDAP, Active Directory, or SSO, users who log into the CRM web UI via those providers will not have a local password set - and the gateway will return `Invalid Login` for them even with correct credentials.
 
 **Workaround:** Use [`tools/create-api-user.sh`](tools/create-api-user.sh) to set a local API password for any existing LDAP/SSO user without touching their web login. Supports single user (interactive) and bulk mode via CSV.
 
