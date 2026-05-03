@@ -61,7 +61,8 @@ const CRM_HOSTS_FILE      = '/etc/suitecrm-mcp/crm-hosts.json';
 const SESSION_TTL_MS      = parseInt(process.env.SESSION_TTL_DAYS || '30') * 24 * 60 * 60 * 1000;
 const SESSION_TTL_DAYS    = parseInt(process.env.SESSION_TTL_DAYS || '30');
 const BRIDGE_SESSION_TTL_MS = 15 * 60 * 1000;
-const NS = AUTH0_AUDIENCE + '/';
+const NS            = AUTH0_AUDIENCE + '/';
+const GROUPS_CLAIM  = process.env.OAUTH_GROUPS_CLAIM || (NS + 'groups');
 
 const logger = pino({
   base: { service: 'suitecrm-mcp-auth' },
@@ -171,6 +172,7 @@ async function verifyAndDecodeAccessToken(accessToken) {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!uiRes.ok) throw new Error(`Access token rejected by Auth0: ${uiRes.status}`);
+  const userinfo = await uiRes.json();
 
   const payload = decodeJwtPayload(accessToken);
   const now = Math.floor(Date.now() / 1000);
@@ -178,10 +180,12 @@ async function verifyAndDecodeAccessToken(accessToken) {
   if (payload.iss && payload.iss !== `https://${AUTH0_DOMAIN}/`) {
     throw new Error(`Issuer mismatch: got ${payload.iss}`);
   }
-  return payload;
+  // Merge userinfo so profile claims (preferred_username, email) are available even when
+  // the access token omits them. JWT payload wins on conflict.
+  return { ...userinfo, ...payload };
 }
 
-async function provisionCrmAccounts(sub, email, sam, userGroups) {
+async function provisionCrmAccounts(sub, email, crmUsername, userGroups) {
   let crmHosts = {};
   try { crmHosts = JSON.parse(readFileSync(CRM_HOSTS_FILE, 'utf8')); } catch {}
 
@@ -190,7 +194,7 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
   profiles[sub].email = email || profiles[sub].email;
   profiles[sub].name  = email || profiles[sub].name;
 
-  const crmUser = sam.includes('@') ? sam.split('@')[0].toLowerCase() : sam.toLowerCase();
+  const crmUser = crmUsername;
 
   for (const [code, data] of Object.entries(loadEntities())) {
     const requiredGroup = data.group;
@@ -299,14 +303,25 @@ app.get('/auth/callback', async (req, res) => {
     const payload = await verifyAndDecodeAccessToken(tokens.access_token);
 
     const sub        = payload.sub;
-    const sam        = payload[`${NS}samaccountname`] || '';
-    const email      = sam.includes('@') ? sam : (payload.email || '');
-    const userGroups = payload[`${NS}groups`] || [];
-    const linuxUser  = email.split('@')[0].toLowerCase();
+    const sam           = payload[`${NS}samaccountname`] || '';
+    const preferredUser = payload.preferred_username || '';
+    const email         = sam.includes('@') ? sam : (payload.email || preferredUser || '');
+    const userGroups    = payload[GROUPS_CLAIM] || [];
+    const linuxUser     = email.split('@')[0].toLowerCase();
+
+    // Derive CRM username: samaccountname → preferred_username → email; reject if none resolvable
+    const rawIdent    = sam || preferredUser || payload.email || '';
+    const crmUsername = rawIdent
+      ? (rawIdent.includes('@') ? rawIdent.split('@')[0].toLowerCase() : rawIdent.toLowerCase())
+      : '';
+    if (!crmUsername) {
+      logger.warn({ sub: sub.slice(-8) }, 'login_rejected_no_crm_username');
+      return res.status(400).send('Cannot determine CRM username from IdP claims. Contact your administrator.');
+    }
 
     logger.info({ email, sub: sub.slice(-8) }, 'login');
 
-    await provisionCrmAccounts(sub, email, sam, userGroups);
+    await provisionCrmAccounts(sub, email, crmUsername, userGroups);
 
     // Reuse existing valid session for this user, or create a new one directly in sessions.json
     const sessions = cleanExpiredSessions(loadSessions());
@@ -637,7 +652,7 @@ function copyEl(id,btn){
 });
 
 // ========================================================================
-// SECURE BRIDGE AUTH ENDPOINTS (v3.1+)
+// SECURE BRIDGE AUTH ENDPOINTS (v4.x)
 // ========================================================================
 
 const logoutLimiter = rateLimit({

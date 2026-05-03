@@ -11,7 +11,7 @@ No CRM credentials are stored on your machine.
 4. Paste the API key into the Claude Desktop config below
 
 Your API key is tied to your identity. The gateway uses it to look up your CRM account
-and connect on your behalf. Keys expire after 90 days (configurable by your admin).
+and connect on your behalf. Keys expire after 30 days (configurable by your admin).
 
 ## 📋 Prerequisites
 

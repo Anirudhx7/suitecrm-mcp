@@ -766,8 +766,8 @@
       <p>Set up Auth0 or Azure AD <strong>before</strong> installing the gateway. The installer will prompt for the credentials you collect here.</p>
       <p>See <a href="#auth-setup">Identity Provider Setup</a> for step-by-step instructions. Minimum required:</p>
       <ul>
-        <li>OIDC issuer URL</li>
-        <li>OAuth client ID and client secret</li>
+        <li>Auth0 domain</li>
+        <li>Auth0 client ID and client secret</li>
         <li>Redirect URI registered: <code>https://YOUR_GATEWAY_DOMAIN/auth/callback</code></li>
       </ul>
 
@@ -896,7 +896,7 @@ curl https://mcp.yourcompany.com/health
 curl -I https://mcp.yourcompany.com/
 
 <span class="cm"># Test OIDC discovery</span>
-curl https://YOUR_OAUTH_ISSUER/.well-known/openid-configuration</pre>
+curl https://YOUR_DOMAIN/.well-known/openid-configuration</pre>
       </div>
       <p>Visit <code>https://mcp.yourcompany.com</code> in a browser and complete the login flow. You should see the success page with your API key.</p>
 
@@ -1025,13 +1025,13 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
       <h3>3. Note your credentials</h3>
       <p>From the Settings tab, copy:</p>
       <ul>
-        <li><strong>Domain</strong> (e.g. <code>your-tenant.auth0.com</code>) - this is your <code>OAUTH_ISSUER</code></li>
-        <li><strong>Client ID</strong> - this is your <code>OAUTH_CLIENT_ID</code></li>
-        <li><strong>Client Secret</strong> - this is your <code>OAUTH_CLIENT_SECRET</code></li>
+        <li><strong>Domain</strong> (e.g. <code>your-tenant.auth0.com</code>) - this is your <code>AUTH0_DOMAIN</code></li>
+        <li><strong>Client ID</strong> - this is your <code>AUTH0_CLIENT_ID</code></li>
+        <li><strong>Client Secret</strong> - this is your <code>AUTH0_CLIENT_SECRET</code></li>
       </ul>
-      <p>For <code>OAUTH_AUDIENCE</code>, use the Auth0 Management API identifier (<code>https://your-tenant.auth0.com/api/v2/</code>) or create a custom API in Auth0 &gt; APIs.</p>
+      <p>For <code>AUTH0_AUDIENCE</code>, use the Auth0 Management API identifier (<code>https://your-tenant.auth0.com/api/v2/</code>) or create a custom API in Auth0 &gt; APIs.</p>
 
-      <h3>4. Configure group/role claims</h3>
+      <h3>4. Configure groups claim</h3>
       <p>The gateway reads group membership from the JWT to decide which CRM entities a user can access. Auth0 does not include custom claims by default - add an Action:</p>
       <ol>
         <li>Go to <strong>Actions &gt; Flows &gt; Login</strong></li>
@@ -1042,14 +1042,14 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
         <div class="code-header"><span class="code-lang">javascript</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>exports.onExecutePostLogin = async (event, api) => {
   const namespace = 'https://suitecrm-mcp/';
-  api.idToken.setCustomClaim(namespace + 'roles', event.authorization?.roles ?? []);
-  api.accessToken.setCustomClaim(namespace + 'roles', event.authorization?.roles ?? []);
+  api.idToken.setCustomClaim(namespace + 'groups', event.authorization?.roles ?? []);
+  api.accessToken.setCustomClaim(namespace + 'groups', event.authorization?.roles ?? []);
 };</pre>
       </div>
       <ol start="4">
         <li>Deploy the action and add it to the Login flow</li>
       </ol>
-      <p>Then set <code>OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/roles</code> in the gateway env file.</p>
+      <p>Then set <code>OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/groups</code> in the gateway env file.</p>
       <p>In Auth0 &gt; <strong>User Management &gt; Roles</strong>, create roles matching the <code>group</code> field in your <code>entities.json</code> (e.g. <code>CRM-MyCompany</code>). Assign users to roles.</p>
 
       <h3>5. Connect Azure AD (optional - corporate SSO)</h3>
@@ -1086,10 +1086,10 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
         <table class="docs-table">
           <thead><tr><th>Gateway env var</th><th>Azure AD value</th></tr></thead>
           <tbody>
-            <tr><td><code>OAUTH_ISSUER</code></td><td><code>https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0</code></td></tr>
-            <tr><td><code>OAUTH_CLIENT_ID</code></td><td>Application (client) ID</td></tr>
-            <tr><td><code>OAUTH_CLIENT_SECRET</code></td><td>Client secret value</td></tr>
-            <tr><td><code>OAUTH_AUDIENCE</code></td><td>Application (client) ID (same as client ID)</td></tr>
+            <tr><td><code>AUTH0_DOMAIN</code></td><td><code>login.microsoftonline.com/YOUR_TENANT_ID/v2.0</code></td></tr>
+            <tr><td><code>AUTH0_CLIENT_ID</code></td><td>Application (client) ID</td></tr>
+            <tr><td><code>AUTH0_CLIENT_SECRET</code></td><td>Client secret value</td></tr>
+            <tr><td><code>AUTH0_AUDIENCE</code></td><td>Application (client) ID (same as client ID)</td></tr>
             <tr><td><code>OAUTH_GROUPS_CLAIM</code></td><td><code>groups</code></td></tr>
           </tbody>
         </table>
@@ -1102,12 +1102,12 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
         <table class="docs-table">
           <thead><tr><th>Prompt</th><th>What to enter</th></tr></thead>
           <tbody>
-            <tr><td>OIDC issuer URL</td><td>Auth0: <code>https://your-tenant.auth0.com</code> / Azure: <code>https://login.microsoftonline.com/TENANT_ID/v2.0</code></td></tr>
-            <tr><td>OAuth client ID</td><td>From your app registration</td></tr>
-            <tr><td>OAuth client secret</td><td>From your app registration (keep this secret)</td></tr>
-            <tr><td>OAuth audience</td><td>Auth0: your API identifier / Azure AD: your client ID</td></tr>
-            <tr><td>Gateway external URL</td><td><code>https://mcp.yourcompany.com</code> - must match the registered callback origin</td></tr>
-            <tr><td>JWT groups claim</td><td>Auth0 with custom action: <code>https://suitecrm-mcp/roles</code> / Azure AD: <code>groups</code> / default: <code>roles</code></td></tr>
+            <tr><td>Auth0 domain</td><td>Auth0: <code>your-tenant.auth0.com</code> / Azure: <code>login.microsoftonline.com/TENANT_ID/v2.0</code></td></tr>
+            <tr><td>Auth0 client ID</td><td>From your app registration</td></tr>
+            <tr><td>Auth0 client secret</td><td>From your app registration (keep this secret)</td></tr>
+            <tr><td>Auth0 audience</td><td>Auth0: your API identifier / Azure AD: your client ID</td></tr>
+            <tr><td>Gateway public URL</td><td><code>https://mcp.yourcompany.com</code> - must match the registered callback origin</td></tr>
+            <tr><td>JWT groups claim</td><td>Auth0 with custom action: <code>https://suitecrm-mcp/groups</code> / Azure AD: <code>groups</code> / default: <code>AUTH0_AUDIENCE + '/groups'</code></td></tr>
           </tbody>
         </table>
       </div>
@@ -1117,9 +1117,10 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
       <p>If you see an error, check:</p>
       <ul>
         <li>The callback URL registered in your identity provider matches exactly</li>
-        <li><code>OAUTH_ISSUER</code> has no trailing slash</li>
-        <li>The <code>/.well-known/openid-configuration</code> endpoint is reachable from the gateway VM: <code>curl https://YOUR_ISSUER/.well-known/openid-configuration</code></li>
+        <li><code>AUTH0_DOMAIN</code> has no trailing slash</li>
+        <li>The <code>/.well-known/openid-configuration</code> endpoint is reachable from the gateway VM: <code>curl https://YOUR_DOMAIN/.well-known/openid-configuration</code></li>
       </ul>
+
     </section>
 
 
@@ -1137,7 +1138,7 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
         <li>The success page shows your personal API key - copy it</li>
         <li>Paste the key into the Claude Desktop config below</li>
       </ol>
-      <p>Your API key is tied to your identity. The gateway uses it to look up your CRM account and connect on your behalf. Keys expire after 90 days (configurable by your admin).</p>
+      <p>Your API key is tied to your identity. The gateway uses it to look up your CRM account and connect on your behalf. Keys expire after 30 days (configurable by your admin).</p>
 
       <h2>Prerequisites</h2>
       <ul>
@@ -1460,7 +1461,7 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
       <p>Test prompt: <em>"List the first 5 accounts in the CRM"</em> - OpenClaw should call <code>suitecrm_mycrm_search</code> automatically.</p>
 
       <h2>Re-authenticating</h2>
-      <p>If the token expires (default 90 days) or is revoked: the next tool call returns HTTP 401, the bridge clears the token and calls <code>POST /auth/bridge/start</code>, and returns a fresh login URL. Same flow as first-time auth. No agent restart needed.</p>
+      <p>If the token expires (default 30 days) or is revoked: the next tool call returns HTTP 401, the bridge clears the token and calls <code>POST /auth/bridge/start</code>, and returns a fresh login URL. Same flow as first-time auth. No agent restart needed.</p>
 
       <h2>Revoking a user's token (operators)</h2>
       <h3>Using mcp-admin (recommended)</h3>

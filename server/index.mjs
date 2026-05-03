@@ -33,6 +33,7 @@ const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE.trim();
 const REQUIRED_GROUP = (process.env.REQUIRED_GROUP || '').trim();
 const PROFILES_FILE  = '/etc/suitecrm-mcp/user-profiles.json';
 const NS             = AUTH0_AUDIENCE + '/';
+const GROUPS_CLAIM   = process.env.OAUTH_GROUPS_CLAIM || (NS + 'groups');
 const TLS_OK         = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
 
 const METRICS_PORT  = parseInt(process.env.METRICS_PORT || '9090', 10);
@@ -293,7 +294,7 @@ async function jwtMiddleware(req, res, next) {
         sub: session.sub,
         email: session.email,
         [`${NS}samaccountname`]: session.email,
-        [`${NS}groups`]: session.groups || [],
+        [GROUPS_CLAIM]: session.groups || [],
       };
       return next();
     }
@@ -320,7 +321,7 @@ function profileMiddleware(req, res, next) {
 
 function groupAccessMiddleware(req, res, next) {
   if (REQUIRED_GROUP) {
-    const userGroups = req.auth[`${NS}groups`] || [];
+    const userGroups = req.auth[GROUPS_CLAIM] || [];
     const hasGroup = userGroups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase());
     if (!hasGroup) {
       return res.status(403).json({

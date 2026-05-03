@@ -154,7 +154,7 @@ Test prompt: `"List the first 5 accounts in the CRM"` - OpenClaw should call
 
 ## 🔄 Re-authenticating
 
-If the token expires (default 90 days) or is revoked by an admin:
+If the token expires (default 30 days) or is revoked by an admin:
 
 1. The next tool call returns HTTP 401 from the gateway.
 2. The bridge clears `~/.suitecrm-mcp/gateway.token` and logs:

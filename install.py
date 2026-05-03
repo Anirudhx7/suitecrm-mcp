@@ -417,10 +417,14 @@ def prompt_oauth_config(args, domain=None):
         "Session TTL in days (default: 30)", "30"
     ) or "30"
 
+    groups_claim = getattr(args, "oauth_groups_claim", None) or _prompt(
+        "JWT groups claim name (leave blank for default: AUTH0_AUDIENCE + '/groups')", ""
+    ) or ""
+
     ok(f"Redirect URI: {gateway_url}/auth/callback")
     print()
 
-    return {
+    cfg = {
         "AUTH0_DOMAIN":      auth0_domain,
         "AUTH0_CLIENT_ID":   client_id,
         "AUTH0_CLIENT_SECRET": client_secret,
@@ -428,6 +432,9 @@ def prompt_oauth_config(args, domain=None):
         "GATEWAY_PUBLIC_URL": gateway_url,
         "SESSION_TTL_DAYS":  session_ttl,
     }
+    if groups_claim:
+        cfg["OAUTH_GROUPS_CLAIM"] = groups_claim
+    return cfg
 
 
 def write_entities_json(entities):
@@ -465,6 +472,7 @@ def install_auth_service(auth_cfg):
         f"AUTH0_AUDIENCE={auth_cfg['AUTH0_AUDIENCE']}",
         f"GATEWAY_PUBLIC_URL={auth_cfg['GATEWAY_PUBLIC_URL']}",
         f"SESSION_TTL_DAYS={auth_cfg.get('SESSION_TTL_DAYS', '30')}",
+        *([ f"OAUTH_GROUPS_CLAIM={auth_cfg['OAUTH_GROUPS_CLAIM']}" ] if auth_cfg.get('OAUTH_GROUPS_CLAIM') else []),
         "PORT=3100",
         "BIND_HOST=127.0.0.1",
         "METRICS_PORT=9091",
@@ -738,7 +746,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
     if oauth_cfg:
         lines.append("")
         lines.append("# Auth0 (token validation)")
-        for key in ("AUTH0_DOMAIN", "AUTH0_AUDIENCE"):
+        for key in ("AUTH0_DOMAIN", "AUTH0_AUDIENCE", "OAUTH_GROUPS_CLAIM"):
             val = oauth_cfg.get(key)
             if val:
                 lines.append(f"{key}={val}")
@@ -1159,8 +1167,8 @@ def main():
     parser.add_argument("--oauth-client-id",    dest="oauth_client_id",    help="OAuth client ID")
     parser.add_argument("--oauth-client-secret",dest="oauth_client_secret",help="OAuth client secret")
     parser.add_argument("--oauth-audience",     dest="oauth_audience",     help="OAuth audience")
-    parser.add_argument("--oauth-groups-claim", dest="oauth_groups_claim", default="roles",
-                        help="JWT claim for groups (default: roles)")
+    parser.add_argument("--oauth-groups-claim", dest="oauth_groups_claim", default=None,
+                        help="JWT claim for groups (default: AUTH0_AUDIENCE + '/groups')")
     parser.add_argument("--gateway-url",        dest="gateway_url",        help="Gateway external URL (e.g. https://mcp.yourcompany.com)")
     parser.add_argument("--skip-oauth",         dest="skip_oauth", action="store_true",
                         help="Skip OAuth setup (for upgrades where OAuth is already configured)")
