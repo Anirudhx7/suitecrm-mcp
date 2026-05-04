@@ -66,14 +66,14 @@ const NS            = AUTH0_AUDIENCE + '/';
 const GROUPS_CLAIM  = process.env.OAUTH_GROUPS_CLAIM || (NS + 'groups');
 const REDIS_URL     = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
-const redis = createClient({ url: REDIS_URL });
-redis.on('error', err => logger.error({ err: err.message }, 'redis_error'));
-await redis.connect();
-
 const logger = pino({
   base: { service: 'suitecrm-mcp-auth' },
   timestamp: pino.stdTimeFunctions.isoTime,
 });
+
+const redis = createClient({ url: REDIS_URL });
+redis.on('error', err => logger.error({ err: err.message }, 'redis_error'));
+await redis.connect();
 
 const metricsRegistry = new Registry();
 collectDefaultMetrics({ register: metricsRegistry });
