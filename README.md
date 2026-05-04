@@ -14,7 +14,7 @@ An open-source MCP (Model Context Protocol) gateway for SuiteCRM. Lets AI assist
 
 Built from a real production deployment. Commercial alternatives are expensive; this one is free and open-source.
 
-Ships with a full observability stack: Prometheus metrics, Grafana dashboards (33 panels), and Loki log aggregation.
+Ships with a **stateless architecture powered by Redis** for horizontal scaling, and a full observability stack: Prometheus metrics, Grafana dashboards (33 panels), and Loki log aggregation.
 
 <!--
 ![Demo: Asking Claude to create a Lead in SuiteCRM](docs/assets/demo-placeholder.gif)
@@ -79,6 +79,7 @@ Built for production environments where data integrity and privacy are non-negot
 - **No credentials on client machines** - MCP clients hold only an opaque API key; CRM passwords live on the gateway
 - **Group-based entity access** - JWT group claims gate which CRM instances each user can reach
 - **Session auto-renewal** - CRM sessions re-authenticate transparently on expiry
+- **Stateless & Scalable** - auth sessions and profiles cached in Redis, enabling horizontal scaling and zero-downtime restarts
 - **Unified installer** - one script handles single CRM (no nginx) or N CRMs behind nginx, with interactive OAuth setup
 - **Entity-prefixed tools** - run multiple CRM instances side-by-side without name collisions
 
@@ -143,7 +144,8 @@ flowchart TB
     IdP -.->|"confirms identity (OAuth2 callback)"| GW
     GW -.->|"issues API key"| Clients
     Clients -->|"Bearer token"| GW
-    GW -->|"v4_1 REST API"| CRMs
+    GW -->|"Hybrid v8 GraphQL\n(v4_1 Fallback)"| CRMs
+    GW --- Redis[(Redis Cache)]
 
     style GW fill:#2b6cb0,stroke:#63b3ed,stroke-width:2px,color:#fff
     style IdP fill:#2d3748,stroke:#718096,color:#e2e8f0
@@ -158,6 +160,10 @@ flowchart TB
 ```
 
 Users log in once via Auth0 or Azure AD; the gateway issues a personal API key. MCP clients attach it as `Authorization: Bearer <key>` on every request. CRM credentials never leave the gateway. Multiple CRM instances are supported - each gets its own port and tool namespace (`suitecrm_crm1_*`, `suitecrm_crm2_*`).
+
+**Smart Hybrid Routing:** The gateway automatically routes basic CRUD operations and record fetching through the blazing-fast SuiteCRM 8 GraphQL API. If an AI requests a complex search requiring raw SQL filters (which GraphQL does not support), the gateway intercepts it and transparently fails over to the legacy v4.1 REST API—ensuring absolute 100% feature parity with no manual intervention.
+
+**Stateless Persistence:** By moving auth sessions and user profiles from local memory/files to Redis, the gateway is completely stateless. This allows for horizontal scaling (running multiple gateway instances behind a load balancer), global rate limiting, and seamless restarts without dropping active AI connections.
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -185,6 +191,7 @@ Alerting rules included for: circuit breaker open, high auth failure rate, laten
 - Python 3.8+
 - Root / sudo access
 - Node.js is installed automatically if missing
+- **Redis 6.0+** (required for session and profile persistence)
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -445,6 +452,7 @@ Put a reverse proxy (nginx, Caddy) in front to route `/crm1/` to port 3101, `/cr
 | `PORT` | No | `3101` | Listen port |
 | `BIND_HOST` | No | `127.0.0.1` | Interface to bind the gateway server to |
 | `SUITECRM_CODE` | No | - | Entity code for multi-entity nginx routing |
+| `REDIS_URL` | Yes | `redis://127.0.0.1:6379` | Connection string for Redis session store |
 | `AUTH0_DOMAIN` | Yes (auth) | - | Auth0 tenant domain (entity gateway) |
 | `AUTH0_AUDIENCE` | Yes (auth) | - | Auth0 API identifier (entity gateway) |
 | `AUTH0_CLIENT_ID` | Yes (auth svc) | - | Auth0 client ID (auth service only) |
