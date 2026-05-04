@@ -21,9 +21,9 @@ On the **Settings** tab:
 
 | Field | Value |
 |-------|-------|
-| Allowed Callback URLs | `https://YOUR_GATEWAY/auth/callback` |
-| Allowed Logout URLs | `https://YOUR_GATEWAY` |
-| Allowed Web Origins | `https://YOUR_GATEWAY` |
+| Allowed Callback URLs | `https://mcp.yourcompany.com/auth/callback` |
+| Allowed Logout URLs | `https://mcp.yourcompany.com` |
+| Allowed Web Origins | `https://mcp.yourcompany.com` |
 
 Under **Advanced Settings > Grant Types**, ensure these are checked:
 - Authorization Code
@@ -95,7 +95,7 @@ Use this if you want to skip Auth0 and authenticate directly against Azure AD.
 1. Go to [Azure Portal > App registrations > New registration](https://portal.azure.com)
 2. Name: `SuiteCRM MCP Gateway`
 3. Supported account types: **Accounts in this organizational directory only**
-4. Redirect URI: Web - `https://YOUR_GATEWAY/auth/callback`
+4. Redirect URI: Web - `https://mcp.yourcompany.com/auth/callback`
 5. Click **Register**
 
 ### 2. Add a client secret
@@ -145,7 +145,7 @@ When you run `sudo python3 install.py`, the OAuth section asks:
 
 ## ✅ Verifying the setup
 
-After installation, visit `https://YOUR_GATEWAY/auth/login`. You should be redirected
+After installation, visit `https://mcp.yourcompany.com/auth/login`. You should be redirected
 to your identity provider's login page. After logging in successfully, you should see
 the success page with your API key.
 

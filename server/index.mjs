@@ -11,6 +11,7 @@ import { createHash, randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import express from 'express';
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
+import { createClient } from 'redis';
 import https from 'https';
 import http from 'http';
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
@@ -35,6 +36,11 @@ const PROFILES_FILE  = '/etc/suitecrm-mcp/user-profiles.json';
 const NS             = AUTH0_AUDIENCE + '/';
 const GROUPS_CLAIM   = process.env.OAUTH_GROUPS_CLAIM || (NS + 'groups');
 const TLS_OK         = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
+const REDIS_URL      = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+
+const redis = createClient({ url: REDIS_URL });
+redis.on('error', err => logger.error({ err: err.message }, 'redis_error'));
+await redis.connect();
 
 const METRICS_PORT  = parseInt(process.env.METRICS_PORT || '9090', 10);
 const METRICS_BIND  = (process.env.METRICS_BIND || '127.0.0.1').trim();
@@ -261,19 +267,24 @@ function redactAuditArgs(args) {
   return safe;
 }
 
-// 2-second read cache. In Docker multi-container deployments, auth.mjs writes
-// sessions.json on a different container's filesystem - the cache means an entity
-// gateway may lag up to 2s after a new token is issued before it accepts it.
-let _sessionsCache = null;
-let _sessionsCacheAt = 0;
-function loadSessions() {
-  const now = Date.now();
-  if (!_sessionsCache || now - _sessionsCacheAt > 2000) {
-    try { _sessionsCache = JSON.parse(readFileSync('/etc/suitecrm-mcp/sessions.json', 'utf8')); }
-    catch { _sessionsCache = {}; }
-    _sessionsCacheAt = now;
+async function getSession(token) {
+  try {
+    const data = await redis.get(`mcp:session:${token}`);
+    return data ? JSON.parse(data) : null;
+  } catch (err) {
+    logger.error({ token: token.slice(0, 8), err: err.message }, 'redis_get_session_failed');
+    return null;
   }
-  return _sessionsCache;
+}
+
+async function getProfile(sub) {
+  try {
+    const data = await redis.get(`mcp:profile:${sub}`);
+    return data ? JSON.parse(data) : null;
+  } catch (err) {
+    logger.error({ sub, err: err.message }, 'redis_get_profile_failed');
+    return null;
+  }
 }
 
 async function jwtMiddleware(req, res, next) {
@@ -282,14 +293,8 @@ async function jwtMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Bearer token required' });
 
   try {
-    const sessions = loadSessions();
-    const session = sessions[token];
+    const session = await getSession(token);
     if (session) {
-      if (session.expiresAt < Date.now()) {
-        metricAuthFailures.inc({ entity: PREFIX });
-        logger.warn({ reason: 'session_expired', sub: session.sub }, 'auth_failed');
-        return res.status(401).json({ error: 'Session expired' });
-      }
       req.auth = {
         sub: session.sub,
         email: session.email,
@@ -305,9 +310,8 @@ async function jwtMiddleware(req, res, next) {
   return res.status(401).json({ error: 'Invalid token' });
 }
 
-function profileMiddleware(req, res, next) {
-  const profiles = loadProfiles();
-  const profile = profiles[req.auth.sub];
+async function profileMiddleware(req, res, next) {
+  const profile = await getProfile(req.auth.sub);
   if (!profile) {
     return res.status(403).json({
       error: 'No CRM profile',

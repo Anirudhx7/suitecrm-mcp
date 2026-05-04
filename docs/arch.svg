@@ -73,5 +73,5 @@
 
   <!-- Gateway -> SuiteCRM -->
   <line x1="340" y1="254" x2="340" y2="298" stroke="#c45d25" stroke-width="1.5" marker-end="url(#arr-orange)"/>
-  <text x="348" y="280" fill="#9da3b8" font-size="9">v4_1 REST API</text>
+  <text x="348" y="280" fill="#9da3b8" font-size="9">Hybrid v8 GraphQL (v4.1 Fallback)</text>
 </svg>

@@ -8,6 +8,7 @@
 import { Command } from 'commander';
 import { createClient } from 'redis';
 import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 const program = new Command();
 
@@ -177,11 +178,6 @@ program
     }
 
     const pData = await redis.get(`mcp:profile:${sub}`);
-    if (!pData) {
-        console.error(`❌ Profile for "${identifier}" not found in Redis.`);
-        await disconnect();
-        return;
-    }
     const profile = JSON.parse(pData);
     
     console.log('\n--- User Profile ---');

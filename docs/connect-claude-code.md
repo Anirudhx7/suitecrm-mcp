@@ -13,11 +13,11 @@ No CRM credentials are stored on your machine.
 
 - Gateway v3.0+ installed and running (see [README](../README.md))
 - Claude Code CLI installed (`npm install -g @anthropic-ai/claude-code`)
-- Your API key from `https://YOUR_GATEWAY/auth/login`
+- Your API key from `https://mcp.yourcompany.com/auth/login`
 
 ## 🔑 Get your API key
 
-1. Visit `https://YOUR_GATEWAY/auth/login` (or just `https://YOUR_GATEWAY` - it redirects)
+1. Visit `https://mcp.yourcompany.com/auth/login` (or just `https://mcp.yourcompany.com` - it redirects)
 2. Log in with your corporate account
 3. On the success page, expand **Claude Code** and copy the ready-to-run command
 

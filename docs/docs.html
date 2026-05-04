@@ -748,7 +748,7 @@
 
           <!-- Gateway -> SuiteCRM -->
           <line x1="340" y1="254" x2="340" y2="298" stroke="#c45d25" stroke-width="1.5" marker-end="url(#arr-orange)"/>
-          <text x="348" y="280" fill="#9da3b8" font-size="9">v4_1 REST API</text>
+          <text x="348" y="280" fill="#9da3b8" font-size="9">Hybrid v8 GraphQL (v4.1 Fallback)</text>
         </svg>
       </div>
       <p>What the gateway does:</p>
@@ -757,6 +757,8 @@
         <li>Issues personal, revocable API keys to authenticated users</li>
         <li>Provisions CRM accounts via SSH on first login (if configured)</li>
         <li>Proxies MCP tool calls to the appropriate SuiteCRM instance</li>
+        <li><strong>Stateless Persistence:</strong> Auth sessions and user profiles are cached in Redis, enabling horizontal scaling, global rate limiting, and zero-downtime restarts.</li>
+        <li><strong>Smart Hybrid Routing:</strong> Automatically routes basic CRUD operations through the blazing-fast v8 GraphQL API, with a transparent failover to the v4.1 REST API for complex SQL searches.</li>
       </ul>
 
       <hr class="sub-divider" />
@@ -1166,49 +1168,53 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
         </table>
       </div>
 
-      <h3>Single entity</h3>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">json</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>{
-  "mcpServers": {
-    "suitecrm": {
-      "type": "sse",
-      "url": "https://mcp.yourcompany.com/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY_HERE"
-      }
-    }
-  }
-}</pre>
-      </div>
+      <p><em>The entire setup is just 3 steps:</em></p>
 
-      <h3>Multi entity</h3>
-      <p>Add one entry per entity. Each entity gets its own <code>/{code}/sse</code> path:</p>
+      <h3>Step 1 — Install Node.js</h3>
+      <p>Download from <a href="https://nodejs.org/" target="_blank">nodejs.org</a> (if not already installed)</p>
+
+      <h3>Step 2 — Edit <code>claude_desktop_config.json</code></h3>
+      <p>Add the following to your config file, replacing <code>&lt;token&gt;</code> with your API key, and using your gateway URL:</p>
+      
       <div class="code-block">
         <div class="code-header"><span class="code-lang">json</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>{
   "mcpServers": {
     "suitecrm_crm1": {
-      "type": "sse",
-      "url": "https://mcp.yourcompany.com/crm1/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY_HERE"
-      }
+      "command": "cmd",
+      "args": [
+        "/C",
+        "npx",
+        "-y",
+        "mcp-remote",
+        "https://mcp.yourcompany.com/crm1/sse",
+        "--transport",
+        "sse-only",
+        "--header",
+        "Authorization:Bearer YOUR_API_KEY_HERE"
+      ]
     },
     "suitecrm_crm2": {
-      "type": "sse",
-      "url": "https://mcp.yourcompany.com/crm2/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY_HERE"
-      }
+      "command": "cmd",
+      "args": [
+        "/C",
+        "npx",
+        "-y",
+        "mcp-remote",
+        "https://mcp.yourcompany.com/crm2/sse",
+        "--transport",
+        "sse-only",
+        "--header",
+        "Authorization:Bearer YOUR_API_KEY_HERE"
+      ]
     }
   }
 }</pre>
       </div>
-      <p>The same API key works for all entities you have access to.</p>
+      <div class="callout callout-info"><strong>Note for macOS users:</strong> Replace <code>"command": "cmd", "args": ["/C", "npx"...]</code> with <code>"command": "npx", "args": ["mcp-remote"...]</code></div>
 
-      <h2>Apply changes</h2>
-      <p>Fully quit and relaunch Claude Desktop (menu bar &gt; Quit, then reopen).</p>
+      <h3>Step 3 — Restart Claude Desktop</h3>
+      <p>Fully quit and relaunch Claude Desktop (menu bar &gt; Quit, then reopen). Done.</p>
 
       <h2>Verify</h2>
       <p>Click the hammer icon in the bottom-left of the chat window. You should see 24 tools: <code>suitecrm_search</code>, <code>suitecrm_get</code>, etc. (or <code>suitecrm_crm1_search</code> for multi entity).</p>
@@ -1396,14 +1402,14 @@ claude mcp add suitecrm \
       <h3>Single entity</h3>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>sudo python3 install.py --url https://crm.example.com --domain mcp.example.com --email you@example.com</pre>
+        <pre>sudo python3 install.py --url https://crm.example.com --domain mcp.yourcompany.com --email you@example.com</pre>
       </div>
       <h3>Multi entity</h3>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>cp entities.example.json entities.json
 <span class="cm"># Edit entities.json: add your CRM codes, labels, ports, endpoints, and group names</span>
-sudo python3 install.py --config entities.json --domain mcp.example.com --email you@example.com</pre>
+sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --email you@example.com</pre>
       </div>
       <div class="callout callout-warn"><strong>HTTPS strongly recommended.</strong> The <code>--domain</code> flag enables automatic TLS via Let's Encrypt. Without it, API keys travel unencrypted.</div>
 
@@ -1412,7 +1418,7 @@ sudo python3 install.py --config entities.json --domain mcp.example.com --email 
       <div class="code-block">
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>sudo python3 install-bridge.py \
-  --gateway https://mcp.example.com \
+  --gateway https://mcp.yourcompany.com \
   --code mycrm \
   --label "My CRM"</pre>
       </div>
@@ -1420,7 +1426,7 @@ sudo python3 install.py --config entities.json --domain mcp.example.com --email 
       <div class="code-block">
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>sudo python3 install-bridge.py \
-  --gateway https://mcp.example.com \
+  --gateway https://mcp.yourcompany.com \
   --entities entities.json</pre>
       </div>
       <h3>Specific users only</h3>
@@ -1472,7 +1478,7 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
       <h3>Using the REST endpoint directly</h3>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>curl -X POST https://mcp.example.com/auth/revoke \
+        <pre>curl -X POST https://mcp.yourcompany.com/auth/revoke \
   -H "X-Admin-Key: your-admin-key" \
   -H "Content-Type: application/json" \
   -d '{"sub": "user@example.com"}'</pre>
@@ -1482,7 +1488,7 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
       <div class="code-block">
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>sudo python3 install-bridge.py --update \
-  --gateway https://mcp.example.com \
+  --gateway https://mcp.yourcompany.com \
   --entities entities.json</pre>
       </div>
 
@@ -1491,7 +1497,7 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>sudo python3 install-bridge.py \
   --remove alice bob \
-  --gateway https://mcp.example.com \
+  --gateway https://mcp.yourcompany.com \
   --entities entities.json</pre>
       </div>
 

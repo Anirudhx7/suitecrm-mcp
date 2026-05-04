@@ -8,14 +8,14 @@ Handles single and multi-entity from one script.
 Single entity (no nginx unless --domain):
   sudo python3 install.py                            # interactive
   sudo python3 install.py --url https://crm.example.com
-  sudo python3 install.py --url https://crm.example.com --domain mcp.example.com --email you@example.com
+  sudo python3 install.py --url https://crm.example.com --domain mcp.yourcompany.com --email you@example.com
 
 Multi entity (nginx always):
   sudo python3 install.py entities.json
   sudo python3 install.py --config entities.json
   sudo python3 install.py --add                      # add new entities without touching existing
   sudo python3 install.py --remove crm1 crm2        # remove specific entities
-  sudo python3 install.py --domain mcp.example.com --email you@example.com  # enable HTTPS
+  sudo python3 install.py --domain mcp.yourcompany.com --email you@example.com  # enable HTTPS
 
 Operations (both modes):
   sudo python3 install.py --status
@@ -477,6 +477,7 @@ def install_auth_service(auth_cfg):
         "BIND_HOST=127.0.0.1",
         "METRICS_PORT=9091",
         "METRICS_BIND=127.0.0.1",
+        f"REDIS_URL={auth_cfg.get('REDIS_URL', 'redis://127.0.0.1:6379')}",
         "",
     ]
     write_file(AUTH_ENV_FILE, "\n".join(lines), mode="600")
@@ -715,6 +716,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             "BIND_HOST=127.0.0.1",
             f"METRICS_PORT={metrics_port}",
             "METRICS_BIND=127.0.0.1",
+            "REDIS_URL=redis://127.0.0.1:6379",
             "NODE_NO_WARNINGS=1",
         ]
         if data.get("group"):
@@ -731,6 +733,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             "BIND_HOST=127.0.0.1",
             f"METRICS_PORT={metrics_port}",
             "METRICS_BIND=127.0.0.1",
+            "REDIS_URL=redis://127.0.0.1:6379",
             "NODE_NO_WARNINGS=1",
         ]
         if data.get("group"):

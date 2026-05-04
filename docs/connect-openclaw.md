@@ -31,7 +31,7 @@ No CLI needed on the OpenClaw machine.
 **Single entity** (one CRM):
 
 ```bash
-sudo python3 install.py --url https://crm.example.com --domain mcp.example.com --email you@example.com
+sudo python3 install.py --url https://crm.example.com --domain mcp.yourcompany.com --email you@example.com
 ```
 
 **Multi entity** (multiple CRMs):
@@ -39,14 +39,14 @@ sudo python3 install.py --url https://crm.example.com --domain mcp.example.com -
 ```bash
 cp entities.example.json entities.json
 # Edit entities.json: add your CRM codes, labels, ports, endpoints, and group names
-sudo python3 install.py --config entities.json --domain mcp.example.com --email you@example.com
+sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --email you@example.com
 ```
 
 The installer will prompt for OAuth2/OIDC configuration (Auth0/Azure AD).
 See [docs/auth0-setup.md](auth0-setup.md) for how to create the identity provider app.
 
 Note the gateway URL - you will need it in Step 2:
-- With domain: `https://mcp.example.com`
+- With domain: `https://mcp.yourcompany.com`
 
 **HTTPS is strongly recommended.** The `--domain` flag enables automatic TLS via
 Let's Encrypt. Without it, API keys travel unencrypted.
@@ -61,7 +61,7 @@ Copy `install-bridge.py` from the gateway machine to the OpenClaw machine, then 
 
 ```bash
 sudo python3 install-bridge.py \
-  --gateway https://mcp.example.com \
+  --gateway https://mcp.yourcompany.com \
   --code mycrm \
   --label "My CRM"
 ```
@@ -70,7 +70,7 @@ sudo python3 install-bridge.py \
 
 ```bash
 sudo python3 install-bridge.py \
-  --gateway https://mcp.example.com \
+  --gateway https://mcp.yourcompany.com \
   --entities entities.json
 ```
 
@@ -113,7 +113,7 @@ the agent to do something with SuiteCRM, the flow starts automatically:
    (or wherever the agent is running):
    ```
    To connect to SuiteCRM, please authenticate:
-   https://mcp.example.com/auth/login?bridge=abc123
+   https://mcp.yourcompany.com/auth/login?bridge=abc123
    This link expires in 15 minutes.
    ```
 
@@ -183,7 +183,7 @@ login prompt.
 **Using the REST endpoint directly:**
 
 ```bash
-curl -X POST https://mcp.example.com/auth/revoke \
+curl -X POST https://mcp.yourcompany.com/auth/revoke \
   -H "X-Admin-Key: your-admin-key" \
   -H "Content-Type: application/json" \
   -d '{"sub": "user@example.com"}'
@@ -200,7 +200,7 @@ To reinstall bridge plugins without wiping the saved token (e.g. after a gateway
 
 ```bash
 sudo python3 install-bridge.py --update \
-  --gateway https://mcp.example.com \
+  --gateway https://mcp.yourcompany.com \
   --entities entities.json
 ```
 
@@ -211,7 +211,7 @@ sudo python3 install-bridge.py --update \
 ```bash
 sudo python3 install-bridge.py \
   --remove alice bob \
-  --gateway https://mcp.example.com \
+  --gateway https://mcp.yourcompany.com \
   --entities entities.json
 ```
 
