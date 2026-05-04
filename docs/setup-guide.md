@@ -8,16 +8,15 @@ End-to-end guide for deploying suitecrm-mcp v4.x from scratch.
 [Identity Provider]          [Gateway VM]                        [CRM VMs]
   Auth0 / Azure AD  <------> suitecrm-mcp-auth (port 3100)
                                OAuth2 login, API key issuance
-                               /etc/suitecrm-mcp/sessions.json
+                               Stateless Persistence (Redis)
 
-                             suitecrm-mcp-crm1 (port 3101)  ->  CRM A REST API
-                               validates Bearer token          /service/v4_1/rest.php
+                             suitecrm-mcp-crm1 (port 3101)  ->  CRM A (Hybrid)
+                               validates Bearer token          v8 GraphQL + v4.1 REST
                                proxies MCP tool calls
 
-                             suitecrm-mcp-crm2 (port 3102)  ->  CRM B REST API
-                               /etc/suitecrm-mcp/
-                                 user-profiles.json
-                                 entities.json
+                             suitecrm-mcp-crm2 (port 3102)  ->  CRM B (Hybrid)
+                               entities.json
+                               Redis Cache (Sessions & Profiles)
 
 [User's machine]
   Claude Desktop / Claude Code / OpenClaw
@@ -31,6 +30,8 @@ End-to-end guide for deploying suitecrm-mcp v4.x from scratch.
 - Issues personal, revocable API keys to authenticated users
 - Provisions CRM accounts via SSH on first login (if configured)
 - Proxies MCP tool calls to the appropriate SuiteCRM instance
+- **Smart Hybrid Routing:** Automatically routes basic CRUD operations through the blazing-fast v8 GraphQL API, with transparent failover to v4.1 REST for complex SQL searches.
+- **Stateless Resilience:** Auth sessions and profiles are cached in Redis, enabling zero-downtime restarts and horizontal scaling.
 
 ---
 
@@ -54,6 +55,7 @@ Requirements:
 - Ubuntu 20.04+ (or Debian 11+)
 - Public IP or domain pointing to this VM
 - Ports 80 and 443 open (for HTTPS + Let's Encrypt)
+- **Redis 6.0+** (required for stateless session and profile storage)
 - SSH access from this VM to CRM VMs (if using SSH provisioning)
 
 ```bash
@@ -222,7 +224,7 @@ curl -I https://mcp.yourcompany.com/
 # Should return: 302 Location: /auth/login
 
 # Test OIDC discovery (gateway startup probe)
-curl https://YOUR_DOMAIN/.well-known/openid-configuration
+curl https://mcp.yourcompany.com/.well-known/openid-configuration
 ```
 
 Then visit `https://mcp.yourcompany.com` in a browser and complete the login flow.
@@ -240,16 +242,14 @@ You should see the success page with your API key.
 
 ## 🛠️ Admin operations
 
-### Periodic session cleanup
+### Session management
 
-`sessions.json` accumulates expired entries over time. Run this periodically or add it as a cron job:
+Expired sessions are automatically purged from Redis after 24 hours. No manual cleanup is required in the new stateless architecture.
 
+To manually list active sessions or revoke a user:
 ```bash
-# Purge expired sessions (safe to run at any time)
-python3 tools/mcp-admin sessions --purge-expired
-
-# Example cron: run daily at 2am
-echo "0 2 * * * suitecrm-mcp python3 /opt/suitecrm-mcp/tools/mcp-admin sessions --purge-expired" | sudo crontab -
+mcp-admin list
+mcp-admin revoke <sub_or_email>
 ```
 
 ---
@@ -257,8 +257,8 @@ echo "0 2 * * * suitecrm-mcp python3 /opt/suitecrm-mcp/tools/mcp-admin sessions 
 ### Check user profiles and API keys
 
 ```bash
-# Requires python3, reads /etc/suitecrm-mcp/user-profiles.json
-python3 tools/mcp-admin list
+# Managed via Redis CLI or scripts
+redis-cli HGETALL crm:profiles
 python3 tools/mcp-admin whoami --sub <sub>
 python3 tools/mcp-admin revoke --sub <sub>
 ```
@@ -311,8 +311,6 @@ sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --em
   entities.json              entity list (written by installer)
   auth.env                   env vars for auth service (mode 600)
   crm1.env                   env vars for entity crm1 (mode 600)
-  user-profiles.json         per-user API keys and CRM creds (mode 600, written at runtime)
-  sessions.json              active gateway sessions (mode 600, written at runtime)
   crm-hosts.json             SSH host map for provisioning (if configured)
   domain                     saved domain for nginx rebuild
 

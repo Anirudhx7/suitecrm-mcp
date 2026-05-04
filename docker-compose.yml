@@ -13,6 +13,7 @@ services:
       - suitecrm-state:/etc/suitecrm-mcp
       - ./entities.json:/etc/suitecrm-mcp/entities.json:ro   # copy from entities.example.json and edit
     environment:
+      REDIS_URL: redis://redis:6379
       AUTH0_DOMAIN: your-tenant.auth0.com
       AUTH0_CLIENT_ID: your-client-id
       AUTH0_CLIENT_SECRET: your-client-secret
@@ -27,6 +28,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    depends_on:
+      - redis
     restart: unless-stopped
 
   # ── Gateway (single-entity Docker usage) ────────────────────────────────────
@@ -54,10 +57,20 @@ services:
       # NODE_TLS_REJECT_UNAUTHORIZED: "0"  # only for self-signed certs
       # CIRCUIT_BREAKER_THRESHOLD: "5"     # failures before circuit opens
       # CIRCUIT_BREAKER_RESET_MS: "60000"  # recovery window ms
+      REDIS_URL: redis://redis:6379
     depends_on:
+      redis:
+        condition: service_started
       suitecrm-mcp-auth:
         condition: service_healthy
     restart: unless-stopped
+
+  # ── Redis (Stateless Persistence) ───────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
 
   # ── Prometheus ───────────────────────────────────────────────────────────────
   # Optional monitoring stack. Remove this and grafana if you don't need metrics.
@@ -128,7 +141,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  suitecrm-state:     # shared runtime state: sessions.json, user-profiles.json
+  suitecrm-state:     # shared runtime config (entities.json etc) - sessions now in Redis
   prometheus_data:
   grafana_data:
   loki_data:

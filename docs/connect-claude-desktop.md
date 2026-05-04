@@ -35,48 +35,34 @@ construct it manually.
 | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
 
-## 🔌 Single entity
+*The entire setup is just 2 steps:*
 
-```json
-{
-  "mcpServers": {
-    "suitecrm": {
-      "type": "sse",
-      "url": "https://mcp.yourcompany.com/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY_HERE"
-      }
-    }
-  }
-}
-```
+### *Step 1 — Install Node.js*
+Download from [nodejs.org](https://nodejs.org/) (if not already installed)
 
-## 🌐 Multi entity
+### *Step 2 — Edit `%APPDATA%\Claude\claude_desktop_config.json`* 
 
-Add one entry per entity. Each entity gets its own `/{code}/sse` path:
+Add the following to your config file, replacing `<token>` with your API key, and using your gateway URL:
 
 ```json
 {
   "mcpServers": {
     "suitecrm_crm1": {
-      "type": "sse",
-      "url": "https://mcp.yourcompany.com/crm1/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY_HERE"
-      }
+      "command": "cmd",
+      "args": ["/C", "npx", "mcp-remote", "https://mcp.yourcompany.com/crm1/sse", "--transport", "sse-only", "--header", "Authorization:Bearer <token>"]
     },
     "suitecrm_crm2": {
-      "type": "sse",
-      "url": "https://mcp.yourcompany.com/crm2/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY_HERE"
-      }
+      "command": "cmd",
+      "args": ["/C", "npx", "mcp-remote", "https://mcp.yourcompany.com/crm2/sse", "--transport", "sse-only", "--header", "Authorization:Bearer <token>"]
     }
   }
 }
 ```
 
-The same API key works for all entities you have access to.
+*Note for macOS users: Replace `"command": "cmd", "args": ["/C", "npx"...]` with `"command": "npx", "args": ["mcp-remote"...]`*
+
+### *Step 3 — Restart Claude Desktop*
+Fully quit → reopen. Done.
 
 ## ▶️ Apply changes
 
