@@ -145,7 +145,6 @@ flowchart TB
     GW -.->|"issues API key"| Clients
     Clients -->|"Bearer token"| GW
     GW -->|"Hybrid v8 GraphQL\n(v4_1 Fallback)"| CRMs
-    GW --- Redis[(Redis Cache)]
 
     style GW fill:#2b6cb0,stroke:#63b3ed,stroke-width:2px,color:#fff
     style IdP fill:#2d3748,stroke:#718096,color:#e2e8f0
