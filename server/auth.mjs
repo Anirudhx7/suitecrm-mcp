@@ -267,8 +267,16 @@ app.get('/', (req, res) => {
   res.redirect('/auth/login');
 });
 
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts, please try again later' },
+});
+
 // GET /auth/login -> OAuth2 flow
-app.get('/auth/login', (req, res) => {
+app.get('/auth/login', loginLimiter, (req, res) => {
   const nonce  = qs(req.query.nonce) || undefined;
   const params = new URLSearchParams({
     response_type: 'code',
@@ -290,7 +298,7 @@ app.get('/auth/login', (req, res) => {
 });
 
 // GET /auth/callback -> exchange code, provision CRM, store token, show success UI
-app.get('/auth/callback', async (req, res) => {
+app.get('/auth/callback', loginLimiter, async (req, res) => {
   const code              = qs(req.query.code);
   const error             = qs(req.query.error);
   const error_description = qs(req.query.error_description);
