@@ -621,15 +621,19 @@
       <input type="text" id="sidebar-search-input" aria-label="Search docs" placeholder="Search docs..." oninput="filterSidebar(this.value)" autocomplete="off" spellcheck="false" />
     </div>
     <div class="sidebar-group">
-      <div class="sidebar-group-label">Getting Started</div>
+      <div class="sidebar-group-label">Start Here</div>
       <nav class="sidebar-nav">
-        <a href="#setup-guide" class="active">Setup Guide</a>
-        <a href="#setup-overview" class="sub">Overview</a>
-        <a href="#setup-install" class="sub">Install steps 1-4</a>
-        <a href="#setup-crm-prep" class="sub">CRM prep (steps 5-6)</a>
-        <a href="#setup-test" class="sub">Test &amp; connect</a>
-        <a href="#setup-admin" class="sub">Admin operations</a>
-        <a href="#setup-files" class="sub">File layout</a>
+        <a href="#setup-guide" class="active">Overview</a>
+        <a href="#setup-overview" class="sub">Architecture</a>
+        <a href="#setup-install" class="sub">Install steps</a>
+        <a href="#setup-crm-prep" class="sub">CRM prep</a>
+        <a href="#setup-test" class="sub">Test the gateway</a>
+        <a href="#crm-prep" class="sub">CRM-side setup</a>
+      </nav>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-label">Identity</div>
+      <nav class="sidebar-nav">
         <a href="#auth-setup">Identity Provider</a>
         <a href="#auth-auth0" class="sub">Auth0</a>
         <a href="#auth-azure" class="sub">Azure AD</a>
@@ -652,14 +656,30 @@
       </nav>
     </div>
     <div class="sidebar-group">
-      <div class="sidebar-group-label">Observability</div>
+      <div class="sidebar-group-label">Operate</div>
       <nav class="sidebar-nav">
-        <a href="#observability">Overview</a>
+        <a href="#admin-operations">Admin Operations</a>
+        <a href="#admin-day-to-day" class="sub">Day-to-day commands</a>
+        <a href="#admin-session-issues" class="sub">Session issues</a>
+        <a href="#admin-ops" class="sub">Ops commands</a>
+        <a href="#admin-emergency" class="sub">Emergency</a>
+      </nav>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-label">Observe</div>
+      <nav class="sidebar-nav">
+        <a href="#observability">Observability</a>
         <a href="#obs-stack" class="sub">Starting the stack</a>
         <a href="#obs-prometheus" class="sub">Prometheus metrics</a>
         <a href="#obs-grafana" class="sub">Grafana dashboards</a>
         <a href="#obs-loki" class="sub">Loki &amp; log queries</a>
         <a href="#obs-alerts" class="sub">Alerting rules</a>
+      </nav>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-label">Reference</div>
+      <nav class="sidebar-nav">
+        <a href="#setup-files">File Layout</a>
       </nav>
     </div>
   </aside>
@@ -670,9 +690,9 @@
     <!-- ======================================================= -->
     <!-- SETUP GUIDE                                              -->
     <!-- ======================================================= -->
-    <section class="doc-section" id="setup-guide">
+<section class="doc-section" id="setup-guide">
       <h1>Complete Setup Guide</h1>
-      <p class="section-desc">End-to-end guide for deploying suitecrm-mcp v4.x from scratch.</p>
+      <p class="section-desc">End-to-end guide for deploying suitecrm-mcp v5.x from scratch.</p>
 
       <h2 id="setup-overview">Overview</h2>
       <div class="arch-diagram">
@@ -909,93 +929,71 @@ curl https://YOUR_DOMAIN/.well-known/openid-configuration</pre>
         <li><a href="#connect-openclaw">OpenClaw setup</a></li>
       </ul>
 
-      <hr class="sub-divider" />
-      <h2 id="setup-admin">Admin Operations</h2>
-
-      <h3>Periodic session cleanup</h3>
-      <p><code>sessions.json</code> accumulates expired entries over time. Safe to run at any time:</p>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre><span class="cm"># Purge expired sessions</span>
-python3 tools/mcp-admin sessions --purge-expired
-
-<span class="cm"># Example cron: daily at 2am</span>
-echo "0 2 * * * suitecrm-mcp python3 /opt/suitecrm-mcp/tools/mcp-admin sessions --purge-expired" | sudo crontab -</pre>
-      </div>
-
-      <h3>Manage user profiles and API keys</h3>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>python3 tools/mcp-admin list
-python3 tools/mcp-admin whoami --sub &lt;sub&gt;
-python3 tools/mcp-admin revoke --sub &lt;sub&gt;</pre>
-      </div>
-
-      <h3>Add a user manually (bypass OAuth)</h3>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>python3 tools/mcp-admin add --sub &lt;sub&gt; --entity &lt;entity_code&gt; --user &lt;crm_username&gt; --pass &lt;crm_password&gt;</pre>
-      </div>
-
-      <h3>Update server code without reinstalling</h3>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>git pull
-sudo python3 install.py --update --config entities.json --skip-oauth</pre>
-      </div>
-
-      <h3>Add a new entity</h3>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre><span class="cm"># Edit entities.json to add the new entry, then:</span>
-sudo python3 install.py --add --config entities.json --skip-oauth</pre>
-      </div>
-
-      <h3>Remove an entity</h3>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>sudo python3 install.py --remove crm2</pre>
-      </div>
-
-      <h3>Enable HTTPS on an existing plain HTTP install</h3>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --email you@example.com --skip-oauth</pre>
-      </div>
-
-      <hr class="sub-divider" />
-      <h2 id="setup-files">File Layout After Install</h2>
-      <div class="code-block">
-        <div class="code-header"><span class="code-lang">filesystem</span></div>
-        <pre>/opt/suitecrm-mcp/           gateway server code
-  index.mjs
-  auth.mjs
-  package.json
-  node_modules/
-
-/etc/suitecrm-mcp/           config and runtime state (mode 700, owned by suitecrm-mcp)
-  entities.json              entity list (written by installer)
-  auth.env                   env vars for auth service (mode 600)
-  crm1.env                   env vars for entity crm1 (mode 600)
-  user-profiles.json         per-user API keys and CRM creds (mode 600, written at runtime)
-  sessions.json              active gateway sessions (mode 600, written at runtime)
-  crm-hosts.json             SSH host map for provisioning (if configured)
-  domain                     saved domain for nginx rebuild
-
-/etc/systemd/system/
-  suitecrm-mcp-auth.service
-  suitecrm-mcp-crm1.service
-
-/etc/nginx/sites-available/
-  suitecrm-mcp               nginx config with entity and /auth/ routing</pre>
-      </div>
     </section>
 
+<section class="doc-section" id="crm-prep">
+      <h1>CRM-side Setup</h1>
+      <p class="section-desc">One-time configuration on your SuiteCRM instance before connecting the gateway. Run these steps once per CRM — regardless of how many gateway entities you configure.</p>
 
-    <!-- ======================================================= -->
-    <!-- AUTH SETUP                                               -->
-    <!-- ======================================================= -->
-    <section class="doc-section" id="auth-setup">
+      <h2 id="crm-prep-api-access">Enable API Access per User</h2>
+      <p>Before any user can authenticate via the gateway, their SuiteCRM account must have API access explicitly enabled. Without this, all login attempts return <code>Invalid Login</code> with no useful error message.</p>
+      <ol>
+        <li>Log into SuiteCRM as admin</li>
+        <li>Go to <strong>Admin &rarr; User Management &rarr;</strong> (select the user)</li>
+        <li>Scroll to "Password" section &rarr; tick <strong>"Allow API Access"</strong> &rarr; Save</li>
+      </ol>
+      <div class="callout callout-warn"><strong>Don't forget:</strong> The <code>mcp_acl_reader</code> service account also needs this enabled if you use ACL enforcement.</div>
+
+      <h2 id="crm-prep-endpoint">Find the REST API Endpoint</h2>
+      <p>SuiteCRM's REST API path varies by installation. Run this probe from your gateway server:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Replace crm.example.com with your CRM hostname</span>
+for path in \
+  "/service/v4_1/rest.php" \
+  "/legacy/service/v4_1/rest.php" \
+  "/crm/legacy/service/v4_1/rest.php" \
+  "/crm/public/legacy/service/v4_1/rest.php"; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "https://crm.example.com${path}" \
+    -d 'method=get_server_info&input_type=JSON&response_type=JSON&rest_data=%7B%7D')
+  echo "$code  $path"
+done</pre>
+      </div>
+      <p>The first path returning <code>200</code> is your <code>SUITECRM_ENDPOINT</code>.</p>
+
+      <h2 id="crm-prep-ldap">LDAP / SSO Users</h2>
+      <p>SuiteCRM's v4_1 REST API only authenticates against local database passwords. LDAP and SSO users have no local password and will fail to log in via the gateway.</p>
+      <p>Use <code>tools/create-api-user.sh</code> to set a local API password without affecting the user's LDAP/SSO login:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Single user</span>
+sudo bash tools/create-api-user.sh john.doe
+
+<span class="cm"># Bulk from CSV (user_name,password)</span>
+sudo bash tools/create-api-user.sh --csv users.csv</pre>
+      </div>
+
+      <h2 id="crm-prep-oauth">Fix OAuth2 Token Lifetime</h2>
+      <p>SuiteCRM's default OAuth2 token lifetime is 1 minute. MCP sessions run for hours or days and will break constantly unless you extend this.</p>
+      <p>First, collect your DB credentials from <code>config.php</code>:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>grep -E "db_host_name|db_name|db_user_name|db_password" /path/to/suitecrm/public/legacy/config.php</pre>
+      </div>
+      <p>Then set the token lifetime to 30 days:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>mysql -h &lt;DB_HOST&gt; -u &lt;DB_USER&gt; -p'&lt;DB_PASS&gt;' &lt;DB_NAME&gt; -e "
+UPDATE oauth2clients
+SET duration_value=30, duration_amount=30, duration_unit='day'
+WHERE deleted=0;"</pre>
+      </div>
+      <p>Full reference including <code>mcp_acl_reader</code> setup: <a href="suitecrm-prep.md" target="_blank">docs/suitecrm-prep.md</a></p>
+
+    </section>
+
+<section class="doc-section" id="auth-setup">
       <h1>Identity Provider Setup</h1>
       <p class="section-desc">The gateway supports any OIDC-compliant provider. This guide covers Auth0 and Azure AD, the two most common configurations.</p>
 
@@ -1125,11 +1123,7 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
 
     </section>
 
-
-    <!-- ======================================================= -->
-    <!-- CLAUDE DESKTOP                                           -->
-    <!-- ======================================================= -->
-    <section class="doc-section" id="connect-desktop">
+<section class="doc-section" id="connect-desktop">
       <h1>Connecting Claude Desktop</h1>
       <p class="section-desc">Claude Desktop connects directly to the gateway via SSE using a gateway-issued API key. No CRM credentials are stored on your machine.</p>
 
@@ -1144,7 +1138,7 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
 
       <h2>Prerequisites</h2>
       <ul>
-        <li>Gateway v4.x installed and running</li>
+        <li>Gateway v5.x installed and running</li>
         <li>Claude Desktop installed</li>
         <li>Your API key from <code>https://YOUR_GATEWAY/auth/login</code></li>
       </ul>
@@ -1226,7 +1220,7 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
         <li>Update <code>Authorization</code> in the config file</li>
         <li>Restart Claude Desktop</li>
       </ol>
-      <p>Your admin can also revoke a key immediately via <code>mcp-admin revoke &lt;sub&gt;</code>.</p>
+      <p>Your admin can also revoke a key immediately via <code>mcp-admin revoke --email your.name@company.com</code>.</p>
 
       <h2 id="desktop-troubleshoot">Troubleshooting</h2>
       <div class="table-wrap">
@@ -1243,11 +1237,7 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
       </div>
     </section>
 
-
-    <!-- ======================================================= -->
-    <!-- CLAUDE CODE                                              -->
-    <!-- ======================================================= -->
-    <section class="doc-section" id="connect-code">
+<section class="doc-section" id="connect-code">
       <h1>Connecting Claude Code (CLI)</h1>
       <p class="section-desc">Claude Code connects directly to the gateway via SSE using a gateway-issued API key. No CRM credentials are stored on your machine.</p>
 
@@ -1260,7 +1250,7 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
 
       <h2>Prerequisites</h2>
       <ul>
-        <li>Gateway v4.x installed and running</li>
+        <li>Gateway v5.x installed and running</li>
         <li>Claude Code CLI installed: <code>npm install -g @anthropic-ai/claude-code</code></li>
         <li>Your API key from <code>https://YOUR_GATEWAY/auth/login</code></li>
       </ul>
@@ -1348,11 +1338,7 @@ claude mcp add suitecrm \
       </div>
     </section>
 
-
-    <!-- ======================================================= -->
-    <!-- OPENCLAW                                                 -->
-    <!-- ======================================================= -->
-    <section class="doc-section" id="connect-openclaw">
+<section class="doc-section" id="connect-openclaw">
       <h1>Connecting OpenClaw</h1>
       <p class="section-desc">OpenClaw uses a two-machine architecture: a remote gateway and a local bridge plugin.</p>
 
@@ -1473,7 +1459,7 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
       <h3>Using mcp-admin (recommended)</h3>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre>mcp-admin revoke &lt;sub&gt;</pre>
+        <pre>mcp-admin revoke --email user@company.com</pre>
       </div>
       <h3>Using the REST endpoint directly</h3>
       <div class="code-block">
@@ -1520,10 +1506,140 @@ sudo python3 install-bridge.py --gateway ... --code mycrm --attach "Sales Bot,Su
       </div>
     </section>
 
-    <!-- ======================================================= -->
-    <!-- OBSERVABILITY                                            -->
-    <!-- ======================================================= -->
-    <section class="doc-section" id="observability">
+<section class="doc-section" id="admin-operations">
+      <h1>Admin Operations</h1>
+      <p class="section-desc">Daily support, session recovery, entity health, credential testing, and emergency controls through the installed <code>mcp-admin</code> command.</p>
+      <p>The admin tool is installed at <code>/usr/local/bin/mcp-admin</code>. It is the operator surface for Redis-backed profiles, gateway sessions, entity health, credential tests, and emergency revocation. Use it instead of editing Redis or profile data by hand.</p>
+
+      <div class="callout callout-info">
+        <strong>Operator standard:</strong> support should be able to answer "who has access, is their session alive, and does their CRM password work?" in one minute.
+      </div>
+
+      <h3 id="admin-day-to-day">Day-to-day user management</h3>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Command</th><th>When to use it</th></tr></thead>
+          <tbody>
+            <tr><td><code>mcp-admin list</code></td><td>First thing to run when someone reports a problem. Shows who has what access and whether they have an active session.</td></tr>
+            <tr><td><code>mcp-admin whoami --email X</code></td><td>Focused view on one user. Use when you need their subject ID or want to see exactly which sessions are alive.</td></tr>
+            <tr><td><code>mcp-admin add</code></td><td>Onboard a new manual user or update someone's CRM password after it changed.</td></tr>
+            <tr><td><code>mcp-admin remove</code></td><td>Offboard a user or revoke access to a specific entity.</td></tr>
+            <tr><td><code>mcp-admin test</code></td><td>After adding or updating credentials, confirm the password actually works against the live CRM.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># See everything</span>
+mcp-admin list
+mcp-admin list --user adogra
+mcp-admin list --entity pcau
+mcp-admin list --show-pass
+
+<span class="cm"># Inspect a specific user</span>
+mcp-admin whoami --email adogra@aecoenergy.com
+
+<span class="cm"># Add or update a user's entity credentials</span>
+mcp-admin add --email adogra@aecoenergy.com --entity pcau --user adogra --pass &lt;plaintext&gt;
+
+<span class="cm"># Create a brand-new manual profile</span>
+mcp-admin add --email newuser@aecoenergy.com
+
+<span class="cm"># Remove access</span>
+mcp-admin remove --email adogra@aecoenergy.com --entity pcau
+mcp-admin remove --email adogra@aecoenergy.com
+
+<span class="cm"># Confirm CRM credentials work</span>
+mcp-admin test
+mcp-admin test --email adogra@aecoenergy.com --entity aeau</pre>
+      </div>
+
+      <h3 id="admin-session-issues">When someone cannot log in or has session issues</h3>
+      <p>Start with revocation. It forces a clean login without deleting the user's CRM access profile.</p>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Command</th><th>When to use it</th></tr></thead>
+          <tbody>
+            <tr><td><code>mcp-admin revoke --email X</code></td><td>Forces a clean re-login without touching the profile. Try this first.</td></tr>
+            <tr><td><code>mcp-admin sessions</code></td><td>Look at what gateway sessions exist and when they expire.</td></tr>
+            <tr><td><code>mcp-admin sessions --purge-expired</code></td><td>Housekeeping for dead Redis session keys.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>mcp-admin revoke --email adogra@aecoenergy.com
+mcp-admin sessions
+mcp-admin sessions --purge-expired</pre>
+      </div>
+
+      <h3 id="admin-ops">Ops and infrastructure</h3>
+      <p>These are the commands to run after deployments, restarts, entity changes, or when support needs a live view of the fleet.</p>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Command</th><th>When to use it</th></tr></thead>
+          <tbody>
+            <tr><td><code>mcp-admin health</code></td><td>Quick sanity check after any deployment or restart.</td></tr>
+            <tr><td><code>mcp-admin health-deep</code></td><td>When health shows a problem, check deeper gateway, Redis, and backend endpoint detail.</td></tr>
+            <tr><td><code>mcp-admin entities</code></td><td>See user/session counts per entity alongside live health.</td></tr>
+            <tr><td><code>mcp-admin restart pcau</code></td><td>Restart one gateway instance after config or code changes.</td></tr>
+            <tr><td><code>mcp-admin restart --all</code></td><td>Restart every gateway instance.</td></tr>
+            <tr><td><code>mcp-admin stats</code></td><td>Quick Redis memory, profile count, and session count snapshot.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>mcp-admin health
+mcp-admin health-deep
+mcp-admin health --watch
+
+mcp-admin entities
+mcp-admin restart pcau
+mcp-admin restart --all
+mcp-admin stats</pre>
+      </div>
+
+      <h3 id="admin-emergency">Emergency</h3>
+      <p><code>flush --yes-i-am-sure</code> kills all gateway sessions instantly. Use it if credentials are compromised or everyone must re-authenticate after a major security or identity-provider change.</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>mcp-admin flush --yes-i-am-sure</pre>
+      </div>
+
+      <div class="callout callout-warn">
+        <strong>Password visibility:</strong> <code>mcp-admin list --show-pass</code> unmasks CRM passwords. Treat terminal history, screenshots, and support transcripts as sensitive whenever you use it.
+      </div>
+
+      <h3>Update server code without reinstalling</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>git pull
+sudo python3 install.py --update --config entities.json --skip-oauth</pre>
+      </div>
+
+      <h3>Add a new entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Edit entities.json to add the new entry, then:</span>
+sudo python3 install.py --add --config entities.json --skip-oauth</pre>
+      </div>
+
+      <h3>Remove an entity</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install.py --remove crm2</pre>
+      </div>
+
+      <h3>Enable HTTPS on an existing plain HTTP install</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --email you@example.com --skip-oauth</pre>
+      </div>
+
+    </section>
+
+<section class="doc-section" id="observability">
       <h1>Observability</h1>
       <p class="section-desc">Prometheus metrics, Grafana dashboards, and Loki log aggregation - shipped in <code>docker-compose.yml</code> and ready to run alongside the gateway.</p>
 
@@ -1633,15 +1749,17 @@ curl http://127.0.0.1:9091/metrics</pre>
 
       <hr class="sub-divider" />
       <h2 id="obs-alerts">Alerting rules</h2>
-      <p>Prometheus alerting rules are in <code>monitoring/prometheus/rules.yml</code> and loaded automatically by the bundled Prometheus. Four rules are configured:</p>
+      <p>Prometheus alerting rules are in <code>monitoring/prometheus/rules.yml</code> and loaded automatically by the bundled Prometheus. The rule set covers:</p>
       <div class="table-wrap">
         <table class="docs-table">
           <thead><tr><th>Alert</th><th>Condition</th><th>Severity</th></tr></thead>
           <tbody>
-            <tr><td>Circuit breaker open</td><td><code>circuit_breaker_state == 2</code> for 1 min</td><td>Critical</td></tr>
-            <tr><td>High auth failure rate</td><td>&gt;10 failures/min for 5 min</td><td>Warning</td></tr>
-            <tr><td>Latency SLO breach</td><td>p99 tool latency &gt; 5s for 5 min</td><td>Warning</td></tr>
-            <tr><td>Session expiry storm</td><td>&gt;20 renewals/min for 3 min</td><td>Warning</td></tr>
+            <tr><td>Circuit breaker open</td><td><code>suitecrm_mcp_circuit_breaker_state == 2</code></td><td>Critical</td></tr>
+            <tr><td>Gateway/entity down</td><td>Prometheus target <code>up == 0</code></td><td>Critical</td></tr>
+            <tr><td>High tool error rate</td><td>More than 10% tool-call errors over 5 minutes</td><td>Warning</td></tr>
+            <tr><td>High heap or event loop lag</td><td>Node memory pressure or event loop blocking</td><td>Warning</td></tr>
+            <tr><td>Auth or rate-limit spike</td><td>Elevated auth failures or excessive client traffic</td><td>Warning</td></tr>
+            <tr><td>Connection capacity</td><td>Active SSE connections approaching the gateway cap</td><td>Warning</td></tr>
           </tbody>
         </table>
       </div>
@@ -1649,6 +1767,39 @@ curl http://127.0.0.1:9091/metrics</pre>
 
     </section>
 
+<section class="doc-section" id="setup-files">
+      <h1>File Layout After Install</h1>
+      <p class="section-desc">Where the installer places runtime code, protected environment files, Redis-backed state, systemd units, and nginx routing.</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">filesystem</span></div>
+        <pre>/opt/suitecrm-mcp/           gateway server code
+  index.mjs
+  auth.mjs
+  package.json
+  node_modules/
+
+/etc/suitecrm-mcp/           config and runtime state (mode 700, owned by suitecrm-mcp)
+  entities.json              entity list (written by installer)
+  auth.env                   env vars for auth service (mode 600)
+  crm1.env                   env vars for entity crm1 (mode 600)
+  crm-hosts.json             SSH host map for provisioning (if configured)
+  domain                     saved domain for nginx rebuild
+
+Redis                       runtime state
+  crm:profiles              per-user CRM credentials and entity access
+  auth:session:*            gateway API sessions
+  crm:session:*             cached CRM sessions per user and entity
+  auth:bridge:*             short-lived OpenClaw bridge login handoffs
+  rl:*                      shared rate-limit counters
+
+/etc/systemd/system/
+  suitecrm-mcp-auth.service
+  suitecrm-mcp-crm1.service
+
+/etc/nginx/sites-available/
+  suitecrm-mcp               nginx config with entity and /auth/ routing</pre>
+      </div>
+    </section>
   </main>
 </div>
 
