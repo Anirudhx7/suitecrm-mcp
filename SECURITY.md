@@ -4,7 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 4.x     | Yes       |
+| 5.x     | Yes       |
+| 4.x     | No        |
 | 3.x     | No        |
 | 2.x     | No        |
 | 1.x     | No        |
@@ -24,10 +25,10 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 - **OAuth2 Authorization Code flow:** Users authenticate via Auth0 (or any OIDC provider).
   The gateway is the sole OAuth client - MCP clients and bridges only hold a gateway-issued
   session token, never CRM credentials.
-- **Session-based API keys:** On successful login, the auth service writes a session record
-  to `sessions.json` (mode 600). The session token is a `crypto.randomBytes(32)` hex string
-  tied to the user's sub, email, and groups. It expires after a configurable number of days
-  (default 30).
+- **Session-based API keys:** On successful login, the auth service stores a session record
+  in Redis under `auth:session:<token>` with a TTL matching the token lifetime. The session
+  token is a `crypto.randomBytes(32)` hex string tied to the user's sub, email, and groups.
+  It expires after a configurable number of days (default 30).
 - **Group-based entity access:** A per-entity `REQUIRED_GROUP` value is checked against the
   groups in the session. Users not in the required group receive HTTP 403.
 - **Nonce-bound bridge pickup:** OpenClaw bridges start a session via
@@ -42,9 +43,10 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 
 - **Fail-fast auth:** Invalid or missing bearer tokens on `/sse` return HTTP 401 immediately
   before the SSE stream opens. No half-open sessions are created.
-- **Rate limiting:** `/sse` and `/test` are limited to 20 requests per 15 minutes per IP.
-  `/messages` is limited to 100 requests per minute. `/health/deep` is limited to 10 per minute.
-  Limits use `express-rate-limit` with standard headers (`RateLimit-*`).
+- **Rate limiting:** `/sse` and `/test` are limited to 60 requests per minute per user (falls
+  back to IP if no session). `/messages` is limited to 100 requests per minute per session.
+  `/health/deep` is limited to 10 per minute. All limits use Redis-backed `express-rate-limit`
+  with standard headers (`RateLimit-*`).
 - **Circuit breaker:** The gateway tracks consecutive CRM REST API failures. After
   `CIRCUIT_BREAKER_THRESHOLD` (default 5) failures, the circuit opens and all tool calls
   immediately return an error without hitting the CRM. The circuit resets after
@@ -53,8 +55,8 @@ Please do not disclose security vulnerabilities publicly until they have been ad
 - **No CORS header:** `Access-Control-Allow-Origin` is not set. Browser same-origin policy
   blocks cross-origin requests by default.
 - **CRM credentials stored only on gateway:** Per-user CRM usernames and passwords live in
-  `/etc/suitecrm-mcp/user-profiles.json` (mode 600, owned by the service user). MCP clients
-  hold only an opaque session token.
+  Redis (`crm:profiles` hash, key = SSO `sub`), on a Redis instance that must be bound to
+  localhost or a private network. MCP clients hold only an opaque session token.
 
 ### Installer (install.py)
 
