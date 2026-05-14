@@ -6,18 +6,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SuiteCRM-mcp - MCP Gateway for SuiteCRM</title>
   <meta name="description"
-    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools. OAuth2/OIDC auth." />
+    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools, Redis-backed sessions, mcp-admin operations, OAuth2/OIDC auth." />
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-2 -2 28 28' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15.536 11.293a1 1 0 0 0 0 1.414l2.376 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414l-2.377-2.377a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M2.297 11.293a1 1 0 0 0 0 1.414l2.377 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414L6.088 8.916a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M8.916 17.912a1 1 0 0 0 0 1.415l2.377 2.376a1 1 0 0 0 1.414 0l2.377-2.376a1 1 0 0 0 0-1.415l-2.377-2.376a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M8.916 4.674a1 1 0 0 0 0 1.414l2.377 2.376a1 1 0 0 0 1.414 0l2.377-2.376a1 1 0 0 0 0-1.414l-2.377-2.377a1 1 0 0 0-1.414 0z'/%3E%3C/svg%3E" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="SuiteCRM-mcp - MCP Gateway for SuiteCRM" />
   <meta property="og:description"
-    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools. OAuth2/OIDC auth." />
+    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools, Redis-backed sessions, mcp-admin operations, OAuth2/OIDC auth." />
   <meta property="og:url" content="https://anirudhx7.github.io/suitecrm-mcp/" />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="SuiteCRM-mcp - MCP Gateway for SuiteCRM" />
   <meta name="twitter:description"
-    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to SuiteCRM. 24 tools. OAuth2/OIDC auth." />
+    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to SuiteCRM. 24 tools, Redis-backed sessions, mcp-admin operations, OAuth2/OIDC auth." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -811,6 +811,80 @@
     .t-gap {
       display: block;
       margin-top: 14px;
+    }
+
+
+    /* Admin Operations */
+    .admin-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-top: 32px;
+    }
+
+    .admin-card {
+      background: rgba(196, 93, 37, 0.07);
+      border: 1px solid rgba(196, 93, 37, 0.18);
+      border-radius: 4px;
+      padding: 26px;
+      transition: all 0.35s var(--ease-smooth);
+    }
+
+    .admin-card:hover {
+      transform: translateY(-5px);
+      border-color: rgba(196, 93, 37, 0.4);
+      background: rgba(196, 93, 37, 0.12);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 32px rgba(196, 93, 37, 0.15);
+    }
+
+    .admin-card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 14px;
+      color: var(--text-primary);
+    }
+
+    .admin-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .admin-list li {
+      position: relative;
+      padding-left: 16px;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    .admin-list li::before {
+      content: '-';
+      position: absolute;
+      left: 0;
+      color: rgba(196, 93, 37, 0.6);
+    }
+
+    .admin-list code,
+    .admin-terminal code {
+      color: #e8915a;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+    }
+
+    .admin-terminal {
+      margin-top: 24px;
+      max-width: 860px;
+      background: rgba(196, 93, 37, 0.06);
+      border: 1px solid rgba(196, 93, 37, 0.22);
+      border-radius: 4px;
+      padding: 22px 24px;
+      font-family: var(--font-mono);
+      font-size: 0.84rem;
+      color: var(--text-secondary);
+      line-height: 1.8;
+      overflow-x: auto;
     }
 
     /* Observability */
@@ -1811,8 +1885,11 @@
       <span></span><span></span><span></span>
     </button>
     <div class="nav-links" id="nav-links">
+      <a href="#why-not-api">Why</a>
+      <a href="#how-it-works">How</a>
+      <a href="#features">Features</a>
       <a href="#security-model">Security</a>
-      <a href="#observability">Observability</a>
+      <a href="#admin-operations">Ops</a>
       <a href="#quickstart">Quick Start</a>
       <a href="docs.html">Docs</a>
       <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener">GitHub</a>
@@ -1820,9 +1897,8 @@
   </nav>
 
   <main>
-
     <!-- Hero -->
-    <section id="hero">
+<section id="hero">
       <div class="wrap">
         <div class="hero-inner">
           <div class="hero-badge fade-up"><span class="dot"></span> Open Source MCP Gateway</div>
@@ -1830,8 +1906,8 @@
               class="title-agents">AI Agents</span></h1>
           <p class="hero-role fade-up">The open-source MCP gateway for SuiteCRM.</p>
           <p class="hero-desc fade-up">
-            Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools. OAuth2/OIDC auth.
-            Production-ready.
+            Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools, Redis-backed sessions, mcp-admin operations, OAuth2/OIDC auth.
+            Production-ready with Redis-backed runtime state.
           </p>
           <div class="hero-actions fade-up">
             <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener" class="btn btn-primary">
@@ -1853,141 +1929,16 @@
           <div class="hero-badges fade-up">
             <span class="badge-pill badge-yellow">MIT License</span>
             <span class="badge-pill badge-green">CI passing</span>
-            <span class="badge-pill badge-green">Node ≥18</span>
+            <span class="badge-pill badge-green">Node >=20</span>
+            <span class="badge-pill badge-green">Redis backed</span>
             <span class="badge-pill badge-orange">24 tools</span>
           </div>
         </div>
       </div>
     </section>
 
-    <hr class="glow-divider" />
-
-    <!-- Who It's For -->
-    <section id="who-its-for">
-      <div class="wrap">
-        <div class="section-label fade-up">Who It's For</div>
-        <h2 class="section-title fade-up">Built for teams<br>that run on SuiteCRM.</h2>
-        <div class="features-grid features-grid--2col">
-          <div class="feature-card fade-up delay-1">
-            <h3>Sales Operations</h3>
-            <p>Give sales reps an AI assistant that searches, updates, and reports on CRM accounts - without exposing
-              API credentials or requiring custom integration work.</p>
-          </div>
-          <div class="feature-card fade-up delay-2">
-            <h3>CRM Administrators</h3>
-            <p>Deploy once, control access by group. Issue and revoke API keys without touching CRM user permissions.
-              Full audit trail included.</p>
-          </div>
-          <div class="feature-card fade-up delay-3">
-            <h3>Internal AI Platform Teams</h3>
-            <p>Add SuiteCRM as a tool in your agent stack. Multi-entity routing means one gateway serves your entire CRM
-              fleet.</p>
-          </div>
-          <div class="feature-card fade-up delay-4">
-            <h3>Support &amp; Account Teams</h3>
-            <p>Let support agents look up accounts, contacts, and opportunities in natural language through Claude,
-              without CRM training or portal access.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <hr class="glow-divider" />
-
-    <!-- Security Model -->
-    <section id="security-model">
-      <div class="wrap">
-        <div class="section-label fade-up">Security Model</div>
-        <h2 class="section-title fade-up">Hardened by design.</h2>
-        <p class="section-sub fade-up">Every layer of the auth stack is explicit. Nothing is trusted by default.</p>
-        <div class="features-grid">
-          <div class="feature-card fade-up delay-1">
-            <h3>Credentials Stay Server-Side</h3>
-            <p>CRM username and password are stored in the gateway profile store. Clients only hold a personal API key.
-              No CRM secrets on user machines.</p>
-          </div>
-          <div class="feature-card fade-up delay-2">
-            <h3>OAuth / OIDC Login</h3>
-            <p>Users authenticate through your identity provider (Auth0, Azure AD, or any OIDC provider). The gateway
-              issues a revocable personal API key on successful login.</p>
-          </div>
-          <div class="feature-card fade-up delay-3">
-            <h3>API Keys Expire</h3>
-            <p>Keys expire after 30 days by default (configurable). Admins can revoke any key immediately. Keys are
-              scoped per user and per entity.</p>
-          </div>
-          <div class="feature-card fade-up delay-4">
-            <h3>Redacted Audit Logs</h3>
-            <p>All tool calls are logged with user sub, entity, and tool name. Sensitive fields - tokens, passwords,
-              search strings - are redacted before writing.</p>
-          </div>
-          <div class="feature-card fade-up delay-5">
-            <h3>Per-Entity Access Control</h3>
-            <p>Group membership controls which CRM entities a user can access. No group, no connection - even with a
-              valid API key.</p>
-          </div>
-        </div>
-        <p class="obs-footer fade-up" style="margin-top:32px;">Full observability via Prometheus metrics, Grafana
-          dashboards, and Loki log aggregation.</p>
-      </div>
-    </section>
-
-    <hr class="glow-divider" />
-
-    <!-- Observability -->
-    <section id="observability">
-      <div class="wrap">
-        <div class="section-label fade-up">Not a Black Box</div>
-        <h2 class="section-title fade-up">Full visibility into every layer.</h2>
-        <p class="section-sub fade-up">Most MCP gateways ship with nothing. This one includes a complete production
-          observability stack out of the box.</p>
-        <div class="obs-grid">
-          <div class="obs-card fade-up delay-1">
-            <div class="obs-icon">📊</div>
-            <h3>Prometheus</h3>
-            <div class="obs-stat">17 metrics</div>
-            <ul class="obs-list">
-              <li>Request rate and latency histograms per entity</li>
-              <li>Active user and session gauges</li>
-              <li>CRM error codes and circuit breaker state</li>
-              <li>Rate-limit hits and connection rejections</li>
-              <li>Auth token issue, revoke, and verify counters</li>
-            </ul>
-          </div>
-          <div class="obs-card fade-up delay-2">
-            <div class="obs-icon">📈</div>
-            <h3>Grafana</h3>
-            <div class="obs-stat">33-panel dashboard</div>
-            <ul class="obs-list">
-              <li>System health, error rates, and latency panels</li>
-              <li>Per-user and per-session live tables</li>
-              <li>CRM backend health and tool breakdown rows</li>
-              <li>Security events and auth failure tracking</li>
-              <li>Fleet overview for multi-entity deployments</li>
-            </ul>
-          </div>
-          <div class="obs-card fade-up delay-3">
-            <div class="obs-icon">🪵</div>
-            <h3>Loki</h3>
-            <div class="obs-stat">Structured log ingestion</div>
-            <ul class="obs-list">
-              <li>JSON logs via Pino with per-request IDs</li>
-              <li>sub, email, and entity on every log line</li>
-              <li>Promtail tails Docker JSON logs into Loki</li>
-              <li>Search and filter logs in Grafana Explore using LogQL</li>
-              <li>Sensitive fields auto-redacted before logging</li>
-            </ul>
-          </div>
-        </div>
-        <p class="obs-footer fade-up">All three ship in <code>docker-compose.yml</code>. One command starts the full
-          stack.<br>Alerting rules included for circuit breaker open, auth failures, and latency SLO breaches.</p>
-      </div>
-    </section>
-
-    <hr class="glow-divider" />
-
-    <!-- Why Not API -->
-    <section id="why-not-api">
+    <!-- Why Gateway -->
+<section id="why-not-api">
       <div class="wrap">
         <div class="section-label fade-up">Comparison</div>
         <h2 class="section-title fade-up">Why not just call<br>the API directly?</h2>
@@ -2021,12 +1972,12 @@
               <tr>
                 <td>API Routing</td>
                 <td>Manual fallback logic in client</td>
-                <td>Smart Hybrid Routing (v8 + v4.1 fallback)</td>
+                <td>Smart hybrid routing: SuiteCRM v8 GraphQL with v4.1 REST fallback</td>
               </tr>
               <tr>
                 <td>Key management</td>
                 <td>CRM admin per user</td>
-                <td>Issue / revoke from CLI</td>
+                <td>Inspect, test, issue, revoke, and flush from <code>mcp-admin</code></td>
               </tr>
               <tr>
                 <td>Observability</td>
@@ -2036,7 +1987,7 @@
               <tr>
                 <td>Session handling</td>
                 <td>Manual login per call</td>
-                <td>Stateless Redis auto-renewal</td>
+                <td>Redis-backed gateway sessions and CRM session renewal</td>
               </tr>
               <tr>
                 <td>Audit logging</td>
@@ -2049,10 +2000,8 @@
       </div>
     </section>
 
-    <hr class="glow-divider" />
-
     <!-- How It Works -->
-    <section id="how-it-works">
+<section id="how-it-works">
       <div class="wrap">
         <div class="section-label fade-up">How it works</div>
         <h2 class="section-title fade-up">Auth in, tools out.</h2>
@@ -2083,14 +2032,12 @@
       </div>
     </section>
 
-    <hr class="glow-divider" />
-
     <!-- Features -->
-    <section id="features">
+<section id="features">
       <div class="wrap">
         <div class="section-label fade-up">What it does</div>
         <h2 class="section-title fade-up">Production-grade,<br>out of the box.</h2>
-        <p class="section-sub fade-up">Everything you need to ship AI-powered CRM workflows.</p>
+        <p class="section-sub fade-up">Everything you need to ship AI-powered CRM workflows and operate them without guessing.</p>
         <div class="features-grid">
           <div class="feature-card fade-up delay-1">
             <div class="feature-icon">🛠️</div>
@@ -2100,9 +2047,9 @@
           </div>
           <div class="feature-card fade-up delay-2">
             <div class="feature-icon">☁️</div>
-            <h3>Stateless Scaling</h3>
-            <p>Auth sessions and profiles cached in Redis. Scale horizontally across multiple servers without dropping
-              active AI connections.</p>
+            <h3>Redis-Backed Runtime</h3>
+            <p>Auth sessions, profiles, bridge handoffs, CRM sessions, and rate limits live in Redis so restarts do not
+              wipe state or strand users.</p>
           </div>
           <div class="feature-card fade-up delay-3">
             <div class="feature-icon">🔒</div>
@@ -2135,14 +2082,24 @@
             <p>Unified <code style="font-size:11px;color:#e8915a;font-family:var(--font-mono)">install.py</code> handles
               single or multi-CRM, HTTPS via Let's Encrypt, systemd, nginx - all interactive.</p>
           </div>
+          <div class="feature-card fade-up delay-6">
+            <div class="feature-icon">🧭</div>
+            <h3>mcp-admin Control</h3>
+            <p>List users, inspect sessions, add or remove access, test live CRM credentials, restart entities, and flush
+              sessions from one installed operator CLI.</p>
+          </div>
+          <div class="feature-card fade-up delay-6">
+            <div class="feature-icon">🔁</div>
+            <h3>v8 GraphQL + v4.1 Fallback</h3>
+            <p>Fast SuiteCRM v8 GraphQL for modern reads and writes, with v4.1 REST fallback for legacy routes and
+              complex compatibility cases.</p>
+          </div>
         </div>
       </div>
     </section>
 
-    <hr class="glow-divider" />
-
     <!-- Tools -->
-    <section id="tools">
+<section id="tools">
       <div class="wrap">
         <div class="section-label fade-up">Tools</div>
         <h2 class="section-title fade-up">24 tools.<br>Full coverage.</h2>
@@ -2196,10 +2153,38 @@
       </div>
     </section>
 
-    <hr class="glow-divider" />
+    <!-- Who It Is For -->
+<section id="who-its-for">
+      <div class="wrap">
+        <div class="section-label fade-up">Who It's For</div>
+        <h2 class="section-title fade-up">Built for teams<br>that run on SuiteCRM.</h2>
+        <div class="features-grid features-grid--2col">
+          <div class="feature-card fade-up delay-1">
+            <h3>Sales Operations</h3>
+            <p>Give sales reps an AI assistant that searches, updates, and reports on CRM accounts - without exposing
+              API credentials or requiring custom integration work.</p>
+          </div>
+          <div class="feature-card fade-up delay-2">
+            <h3>CRM Administrators</h3>
+            <p>Deploy once, control access by group. Issue and revoke API keys without touching CRM user permissions.
+              Full audit trail included.</p>
+          </div>
+          <div class="feature-card fade-up delay-3">
+            <h3>Internal AI Platform Teams</h3>
+            <p>Add SuiteCRM as a tool in your agent stack. Multi-entity routing means one gateway serves your entire CRM
+              fleet.</p>
+          </div>
+          <div class="feature-card fade-up delay-4">
+            <h3>Support &amp; Account Teams</h3>
+            <p>Let support agents look up accounts, contacts, and opportunities in natural language through Claude,
+              without CRM training or portal access.</p>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Clients -->
-    <section id="clients">
+<section id="clients">
       <div class="wrap">
         <div class="section-label fade-up">Client Support</div>
         <h2 class="section-title fade-up">Connect anything<br>MCP-compatible.</h2>
@@ -2229,16 +2214,151 @@
       </div>
     </section>
 
-    <hr class="glow-divider" />
+    <!-- Security Model -->
+<section id="security-model">
+      <div class="wrap">
+        <div class="section-label fade-up">Security Model</div>
+        <h2 class="section-title fade-up">Hardened by design.</h2>
+        <p class="section-sub fade-up">Every layer of the auth stack is explicit. Nothing is trusted by default.</p>
+        <div class="features-grid">
+          <div class="feature-card fade-up delay-1">
+            <h3>Credentials Stay Server-Side</h3>
+            <p>CRM username and password are stored in the gateway profile store. Clients only hold a personal API key.
+              No CRM secrets on user machines.</p>
+          </div>
+          <div class="feature-card fade-up delay-2">
+            <h3>OAuth / OIDC Login</h3>
+            <p>Users authenticate through your identity provider (Auth0, Azure AD, or any OIDC provider). The gateway
+              issues a revocable personal API key on successful login.</p>
+          </div>
+          <div class="feature-card fade-up delay-3">
+            <h3>API Keys Expire</h3>
+            <p>Keys expire after 30 days by default (configurable). Admins can revoke any key immediately. Keys are
+              scoped per user and per entity.</p>
+          </div>
+          <div class="feature-card fade-up delay-4">
+            <h3>Redacted Audit Logs</h3>
+            <p>All tool calls are logged with user sub, entity, and tool name. Sensitive fields - tokens, passwords,
+              search strings - are redacted before writing.</p>
+          </div>
+          <div class="feature-card fade-up delay-5">
+            <h3>Per-Entity Access Control</h3>
+            <p>Group membership controls which CRM entities a user can access. No group, no connection - even with a
+              valid API key.</p>
+          </div>
+          <div class="feature-card fade-up delay-6">
+            <h3>Redis Runtime Block</h3>
+            <p>Gateway sessions, user profiles, CRM sessions, bridge handoffs, and rate limits live in Redis so restarts
+              do not wipe active support context.</p>
+          </div>
+        </div>
+        <p class="obs-footer fade-up" style="margin-top:32px;">Full observability via Prometheus metrics, Grafana
+          dashboards, Loki log aggregation, and <code>mcp-admin health</code>.</p>
+      </div>
+    </section>
+
+    <!-- Admin Operations -->
+    <section id="admin-operations">
+      <div class="wrap">
+        <div class="section-label fade-up">Operator Control</div>
+        <h2 class="section-title fade-up">Day-to-day support<br>from one CLI.</h2>
+        <p class="section-sub fade-up"><code>mcp-admin</code> is installed at <code>/usr/local/bin/mcp-admin</code>. It
+          gives admins a clean operating surface for users, sessions, Redis state, entity health, restarts, and emergency
+          revocation.</p>
+        <div class="admin-grid">
+          <div class="admin-card fade-up delay-1">
+            <h3>User Management</h3>
+            <ul class="admin-list">
+              <li><code>list</code> shows who has access and whether sessions are active.</li>
+              <li><code>whoami --email X</code> focuses on one user and live sessions.</li>
+              <li><code>add</code>, <code>remove</code>, and <code>test</code> cover onboarding, offboarding, and credential validation.</li>
+            </ul>
+          </div>
+          <div class="admin-card fade-up delay-2">
+            <h3>Login Recovery</h3>
+            <ul class="admin-list">
+              <li><code>revoke --email X</code> forces a clean re-login without touching the profile.</li>
+              <li><code>sessions</code> shows active session keys and expiry windows.</li>
+              <li><code>sessions --purge-expired</code> clears dead Redis session entries.</li>
+            </ul>
+          </div>
+          <div class="admin-card fade-up delay-3">
+            <h3>Ops and Emergency</h3>
+            <ul class="admin-list">
+              <li><code>health</code>, <code>health-deep</code>, <code>entities</code>, and <code>stats</code> make deployment checks quick.</li>
+              <li><code>restart pcau</code> or <code>restart --all</code> refreshes gateway instances after changes.</li>
+              <li><code>flush --yes-i-am-sure</code> kills all sessions when credentials are compromised.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="admin-terminal fade-up delay-4"><span class="t-prompt">$ </span>mcp-admin list<br><span
+            class="t-prompt">$ </span>mcp-admin whoami --email adogra@aecoenergy.com<br><span class="t-prompt">$
+          </span>mcp-admin test --email adogra@aecoenergy.com --entity aeau<br><span class="t-prompt">$ </span>mcp-admin
+          health-deep</div>
+      </div>
+    </section>
+
+    <!-- Observability -->
+<section id="observability">
+      <div class="wrap">
+        <div class="section-label fade-up">Not a Black Box</div>
+        <h2 class="section-title fade-up">Full visibility into every layer.</h2>
+        <p class="section-sub fade-up">Most MCP gateways ship with nothing. This one includes a complete production
+          observability stack out of the box.</p>
+        <div class="obs-grid">
+          <div class="obs-card fade-up delay-1">
+            <div class="obs-icon">📊</div>
+            <h3>Prometheus</h3>
+            <div class="obs-stat">17 metrics</div>
+            <ul class="obs-list">
+              <li>Request rate and latency histograms per entity</li>
+              <li>Active user and session gauges</li>
+              <li>CRM error codes and circuit breaker state</li>
+              <li>Rate-limit hits and connection rejections</li>
+              <li>Auth token issue, revoke, and verify counters</li>
+            </ul>
+          </div>
+          <div class="obs-card fade-up delay-2">
+            <div class="obs-icon">📈</div>
+            <h3>Grafana</h3>
+            <div class="obs-stat">33-panel dashboard</div>
+            <ul class="obs-list">
+              <li>System health, error rates, and latency panels</li>
+              <li>Per-user and per-session live tables</li>
+              <li>CRM backend health and tool breakdown rows</li>
+              <li>Security events and auth failure tracking</li>
+              <li>Fleet overview for multi-entity deployments</li>
+            </ul>
+          </div>
+          <div class="obs-card fade-up delay-3">
+            <div class="obs-icon">🪵</div>
+            <h3>Loki</h3>
+            <div class="obs-stat">Structured log ingestion</div>
+            <ul class="obs-list">
+              <li>JSON logs via Pino with per-request IDs</li>
+              <li>sub, email, and entity on every log line</li>
+              <li>Promtail tails Docker JSON logs into Loki</li>
+              <li>Search and filter logs in Grafana Explore using LogQL</li>
+              <li>Sensitive fields auto-redacted before logging</li>
+            </ul>
+          </div>
+        </div>
+        <p class="obs-footer fade-up">All three ship in <code>docker-compose.yml</code>. One command starts the full
+          stack.<br>Alerting rules included for circuit breaker open, auth failures, and latency SLO breaches.</p>
+      </div>
+    </section>
 
     <!-- Production Ready -->
-    <section id="production-ready">
+<section id="production-ready">
       <div class="wrap">
         <div class="section-label fade-up">Production Ready</div>
         <h2 class="section-title fade-up">Ships with everything<br>ops needs.</h2>
         <p class="section-sub fade-up">Not a prototype. A checklist of what's already in the box.</p>
         <div class="prod-grid fade-up">
           <div class="prod-item"><span class="prod-check">+</span> Docker + systemd deployment</div>
+          <div class="prod-item"><span class="prod-check">+</span> <code>mcp-admin</code> installed at <code>/usr/local/bin</code></div>
+          <div class="prod-item"><span class="prod-check">+</span> Redis-backed sessions, profiles, bridge handoffs, and rate limits</div>
+          <div class="prod-item"><span class="prod-check">+</span> SuiteCRM v8 GraphQL + v4.1 REST fallback</div>
           <div class="prod-item"><span class="prod-check">+</span> Prometheus metrics (17 metrics)</div>
           <div class="prod-item"><span class="prod-check">+</span> Grafana dashboards (33-panel entity + fleet overview)
           </div>
@@ -2254,15 +2374,13 @@
           <div class="prod-item"><span class="prod-check">+</span> MIT license</div>
           <div class="prod-item"><span class="prod-check">+</span> Tested on SuiteCRM 8.8.x</div>
         </div>
-        <p style="text-align:center;color:var(--text-muted);font-size:0.82rem;margin-top:18px;">Works with any SuiteCRM
-          version supporting the v4_1 REST API.</p>
+        <p style="text-align:center;color:var(--text-muted);font-size:0.82rem;margin-top:18px;">Works with SuiteCRM v8
+          GraphQL where available and the v4_1 REST API for compatibility fallback.</p>
       </div>
     </section>
 
-    <hr class="glow-divider" />
-
     <!-- Quick Start -->
-    <section id="quickstart">
+<section id="quickstart">
       <div class="wrap">
         <div class="section-label fade-up">Quick Start</div>
         <h2 class="section-title fade-up">Up in five minutes.</h2>
@@ -2443,7 +2561,6 @@
         </div>
       </div>
     </section>
-
   </main>
 
   <!-- CTA Band -->
@@ -2464,7 +2581,7 @@
     <div class="wrap">
       <div class="footer-inner">
         <p>MIT License · Built by <a href="https://github.com/Anirudhx7" target="_blank" rel="noopener">Anirudh
-            Mehandru</a> · SuiteCRM-mcp v4.4.0</p>
+            Mehandru</a> · SuiteCRM-mcp v5.0.0</p>
         <div class="footer-links">
           <a href="https://github.com/Anirudhx7/suitecrm-mcp" target="_blank" rel="noopener">GitHub</a>
           <a href="docs.html">Docs</a>
