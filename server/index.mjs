@@ -418,7 +418,7 @@ async function ensureCrmSession(sid) {
           .then(async refreshed => {
             cached.v8 = refreshed;
             await setCrmSession(sub, cached);
-            logger.info({ sub: sub.slice(-8) }, 'v8_token_refreshed');
+            logger.info('v8_token_refreshed');
             return getCrmSession(sub);
           })
           .catch(async err => {
@@ -481,7 +481,7 @@ async function resilientCall(sid, method, params) {
               .then(async r => {
                 const updated = { ...cached, v8: r };
                 await setCrmSession(sub, updated);
-                logger.info({ sub: sub.slice(-8) }, 'v8_token_refreshed_on_expiry');
+                logger.info('v8_token_refreshed_on_expiry');
                 return getCrmSession(sub);
               })
               .finally(() => crmLoginInflight.delete(sub));
@@ -662,6 +662,7 @@ const redisStore = (pfx) => new RedisStore({ sendCommand: (...args) => redis.cal
 const sseRL = rateLimit({ windowMs:60000, max:60, standardHeaders:true, legacyHeaders:false, message:{error:'Too many connection attempts - try again shortly'}, store:redisStore('rl:sse:'), keyGenerator:async(req)=>{ const token=req.headers.authorization?.startsWith('Bearer ')?req.headers.authorization.slice(7).trim():''; if(token){ const session=await getAuthSession(token); if(session?.sub) return session.sub; return token; } return ipKeyGenerator(req); }, handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'sse'}); logger.warn({route:'sse'},'rate_limit_hit'); res.status(opts.statusCode).json(opts.message); } });
 const messagesRL = rateLimit({ windowMs:60000, max:100, standardHeaders:true, legacyHeaders:false, message:{error:'Too many tool calls - slow down'}, store:redisStore('rl:msg:'), keyGenerator:(req)=>req.query.sessionId||ipKeyGenerator(req), handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'messages'}); logger.warn({route:'messages'},'rate_limit_hit'); res.status(opts.statusCode).json(opts.message); } });
 const deepHealthRL = rateLimit({ windowMs:60000, max:10, standardHeaders:true, legacyHeaders:false, message:{error:'Too many health check requests'}, handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'health_deep'}); res.status(opts.statusCode).json(opts.message); } });
+const healthRL = rateLimit({ windowMs:60000, max:120, standardHeaders:true, legacyHeaders:false, message:{error:'Too many health check requests'}, handler:(req,res,next,opts)=>{ res.status(opts.statusCode).json(opts.message); } });
 
 // ---------------------------------------------------------------------------
 // Express App & Routes
@@ -670,7 +671,7 @@ const app = express();
 app.set('trust proxy', 1);
 app.use((req,res,next) => req.path==='/messages' ? next() : express.json()(req,res,next));
 
-app.get('/health', (_req,res) => res.json({ status:'ok', entity:CODE, port:PORT, active:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), persistence:'redis' }));
+app.get('/health', healthRL, (_req,res) => res.json({ status:'ok', entity:CODE, port:PORT, active:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), persistence:'redis' }));
 
 app.get('/health/deep', deepHealthRL, async (_req,res) => {
   const start=Date.now(); const checks={}; let status='healthy';
@@ -757,7 +758,7 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
       if (!allKeys.length) return;
       const vals = await redis.mget(...allKeys);
       const orphans = allKeys.filter((k, i) => k !== `crm:sid2sub:${sid}` && vals[i] === req.auth.sub);
-      if (orphans.length) { await redis.del(...orphans); logger.debug({ count: orphans.length, sub: req.auth.sub }, 'post_connect_zombie_cleanup'); }
+      if (orphans.length) { await redis.del(...orphans); logger.debug({ count: orphans.length }, 'post_connect_zombie_cleanup'); }
     } catch { /* non-fatal */ }
   })();
 
