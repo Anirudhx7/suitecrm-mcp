@@ -2,7 +2,9 @@ FROM node:20-alpine
 WORKDIR /app
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
-COPY server/index.mjs server/auth.mjs ./
+COPY server/index.mjs server/auth.mjs server/redis.mjs server/acl-check.mjs ./
+COPY server/bridges/ ./bridges/
+COPY server/scripts/*.mjs ./scripts/
 RUN adduser -D appuser \
     && chown -R appuser /app \
     && mkdir -p /etc/suitecrm-mcp \
