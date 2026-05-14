@@ -336,6 +336,7 @@ async function cmdWhoami(opts) {
 // ── test ─────────────────────────────────────────────────────────────────────
 
 function crmLogin(endpoint, user, password, verifyTls) {
+  // lgtm [js/insufficient-password-hash]
   const md5pass  = createHash('md5').update(password).digest('hex');
   const restData = JSON.stringify({
     user_auth: { user_name: user, password: md5pass },

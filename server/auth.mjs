@@ -796,7 +796,15 @@ app.post('/auth/logout', logoutLimiter, async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'suitecrm-mcp-auth' }));
+const healthRL = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many health check requests' },
+});
+
+app.get('/health', healthRL, (_req, res) => res.json({ status: 'ok', service: 'suitecrm-mcp-auth' }));
 
 const PORT = parseInt(process.env.PORT || '3100', 10);
 const BIND_HOST = (process.env.BIND_HOST || '127.0.0.1').trim();
