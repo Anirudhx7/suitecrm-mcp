@@ -1,457 +1,507 @@
-
 /**
- * SuiteCRM MCP Gateway Server (index.mjs)
- * Per-entity server (one process per entity)
- * Auth: gateway session tokens (issued by auth.mjs, stored in sessions.json)
+ * SuiteCRM MCP Gateway — Redis-Persisted Edition (index.mjs)
+ * Hybrid v8/v4.1 bridge + Redis for sessions, profiles, and rate limiting.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import express from 'express';
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
-import { createClient } from 'redis';
+import { RedisStore } from 'rate-limit-redis';
 import https from 'https';
 import http from 'http';
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 import pino from 'pino';
 
+// logger is declared after PREFIX is set (see Config section below)
+
+import { LegacyBridge } from './bridges/legacy.mjs';
+import { GraphQLBridge } from './bridges/graphql.mjs';
+import { HybridBridge } from './bridges/hybrid.mjs';
+import { redis } from './redis.mjs';
+import { initAclDb, isAclDenied, ACTION_MAP } from './acl-check.mjs';
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
 const REQUIRED = ['SUITECRM_ENDPOINT', 'SUITECRM_PREFIX', 'PORT', 'AUTH0_DOMAIN', 'AUTH0_AUDIENCE'];
 const missing = REQUIRED.filter(k => !process.env[k]);
 if (missing.length) { console.error(`Missing required env vars: ${missing.join(', ')}`); process.exit(1); }
 
-const ENDPOINT    = process.env.SUITECRM_ENDPOINT.trim();
-const PREFIX      = process.env.SUITECRM_PREFIX.trim();
-const logger = pino({
-  base: { entity: PREFIX },
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
-const PORT        = parseInt(process.env.PORT, 10);
-const CODE        = (process.env.SUITECRM_CODE || '').trim();
+const ENDPOINT       = process.env.SUITECRM_ENDPOINT.trim();
+const API_STRATEGY   = process.env.SUITECRM_API_VERSION || '4';
+const CLIENT_ID      = (process.env.SUITECRM_CLIENT_ID    || '').trim();
+const CLIENT_SECRET  = (process.env.SUITECRM_CLIENT_SECRET || '').trim();
+const AUTH_ENDPOINT_OVERRIDE = (process.env.SUITECRM_AUTH_ENDPOINT || '').trim();
+const PREFIX         = process.env.SUITECRM_PREFIX.trim();
+const logger = pino({ base: { entity: PREFIX, strategy: process.env.SUITECRM_API_VERSION || '4' }, timestamp: pino.stdTimeFunctions.isoTime });
+const PORT           = parseInt(process.env.PORT, 10);
+const CODE           = (process.env.SUITECRM_CODE || '').trim();
 const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN.trim();
 const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE.trim();
 const REQUIRED_GROUP = (process.env.REQUIRED_GROUP || '').trim();
-const PROFILES_FILE  = '/etc/suitecrm-mcp/user-profiles.json';
 const NS             = AUTH0_AUDIENCE + '/';
 const GROUPS_CLAIM   = process.env.OAUTH_GROUPS_CLAIM || (NS + 'groups');
 const TLS_OK         = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
-const REDIS_URL      = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const METRICS_PORT   = parseInt(process.env.METRICS_PORT || '9090', 10);
+const METRICS_BIND   = (process.env.METRICS_BIND || '127.0.0.1').trim();
+const CRM_TIMEOUT    = parseInt(process.env.CRM_TIMEOUT_MS || '30000', 10);
+const CB_THRESHOLD   = parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD || '5', 10);
+const CB_RESET_MS    = parseInt(process.env.CIRCUIT_BREAKER_RESET_MS || '60000', 10);
+const CRM_SESSION_TTL_SEC = 30 * 24 * 3600; // 30 days — matches SuiteCRM OAuth token and gateway session lifetime
 
-const redis = createClient({ url: REDIS_URL });
-redis.on('error', err => logger.error({ err: err.message }, 'redis_error'));
-await redis.connect();
-
-const METRICS_PORT  = parseInt(process.env.METRICS_PORT || '9090', 10);
-const METRICS_BIND  = (process.env.METRICS_BIND || '127.0.0.1').trim();
-const CRM_REQUEST_TIMEOUT_MS    = parseInt(process.env.CRM_TIMEOUT_MS              || '30000', 10);
-const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD   || '5',     10);
-const CIRCUIT_BREAKER_RESET_MS  = parseInt(process.env.CIRCUIT_BREAKER_RESET_MS    || '60000', 10);
+const NETWORK_ERRS = new Set(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','ECONNABORTED']);
+initAclDb(); // no-op if SUITECRM_DB_HOST not set
 
 // ---------------------------------------------------------------------------
-// Prometheus metrics
+// Prometheus Metrics
 // ---------------------------------------------------------------------------
 const metricsRegistry = new Registry();
 metricsRegistry.setDefaultLabels({ entity: PREFIX });
 collectDefaultMetrics({ register: metricsRegistry });
 
-const metricActiveConnections = new Gauge({
-  name: 'suitecrm_mcp_active_connections', help: 'Active SSE connections',
-  labelNames: ['entity'], registers: [metricsRegistry],
-});
-const metricConnections = new Counter({
-  name: 'suitecrm_mcp_connections_total', help: 'Total SSE connections established',
-  labelNames: ['entity'], registers: [metricsRegistry],
-});
-const metricToolCalls = new Counter({
-  name: 'suitecrm_mcp_tool_calls_total', help: 'Total tool calls',
-  labelNames: ['entity', 'tool', 'status'], registers: [metricsRegistry],
-});
-const metricToolDuration = new Histogram({
-  name: 'suitecrm_mcp_tool_duration_seconds', help: 'Tool call duration in seconds',
-  labelNames: ['entity', 'tool'], buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
-  registers: [metricsRegistry],
-});
-const metricCrmApiDuration = new Histogram({
-  name: 'suitecrm_mcp_crm_api_duration_seconds', help: 'CRM REST API call duration in seconds',
-  labelNames: ['entity', 'method'], buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
-  registers: [metricsRegistry],
-});
-const metricSessionRenewals = new Counter({
-  name: 'suitecrm_mcp_session_renewals_total', help: 'CRM session renewals',
-  labelNames: ['entity'], registers: [metricsRegistry],
-});
-const metricAuthFailures = new Counter({
-  name: 'suitecrm_mcp_auth_failures_total', help: 'Authentication failures',
-  labelNames: ['entity'], registers: [metricsRegistry],
-});
-const metricCircuitBreakerState = new Gauge({
-  name: 'suitecrm_mcp_circuit_breaker_state', help: 'Circuit breaker state (0=closed,1=half-open,2=open)',
-  labelNames: ['entity'], registers: [metricsRegistry],
-});
-const metricCircuitBreakerOpenings = new Counter({
-  name: 'suitecrm_mcp_circuit_breaker_openings_total', help: 'Circuit breaker openings',
-  labelNames: ['entity'], registers: [metricsRegistry],
-});
-const metricRateLimited = new Counter({
-  name: 'suitecrm_mcp_rate_limited_total', help: 'Requests rejected by rate limiter',
-  labelNames: ['entity', 'route'], registers: [metricsRegistry],
-});
-const metricConnectionRejected = new Counter({
-  name: 'suitecrm_mcp_connection_rejected_total', help: 'SSE connections rejected at capacity cap',
-  labelNames: ['entity'], registers: [metricsRegistry],
-});
-const metricCrmErrors = new Counter({
-  name: 'suitecrm_mcp_crm_errors_total', help: 'CRM REST API errors by error code',
-  labelNames: ['entity', 'method', 'crm_code'], registers: [metricsRegistry],
-});
-const NETWORK_ERRS = new Set(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','ECONNABORTED']);
-const metricCrmSessionsCached = new Gauge({
-  name: 'suitecrm_mcp_crm_sessions_cached', help: 'In-memory CRM sessions cached',
-  labelNames: ['entity'], registers: [metricsRegistry],
-});
+const metricActiveConnections   = new Gauge({ name: 'suitecrm_mcp_active_connections', help: 'Active SSE connections', labelNames: ['entity'], registers: [metricsRegistry] });
+const metricConnections         = new Counter({ name: 'suitecrm_mcp_connections_total', help: 'Total SSE connections', labelNames: ['entity'], registers: [metricsRegistry] });
+const metricToolCalls           = new Counter({ name: 'suitecrm_mcp_tool_calls_total', help: 'Total tool calls', labelNames: ['entity','tool','status'], registers: [metricsRegistry] });
+const metricToolDuration        = new Histogram({ name: 'suitecrm_mcp_tool_duration_seconds', help: 'Tool duration', labelNames: ['entity','tool'], buckets: [0.05,0.1,0.25,0.5,1,2.5,5,10], registers: [metricsRegistry] });
+const metricCrmApiDuration      = new Histogram({ name: 'suitecrm_mcp_crm_api_duration_seconds', help: 'CRM API duration', labelNames: ['entity','method'], buckets: [0.05,0.1,0.25,0.5,1,2.5,5,10,30], registers: [metricsRegistry] });
+const metricSessionRenewals     = new Counter({ name: 'suitecrm_mcp_session_renewals_total', help: 'CRM session renewals', labelNames: ['entity'], registers: [metricsRegistry] });
+const metricAuthFailures        = new Counter({ name: 'suitecrm_mcp_auth_failures_total', help: 'Auth failures', labelNames: ['entity'], registers: [metricsRegistry] });
+const metricCircuitBreakerState = new Gauge({ name: 'suitecrm_mcp_circuit_breaker_state', help: 'CB state (0=closed,1=half-open,2=open)', labelNames: ['entity'], registers: [metricsRegistry] });
+const metricCircuitBreakerOpenings = new Counter({ name: 'suitecrm_mcp_circuit_breaker_openings_total', help: 'CB openings', labelNames: ['entity'], registers: [metricsRegistry] });
+const metricRateLimited         = new Counter({ name: 'suitecrm_mcp_rate_limited_total', help: 'Rate limited requests', labelNames: ['entity','route'], registers: [metricsRegistry] });
+const metricConnectionRejected  = new Counter({ name: 'suitecrm_mcp_connection_rejected_total', help: 'Rejected SSE connections', labelNames: ['entity'], registers: [metricsRegistry] });
+const metricCrmErrors           = new Counter({ name: 'suitecrm_mcp_crm_errors_total', help: 'CRM errors', labelNames: ['entity','method','crm_code'], registers: [metricsRegistry] });
+const metricCrmSessionsCached   = new Counter({ name: 'suitecrm_mcp_crm_sessions_cached', help: 'CRM sessions written to Redis (total)', labelNames: ['entity'], registers: [metricsRegistry] });
+
 new Gauge({
   name: 'suitecrm_mcp_profiles_configured',
-  help: 'Users with a CRM profile configured for this entity',
-  labelNames: ['entity'], registers: [metricsRegistry],
-  collect() {
+  help: 'Number of user profiles configured for this entity',
+  labelNames: ['entity'],
+  registers: [metricsRegistry],
+  async collect() {
     this.reset();
-    const profiles = loadProfiles();
-    let count = 0;
-    for (const p of Object.values(profiles)) {
-      if (p.entities?.[CODE]) count++;
-    }
-    this.set({ entity: PREFIX }, count);
+    try {
+      const all = await redis.hgetall('crm:profiles');
+      if (!all) { this.set({ entity: PREFIX }, 0); return; }
+      let count = 0;
+      for (const raw of Object.values(all)) {
+        try { const p = JSON.parse(raw); if (p?.entities?.[CODE]) count++; } catch (err) { logger.error({ err: err.message }, 'profile_parse_error'); }
+      }
+      this.set({ entity: PREFIX }, count);
+    } catch { this.set({ entity: PREFIX }, 0); }
   },
 });
-new Gauge({
-  name: 'suitecrm_mcp_gateway_sessions_active',
-  help: 'Users with a valid non-expired gateway API session for this entity',
-  labelNames: ['entity'], registers: [metricsRegistry],
-  collect() {
-    this.reset();
-    const sessions = loadSessions();
-    const profiles = loadProfiles();
-    const now = Date.now();
-    const activeSubs = new Set(
-      Object.values(sessions).filter(s => s.expiresAt > now).map(s => s.sub)
-    );
-    let count = 0;
-    for (const [sub, p] of Object.entries(profiles)) {
-      if (p.entities?.[CODE] && activeSubs.has(sub)) count++;
-    }
-    this.set({ entity: PREFIX }, count);
-  },
-});
+
 new Gauge({
   name: 'suitecrm_mcp_user_crm_session_active',
-  help: 'Whether user has active in-memory CRM session (1=yes 0=no)',
-  labelNames: ['sub', 'email', 'entity', 'crm_user'], registers: [metricsRegistry],
-  collect() {
+  help: '1 if the user has an active CRM session cached in Redis for this entity',
+  labelNames: ['entity', 'email'],
+  registers: [metricsRegistry],
+  async collect() {
     this.reset();
-    const profiles = loadProfiles();
-    for (const [sub, profile] of Object.entries(profiles)) {
-      const creds = profile.entities?.[CODE];
-      if (!creds) continue;
-      this.set({
-        sub,
-        email: profile.email || sub,
-        entity: PREFIX,
-        crm_user: creds.user || '',
-      }, crmSessions.has(`${sub}:${CODE}`) ? 1 : 0);
-    }
+    try {
+      const keys = await (async () => {
+        const out = []; let cursor = '0';
+        do { const [next, batch] = await redis.scan(cursor, 'MATCH', `crm:session:*:${CODE}`, 'COUNT', 100); out.push(...batch); cursor = next; } while (cursor !== '0');
+        return out;
+      })();
+      const allProfiles = await redis.hgetall('crm:profiles') || {};
+      for (const key of keys) {
+        const sub = key.slice('crm:session:'.length, -(`:${CODE}`.length));
+        const profileRaw = allProfiles[sub];
+        const email = profileRaw ? (JSON.parse(profileRaw)?.email || sub) : sub;
+        this.set({ entity: PREFIX, email }, 1);
+      }
+    } catch (err) { logger.error({ err: err.message }, 'metric_collection_error'); }
   },
 });
+
 new Gauge({
   name: 'suitecrm_mcp_user_gateway_session_active',
-  help: 'Whether user has a valid non-expired gateway session token (1=yes 0=no)',
-  labelNames: ['sub', 'email'], registers: [metricsRegistry],
+  help: '1 if the user currently has an active SSE connection to this entity',
+  labelNames: ['entity', 'email'],
+  registers: [metricsRegistry],
   collect() {
     this.reset();
-    const sessions = loadSessions();
-    const profiles = loadProfiles();
-    const now = Date.now();
-    const subBest = {};
-    for (const sess of Object.values(sessions)) {
-      if (!profiles[sess.sub]?.entities?.[CODE]) continue;
-      subBest[sess.sub] = subBest[sess.sub] || (sess.expiresAt > now ? 1 : 0);
-    }
-    for (const [sub, active] of Object.entries(subBest)) {
-      this.set({ sub, email: profiles[sub]?.email || sub }, active);
+    const seen = new Set();
+    for (const { email } of connAuth.values()) {
+      if (!seen.has(email)) { seen.add(email); this.set({ entity: PREFIX, email }, 1); }
     }
   },
 });
 
+new Gauge({
+  name: 'suitecrm_mcp_gateway_sessions_active',
+  help: 'Users with a valid non-expired gateway API session for this entity',
+  labelNames: ['entity'],
+  registers: [metricsRegistry],
+  async collect() {
+    this.reset();
+    try {
+      const sessionKeys = [];
+      let cursor = '0';
+      do {
+        const [next, batch] = await redis.scan(cursor, 'MATCH', 'auth:session:*', 'COUNT', 100);
+        sessionKeys.push(...batch);
+        cursor = next;
+      } while (cursor !== '0');
+
+      const sessionData = sessionKeys.length ? await redis.mget(...sessionKeys) : [];
+
+      const allProfiles = await redis.hgetall('crm:profiles') || {};
+
+      const now = Date.now();
+      const activeSubs = new Set();
+
+      for (const data of sessionData) {
+        if (data) {
+          try {
+            const session = JSON.parse(data);
+            if (session.expiresAt > now) {
+              activeSubs.add(session.sub);
+            }
+          } catch { /* skip corrupt session */ }
+        }
+      }
+
+      let count = 0;
+      for (const [sub, profileRaw] of Object.entries(allProfiles)) {
+        try {
+          const profile = JSON.parse(profileRaw);
+          if (profile?.entities?.[CODE] && activeSubs.has(sub)) {
+            count++;
+          }
+        } catch { /* skip corrupt profile */ }
+      }
+
+      this.set({ entity: PREFIX }, count);
+    } catch (err) { logger.error({ err: err.message }, 'gateway_sessions_metric_error'); this.set({ entity: PREFIX }, 0); }
+  },
+});
+
 // ---------------------------------------------------------------------------
-// Circuit breaker
+// Transport map (must stay in-process — SSE streams cannot live in Redis)
+// ---------------------------------------------------------------------------
+const transports  = new Map(); // sid -> SSEServerTransport
+const connCreds   = new Map(); // sid -> { user, pass }
+const connLoggers = new Map(); // sid -> pino child logger
+const connAuth    = new Map(); // sid -> { sub, email }
+const subSids     = new Map(); // sub -> Set<sid>  (all live connections per user)
+
+// ---------------------------------------------------------------------------
+// Redis-backed state helpers (replaces in-memory Maps)
+// ---------------------------------------------------------------------------
+
+// Auth sessions: check Redis first, fall back to sessions.json (auth.mjs writes there).
+// Lazy-promotes file sessions into Redis on first use so subsequent lookups hit Redis.
+async function getAuthSession(token) {
+  try {
+    const raw = await redis.get(`auth:session:${token}`);
+    if (raw) return JSON.parse(raw);
+  } catch { /* Redis down — fall through to file */ }
+  try {
+    const sessions = JSON.parse(readFileSync(process.env.SESSIONS_FILE || '/etc/suitecrm-mcp/sessions.json', 'utf8'));
+    const session = sessions[token] || null;
+    if (session) {
+      const ttlSec = Math.max(1, Math.ceil((session.expiresAt - Date.now()) / 1000));
+      redis.setex(`auth:session:${token}`, ttlSec, JSON.stringify(session)).catch(() => {});
+    }
+    return session;
+  } catch { return null; }
+}
+
+// CRM sessions (v4 sessionId + v8 token per user:entity)
+async function getCrmSession(sub) {
+  try {
+    const raw = await redis.get(`crm:session:${sub}:${CODE}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+async function setCrmSession(sub, sessions) {
+  await redis.setex(`crm:session:${sub}:${CODE}`, CRM_SESSION_TTL_SEC, JSON.stringify(sessions));
+}
+async function delCrmSession(sub) {
+  await redis.del(`crm:session:${sub}:${CODE}`);
+}
+
+// Connection maps (sub <-> sid)
+async function getSubBySid(sid)  { return redis.get(`crm:sid2sub:${sid}`);  }
+async function getSidBySub(sub)  { return redis.get(`crm:sub2sid:${sub}`);  }
+async function setSubSidMapping(sub, sid) {
+  await Promise.all([
+    redis.setex(`crm:sub2sid:${sub}`, 86400, sid),
+    redis.setex(`crm:sid2sub:${sid}`, 3600, sub),  // 1h — timing-race zombies expire quickly
+  ]);
+}
+async function delSubSidMapping(sub, sid) {
+  // Only remove the sid→sub reverse lookup; sub→sid already points to the newest sid
+  await redis.del(`crm:sid2sub:${sid}`);
+}
+
+// Startup cleanup: delete crm:sid2sub:* entries that are no longer the authoritative sid for their sub.
+// This eliminates zombies left by the previous process run (or a reconnect storm timing race).
+async function cleanupOrphanSidMappings() {
+  try {
+    // Collect all valid (sub → current_sid) pairs from the authoritative sub2sid keys
+    const sub2sidKeys = [];
+    let cursor = '0';
+    do {
+      const [next, batch] = await redis.scan(cursor, 'MATCH', 'crm:sub2sid:*', 'COUNT', 100);
+      sub2sidKeys.push(...batch); cursor = next;
+    } while (cursor !== '0');
+    const validSids = new Set();
+    if (sub2sidKeys.length) {
+      const vals = await redis.mget(...sub2sidKeys);
+      for (const v of vals) { if (v) validSids.add(v); }
+    }
+
+    // Scan all sid2sub entries and delete any whose sid is not in validSids
+    const sid2subKeys = [];
+    cursor = '0';
+    do {
+      const [next, batch] = await redis.scan(cursor, 'MATCH', 'crm:sid2sub:*', 'COUNT', 100);
+      sid2subKeys.push(...batch); cursor = next;
+    } while (cursor !== '0');
+    const orphans = sid2subKeys.filter(k => !validSids.has(k.slice('crm:sid2sub:'.length)));
+    if (orphans.length) {
+      await redis.del(...orphans);
+      logger.info({ count: orphans.length }, 'startup_orphan_sid_cleanup');
+    }
+  } catch (err) { logger.warn({ err: err.message }, 'startup_orphan_sid_cleanup_failed'); }
+}
+
+// User profiles (was user-profiles.json)
+async function getProfile(sub) {
+  try {
+    const raw = await redis.hget('crm:profiles', sub);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function redactAuditArgs(args) {
+  const safe = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (['name_value_list','search_params','fields'].includes(k))
+      safe[k] = (typeof v === 'object' && v !== null) ? Object.fromEntries(Object.keys(v).map(fk => [fk, '[redacted]'])) : '[redacted]';
+    else if (['query','search_query','search_string'].includes(k)) safe[k] = '[redacted]';
+    else safe[k] = v;
+  }
+  return safe;
+}
+
+// ---------------------------------------------------------------------------
+// Circuit Breaker
 // ---------------------------------------------------------------------------
 const circuitBreaker = {
   state: 'CLOSED', failures: 0, lastFailure: 0,
   isOpen() {
     if (this.state === 'CLOSED') return false;
-    if (this.state === 'HALF_OPEN') return true; // probe in-flight; block all other requests
-    // OPEN: check reset window
-    if (Date.now() - this.lastFailure > CIRCUIT_BREAKER_RESET_MS) {
-      this.state = 'HALF_OPEN';
-      metricCircuitBreakerState.set({ entity: PREFIX }, 1);
-      logger.warn({ state: 'HALF_OPEN' }, 'circuit_breaker_state');
-      return false; // let exactly one probe through
-    }
+    if (this.state === 'HALF_OPEN') return true;
+    if (Date.now() - this.lastFailure > CB_RESET_MS) { this.state = 'HALF_OPEN'; metricCircuitBreakerState.set({ entity: PREFIX }, 1); logger.warn({ state: 'HALF_OPEN' }, 'circuit_breaker_state'); return false; }
     return true;
   },
-  recordSuccess() {
-    if (this.state !== 'CLOSED') logger.info({ state: 'CLOSED' }, 'circuit_breaker_state');
-    this.state = 'CLOSED'; this.failures = 0;
-    metricCircuitBreakerState.set({ entity: PREFIX }, 0);
-  },
+  recordSuccess() { if (this.state !== 'CLOSED') logger.info({ state: 'CLOSED' }, 'circuit_breaker_state'); this.state = 'CLOSED'; this.failures = 0; metricCircuitBreakerState.set({ entity: PREFIX }, 0); },
   recordFailure() {
     this.failures++; this.lastFailure = Date.now();
-    if (this.state === 'HALF_OPEN') {
-      this.state = 'OPEN';
-      metricCircuitBreakerState.set({ entity: PREFIX }, 2);
-      metricCircuitBreakerOpenings.inc({ entity: PREFIX });
-      logger.warn({ state: 'OPEN', failures: this.failures }, 'circuit_breaker_state');
-    } else if (this.failures >= CIRCUIT_BREAKER_THRESHOLD && this.state !== 'OPEN') {
-      this.state = 'OPEN';
-      metricCircuitBreakerState.set({ entity: PREFIX }, 2);
-      metricCircuitBreakerOpenings.inc({ entity: PREFIX });
+    if (this.state === 'HALF_OPEN' || (this.failures >= CB_THRESHOLD && this.state !== 'OPEN')) {
+      this.state = 'OPEN'; metricCircuitBreakerState.set({ entity: PREFIX }, 2); metricCircuitBreakerOpenings.inc({ entity: PREFIX });
       logger.warn({ state: 'OPEN', failures: this.failures }, 'circuit_breaker_state');
     }
   },
 };
 
 // ---------------------------------------------------------------------------
-// In-memory state
+// Bridge Initialization
 // ---------------------------------------------------------------------------
-const transports = new Map();
-const subToSid   = new Map(); // sub -> most recent sid, used to evict stale connections on reconnect
-const crmSessions = new Map();
-const crmSessionAges = new Map();
-const connCreds = new Map();
-const subBySid = new Map();
-const connLoggers = new Map();
-
-const CRM_SESSION_TTL = 2 * 60 * 60 * 1000;
-setInterval(() => {
-  const cutoff = Date.now() - CRM_SESSION_TTL;
-  for (const [key, at] of crmSessionAges.entries()) {
-    if (at < cutoff) {
-      crmSessions.delete(key);
-      crmSessionAges.delete(key);
+const bridgeOptions = {
+  logger, tlsOk: TLS_OK, timeout: CRM_TIMEOUT,
+  metrics: {
+    startTimer: (labels) => metricCrmApiDuration.startTimer({ entity: PREFIX, ...labels }),
+    recordError: (method, err) => {
+      const crmCode = typeof err.code === 'number' ? String(err.code) : (NETWORK_ERRS.has(err.code) || err.message?.includes('Timeout') ? 'network' : 'unknown');
+      metricCrmErrors.inc({ entity: PREFIX, method, crm_code: crmCode });
     }
   }
-  metricCrmSessionsCached.set({ entity: PREFIX }, crmSessions.size);
-}, 30 * 60 * 1000).unref();
+};
 
-function loadProfiles() {
-  try { return JSON.parse(readFileSync(PROFILES_FILE, 'utf8')); }
-  catch { return {}; }
-}
-
-// Redact potentially-PII field values from audit log entries.
-// Keeps structural keys (so logs show which fields were queried) but
-// removes values that may contain names, emails, or business-sensitive data.
-function redactAuditArgs(args) {
-  const safe = {};
-  for (const [k, v] of Object.entries(args)) {
-    if (k === 'name_value_list' || k === 'search_params' || k === 'fields') {
-      safe[k] = (typeof v === 'object' && v !== null)
-        ? Object.fromEntries(Object.keys(v).map(fk => [fk, '[redacted]']))
-        : '[redacted]';
-    } else if (k === 'query' || k === 'search_query' || k === 'search_string') {
-      safe[k] = '[redacted]';
-    } else {
-      safe[k] = v;
-    }
+let V4_ENDPOINT, _v8AuthEndpoint;
+if (API_STRATEGY === '8') {
+  if (!ENDPOINT.includes('/api/graphql')) {
+    console.error('SUITECRM_ENDPOINT must be the GraphQL URL (.../api/graphql) when SUITECRM_API_VERSION=8');
+    process.exit(1);
   }
-  return safe;
+  const _base = ENDPOINT.replace(/\/api\/graphql.*$/, '');
+  V4_ENDPOINT      = `${_base}/legacy/service/v4_1/rest.php`;
+  _v8AuthEndpoint  = AUTH_ENDPOINT_OVERRIDE || `${_base}/legacy/Api/access_token`;
+} else {
+  V4_ENDPOINT     = ENDPOINT; // already the v4.1 REST URL
+  _v8AuthEndpoint = null;
 }
+const v4  = new LegacyBridge(V4_ENDPOINT, bridgeOptions);
+const v8g = new GraphQLBridge(ENDPOINT, { ...bridgeOptions, authEndpoint: _v8AuthEndpoint, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
+const crm = new HybridBridge(v8g, v4, { logger, priority: API_STRATEGY === '8' ? 'v8' : 'v4' });
 
-async function getSession(token) {
-  try {
-    const data = await redis.get(`mcp:session:${token}`);
-    return data ? JSON.parse(data) : null;
-  } catch (err) {
-    logger.error({ token: token.slice(0, 8), err: err.message }, 'redis_get_session_failed');
-    return null;
-  }
-}
-
-async function getProfile(sub) {
-  try {
-    const data = await redis.get(`mcp:profile:${sub}`);
-    return data ? JSON.parse(data) : null;
-  } catch (err) {
-    logger.error({ sub, err: err.message }, 'redis_get_profile_failed');
-    return null;
-  }
-}
-
+// ---------------------------------------------------------------------------
+// Middlewares (all async — Redis I/O)
+// ---------------------------------------------------------------------------
 async function jwtMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token) return res.status(401).json({ error: 'Bearer token required' });
-
   try {
-    const session = await getSession(token);
+    const session = await getAuthSession(token);
     if (session) {
-      req.auth = {
-        sub: session.sub,
-        email: session.email,
-        [`${NS}samaccountname`]: session.email,
-        [GROUPS_CLAIM]: session.groups || [],
-      };
+      if (session.expiresAt < Date.now()) {
+        metricAuthFailures.inc({ entity: PREFIX });
+        logger.warn({ reason: 'session_expired', sub: session.sub }, 'auth_failed');
+        return res.status(401).json({ error: 'Session expired' });
+      }
+      req.auth = { sub: session.sub, email: session.email, [`${NS}samaccountname`]: session.email, [GROUPS_CLAIM]: session.groups || [] };
       return next();
     }
-  } catch {}
-
+  } catch (err) { return next(err); }
   metricAuthFailures.inc({ entity: PREFIX });
   logger.warn({ reason: 'invalid_token' }, 'auth_failed');
   return res.status(401).json({ error: 'Invalid token' });
 }
 
 async function profileMiddleware(req, res, next) {
-  const profile = await getProfile(req.auth.sub);
-  if (!profile) {
-    return res.status(403).json({
-      error: 'No CRM profile',
-      sub: req.auth.sub,
-      fix: `Run: mcp-admin add --sub "${req.auth.sub}" --entity ${CODE} --user <u> --pass <p>`,
-    });
-  }
-  req.crmProfile = profile;
-  next();
+  try {
+    const profile = await getProfile(req.auth.sub);
+    if (!profile) {
+      return res.status(403).json({
+        error: 'No CRM profile',
+        sub: req.auth.sub,
+        fix: `Run: node scripts/add_user.mjs "${req.auth.sub}" <crmUser> <crmPass> ${CODE}`,
+      });
+    }
+    req.crmProfile = profile;
+    return next();
+  } catch (err) { return next(err); }
 }
 
 function groupAccessMiddleware(req, res, next) {
   if (REQUIRED_GROUP) {
-    const userGroups = req.auth[GROUPS_CLAIM] || [];
-    const hasGroup = userGroups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase());
-    if (!hasGroup) {
-      return res.status(403).json({
-        error: `Not in group "${REQUIRED_GROUP}"`,
-        your_groups: userGroups,
-      });
-    }
+    const groups = req.auth[GROUPS_CLAIM] || [];
+    if (!groups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase()))
+      return res.status(403).json({ error: `Not in group "${REQUIRED_GROUP}"`, your_groups: groups });
   }
   const creds = req.crmProfile?.entities?.[CODE];
-  if (!creds?.user || !creds?.pass) {
-    return res.status(403).json({
-      error: `No CRM credentials for ${CODE}`,
-      fix: `Run: mcp-admin add --sub "${req.auth.sub}" --entity ${CODE} --user <u> --pass <p>`,
-    });
-  }
+  if (!creds?.user || !creds?.pass)
+    return res.status(403).json({ error: `No CRM credentials for ${CODE}`, fix: `Run: node scripts/add_user.mjs "${req.auth.sub}" <crmUser> <crmPass> ${CODE}` });
   req.crmCreds = creds;
   next();
 }
 
-function postForm(url, params) {
-  return new Promise((resolve, reject) => {
-    const body = new URLSearchParams(params).toString();
-    const parsed = new URL(url);
-    const lib = parsed.protocol === 'https:' ? https : http;
-    const req = lib.request({
-      hostname: parsed.hostname,
-      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-      path: parsed.pathname + parsed.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(body),
-      },
-      rejectUnauthorized: TLS_OK,
-    }, (res) => {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => {
-        try { resolve(JSON.parse(raw)); }
-        catch { reject(new Error(`Non-JSON: ${raw.slice(0, 300)}`)); }
-      });
-    });
-    req.setTimeout(CRM_REQUEST_TIMEOUT_MS, () => req.destroy(new Error('Timeout')));
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-}
-
-async function rawCall(method, restData) {
-  const end = metricCrmApiDuration.startTimer({ entity: PREFIX, method });
-  try {
-    const r = await postForm(ENDPOINT, {
-      method,
-      input_type: 'JSON',
-      response_type: 'JSON',
-      rest_data: JSON.stringify(restData),
-    });
-    if (r && typeof r.number === 'number' && r.number !== 0) {
-      const e = new Error(r.name || r.description || `CRM error ${r.number}`);
-      e.code = r.number;
-      end(); throw e;
-    }
-    end(); return r;
-  } catch (err) {
-    end();
-    const crmCode = typeof err.code === 'number'
-      ? String(err.code)
-      : (NETWORK_ERRS.has(err.code) || err.message?.includes('Timeout') ? 'network' : 'unknown');
-    metricCrmErrors.inc({ entity: PREFIX, method, crm_code: crmCode });
-    throw err;
-  }
-}
-
-async function crmLogin(user, pass) {
-  const r = await rawCall('login', {
-    user_auth: {
-      user_name: user,
-      password: createHash('md5').update(pass).digest('hex'),
-    },
-    application_name: 'SuiteCRM-MCP',
-    name_value_list: [],
-  });
-  if (!r.id || r.id === 0 || r.id === '0') {
-    throw new Error(`Login failed for ${user}`);
-  }
-  return r.id;
-}
+// ---------------------------------------------------------------------------
+// Session Lifecycle
+// ---------------------------------------------------------------------------
+const crmLoginInflight = new Map(); // sub -> Promise — prevents parallel logins creating duplicate SuiteCRM tokens
 
 async function ensureCrmSession(sid) {
-  const sub = subBySid.get(sid) || sid;
-  const key = `${sub}:${CODE}`;
-  if (crmSessions.has(key)) return crmSessions.get(key);
+  // connAuth is authoritative for live connections; Redis is fallback for edge cases
+  const sub = connAuth.get(sid)?.sub ?? await getSubBySid(sid);
+  if (!sub) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} — connection may have been evicted`);
+  const cached = await getCrmSession(sub);
+  if (cached) {
+    // Proactively refresh the v8 access token if it expires within 10 minutes,
+    // so we never create a new SuiteCRM OAuth token for an already-authenticated user.
+    const v8 = cached.v8;
+    if (v8 && typeof v8 === 'object' && v8.refreshToken && v8.expiresAt) {
+      const REFRESH_BUFFER_MS = 10 * 60 * 1000;
+      if (v8.expiresAt - Date.now() < REFRESH_BUFFER_MS) {
+        if (crmLoginInflight.has(sub)) return crmLoginInflight.get(sub);
+        const refreshPromise = v8g.refreshAccess(v8)
+          .then(async refreshed => {
+            cached.v8 = refreshed;
+            await setCrmSession(sub, cached);
+            logger.info({ sub: sub.slice(-8) }, 'v8_token_refreshed');
+            return getCrmSession(sub);
+          })
+          .catch(async err => {
+            logger.warn({ err: err.message }, 'v8_token_refresh_failed');
+            // Refresh failed — delete so next call does a full re-login
+            await delCrmSession(sub);
+            throw err;
+          })
+          .finally(() => crmLoginInflight.delete(sub));
+        crmLoginInflight.set(sub, refreshPromise);
+        return refreshPromise;
+      }
+    }
+    return cached;
+  }
+
+  // Deduplicate: if a login is already in flight for this user, piggyback on it
+  if (crmLoginInflight.has(sub)) return crmLoginInflight.get(sub);
+
   const creds = connCreds.get(sid);
-  if (!creds) throw new Error('No credentials');
-  const crmSid = await crmLogin(creds.user, creds.pass);
-  crmSessions.set(key, crmSid);
-  crmSessionAges.set(key, Date.now());
-  metricCrmSessionsCached.set({ entity: PREFIX }, crmSessions.size);
-  return crmSid;
+  if (!creds) throw new Error('No credentials for session');
+
+  const promise = crm.login(creds.user, creds.pass)
+    .then(async sessions => {
+      await setCrmSession(sub, sessions);
+      metricCrmSessionsCached.inc({ entity: PREFIX });
+      return sessions;
+    })
+    .finally(() => crmLoginInflight.delete(sub));
+
+  crmLoginInflight.set(sub, promise);
+  return promise;
 }
 
-async function crmCall(sid, method, params) {
-  if (circuitBreaker.isOpen())
-    throw new Error(`Circuit breaker open - CRM unavailable (${circuitBreaker.failures} consecutive failures)`);
-
-  let crmSid;
-  try { crmSid = await ensureCrmSession(sid); }
+async function resilientCall(sid, method, params) {
+  if (circuitBreaker.isOpen()) throw new Error(`Circuit breaker open (${circuitBreaker.failures} failures)`);
+  let sessions;
+  try { sessions = await ensureCrmSession(sid); }
   catch (err) { circuitBreaker.recordFailure(); throw err; }
-
   try {
-    const result = await rawCall(method, { session: crmSid, ...params });
+    const result = await crm[method](sessions, params);
     circuitBreaker.recordSuccess();
     return result;
   } catch (err) {
-    if (err.code === 11) {
-      const _cLog = connLoggers.get(sid) || logger;
-      _cLog.info({ sid }, 'crm_session_expired_renewing');
+    const isExpired = err.code === 11 || (err.message && err.message.toLowerCase().includes('expired'));
+    if (isExpired) {
       metricSessionRenewals.inc({ entity: PREFIX });
-      const sub = subBySid.get(sid) || sid;
-      crmSessions.delete(`${sub}:${CODE}`);
-      crmSessionAges.delete(`${sub}:${CODE}`);
-      metricCrmSessionsCached.set({ entity: PREFIX }, crmSessions.size);
+      const sub = connAuth.get(sid)?.sub ?? await getSubBySid(sid);
+      if (!sub) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} — connection may have been evicted`);
+      // Try refreshing the v8 access token before falling back to a full re-login
+      // (which would create a new SuiteCRM OAuth token entry)
+      const cached = await getCrmSession(sub);
+      if (cached?.v8?.refreshToken) {
+        try {
+          let refreshed;
+          if (crmLoginInflight.has(sub)) {
+            refreshed = await crmLoginInflight.get(sub);
+          } else {
+            const p = v8g.refreshAccess(cached.v8)
+              .then(async r => {
+                const updated = { ...cached, v8: r };
+                await setCrmSession(sub, updated);
+                logger.info({ sub: sub.slice(-8) }, 'v8_token_refreshed_on_expiry');
+                return getCrmSession(sub);
+              })
+              .finally(() => crmLoginInflight.delete(sub));
+            crmLoginInflight.set(sub, p);
+            refreshed = await p;
+          }
+          if (refreshed) {
+            const result = await crm[method](refreshed, params);
+            circuitBreaker.recordSuccess();
+            return result;
+          }
+        } catch (refreshErr) {
+          logger.warn({ err: refreshErr.message }, 'v8_token_refresh_failed_fallback_relogin');
+          crmLoginInflight.delete(sub);
+        }
+      }
+      await delCrmSession(sub);
       try {
-        crmSid = await ensureCrmSession(sid);
-        const result = await rawCall(method, { session: crmSid, ...params });
+        sessions = await ensureCrmSession(sid);
+        const result = await crm[method](sessions, params);
         circuitBreaker.recordSuccess();
         return result;
       } catch (retryErr) { circuitBreaker.recordFailure(); throw retryErr; }
@@ -459,1084 +509,309 @@ async function crmCall(sid, method, params) {
     circuitBreaker.recordFailure(); throw err;
   }
 }
+// ---------------------------------------------------------------------------
+// Validation Helpers
+// ---------------------------------------------------------------------------
+const MODULE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const IDENT_RE  = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_QUERY_LEN = 2000; const MAX_ORDER_BY_LEN = 200; const MAX_RESULTS_CAP = 100; const MAX_FIELDS = 50;
+function validateModule(m)    { if (!m || !MODULE_RE.test(m)) throw new McpError(ErrorCode.InvalidParams, `Invalid module: ${m}`); }
+function validateId(id)       { if (!id || !UUID_RE.test(String(id))) throw new McpError(ErrorCode.InvalidParams, `Invalid UUID: ${id}`); }
+function validateIdent(n, l='field') { if (!n || !IDENT_RE.test(String(n))) throw new McpError(ErrorCode.InvalidParams, `Invalid ${l}: ${n}`); }
+function validateFieldList(f) { if (!Array.isArray(f)) return; if (f.length > MAX_FIELDS) throw new McpError(ErrorCode.InvalidParams, `Too many fields (max ${MAX_FIELDS})`); for (const x of f) validateIdent(x,'field'); }
+function validateQuery(q)     { if (q == null) return; if (typeof q !== 'string') throw new McpError(ErrorCode.InvalidParams,'query must be a string'); if (q.length > MAX_QUERY_LEN) throw new McpError(ErrorCode.InvalidParams,`Query too long (max ${MAX_QUERY_LEN})`); }
+function validateOrderBy(o)   { if (o == null) return; if (typeof o !== 'string') throw new McpError(ErrorCode.InvalidParams,'order_by must be a string'); if (o.length > MAX_ORDER_BY_LEN) throw new McpError(ErrorCode.InvalidParams,`order_by too long`); }
+function validateFieldsObject(f) { if (!f || typeof f !== 'object' || Array.isArray(f)) throw new McpError(ErrorCode.InvalidParams,'fields must be a non-null object'); const keys=Object.keys(f); if (keys.length>MAX_FIELDS) throw new McpError(ErrorCode.InvalidParams,`Too many fields (max ${MAX_FIELDS})`); for (const k of keys) validateIdent(k,'field'); }
+function coerceNumeric(val, def, min, max) { const n = Number.isInteger(val) ? val : parseInt(val,10); if (!Number.isFinite(n)) return def; return Math.max(min,Math.min(max,n)); }
 
-function flatNvl(nvl) {
-  if (!nvl || typeof nvl !== 'object') return {};
-  const out = {};
-  for (const k of Object.keys(nvl)) {
-    const v = nvl[k];
-    out[k] = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
-  }
-  return out;
-}
+// ---------------------------------------------------------------------------
+// Tool Handlers
+// ---------------------------------------------------------------------------
+async function searchRecords(sid,args)     { validateModule(args.module); validateQuery(args.query); validateOrderBy(args.order_by); validateFieldList(args.fields); args.max_results=coerceNumeric(args.max_results,20,1,MAX_RESULTS_CAP); args.offset=coerceNumeric(args.offset,0,0,1000000); return resilientCall(sid,'searchRecords',args); }
+async function searchText(sid,args)        { validateQuery(args.search_string); if(args.modules!==undefined){if(!Array.isArray(args.modules)||args.modules.length===0)throw new McpError(ErrorCode.InvalidParams,'modules must be a non-empty array');if(args.modules.length>20)throw new McpError(ErrorCode.InvalidParams,'modules array exceeds max 20');for(const m of args.modules)validateModule(m);} args.max_results=coerceNumeric(args.max_results,10,1,MAX_RESULTS_CAP); return resilientCall(sid,'searchText',args); }
+async function getRecord(sid,args)         { validateModule(args.module); validateId(args.id); validateFieldList(args.fields); return resilientCall(sid,'getRecord',args); }
+async function createRecord(sid,args)      { validateModule(args.module); validateFieldsObject(args.fields); return resilientCall(sid,'createRecord',args); }
+async function updateRecord(sid,args)      { validateModule(args.module); validateId(args.id); validateFieldsObject(args.fields); return resilientCall(sid,'updateRecord',args); }
+async function deleteRecord(sid,args)      { validateModule(args.module); validateId(args.id); return resilientCall(sid,'deleteRecord',args); }
+async function countRecords(sid,args)      { validateModule(args.module); validateQuery(args.query); return resilientCall(sid,'countRecords',args); }
+async function getRelationships(sid,args)  { validateModule(args.module); validateId(args.id); validateIdent(args.link_field,'link_field'); validateFieldList(args.related_fields); args.max_results=coerceNumeric(args.max_results,20,1,MAX_RESULTS_CAP); args.offset=coerceNumeric(args.offset,0,0,1000000); return resilientCall(sid,'getRelationships',args); }
+async function linkRecords(sid,args)       { validateModule(args.module); validateId(args.id); validateIdent(args.link_field,'link_field'); if(Array.isArray(args.related_ids)){if(args.related_ids.length>100)throw new McpError(ErrorCode.InvalidParams,'Too many related_ids (max 100)');for(const r of args.related_ids)validateId(r);} return resilientCall(sid,'linkRecords',args); }
+async function unlinkRecords(sid,args)     { validateModule(args.module); validateId(args.id); validateIdent(args.link_field,'link_field'); if(Array.isArray(args.related_ids)){if(args.related_ids.length>100)throw new McpError(ErrorCode.InvalidParams,'Too many related_ids (max 100)');for(const r of args.related_ids)validateId(r);} return resilientCall(sid,'unlinkRecords',args); }
+async function getModuleFields(sid,args)   { validateModule(args.module); return resilientCall(sid,'getModuleFields',args); }
+async function listModules(sid)            { return resilientCall(sid,'listModules',{}); }
+async function getMany(sid,args)           { validateModule(args.module); if(!Array.isArray(args.ids)||args.ids.length===0)throw new McpError(ErrorCode.InvalidParams,'ids must be non-empty'); if(args.ids.length>100)throw new McpError(ErrorCode.InvalidParams,'Too many ids (max 100)'); for(const id of args.ids)validateId(id); validateFieldList(args.fields); return resilientCall(sid,'getMany',args); }
+async function bulkUpsert(sid,args)        { validateModule(args.module); if(!Array.isArray(args.records)||args.records.length===0)throw new McpError(ErrorCode.InvalidParams,'records must be non-empty'); if(args.records.length>100)throw new McpError(ErrorCode.InvalidParams,'Too many records (max 100)'); for(const r of args.records)validateFieldsObject(r); return resilientCall(sid,'bulkUpsert',args); }
+async function getDropdownValues(sid,args) { if(args.dropdown_name)validateIdent(args.dropdown_name,'dropdown_name'); return resilientCall(sid,'getDropdownValues',args); }
+async function getRecent(sid,args)         { if(args.modules){for(const m of args.modules)validateModule(m);} args.max_results=coerceNumeric(args.max_results,10,1,MAX_RESULTS_CAP); return resilientCall(sid,'getRecent',args); }
+async function getNoteAttachment(sid,args) { validateId(args.id); return resilientCall(sid,'getNoteAttachment',args); }
+async function setNoteAttachment(sid,args) { validateId(args.id); if(!args.filename||!args.file_base64)throw new McpError(ErrorCode.InvalidParams,'filename and file_base64 required'); return resilientCall(sid,'setNoteAttachment',args); }
+async function getUpcomingActivities(sid)  { return resilientCall(sid,'getUpcomingActivities',{}); }
+async function logCall(sid,args)           { if(!args.name||!args.date_start)throw new McpError(ErrorCode.InvalidParams,'name and date_start required'); if(args.contact_ids)for(const c of args.contact_ids)validateId(c); if(args.account_ids)for(const a of args.account_ids)validateId(a); return resilientCall(sid,'logCall',args); }
+async function createTask(sid,args)        { if(!args.name)throw new McpError(ErrorCode.InvalidParams,'name required'); if(args.contact_id)validateId(args.contact_id); if(args.parent_id)validateId(args.parent_id); if(args.parent_type)validateModule(args.parent_type); return resilientCall(sid,'createTask',args); }
+async function createLinkedNote(sid,args)  { if(!args.name)throw new McpError(ErrorCode.InvalidParams,'name required'); if(args.parent_id)validateId(args.parent_id); if(args.contact_id)validateId(args.contact_id); if(args.parent_type)validateModule(args.parent_type); return resilientCall(sid,'createNote',args); }
+async function getRecordActivities(sid,args){ validateModule(args.module); validateId(args.id); args.max_results=coerceNumeric(args.max_results,10,1,MAX_RESULTS_CAP); if(args.types!==undefined){const v=['calls','meetings','tasks','notes'];const f=(args.types||[]).filter(t=>v.includes(t));if(f.length===0)throw new McpError(ErrorCode.InvalidParams,`types must include one of: ${v.join(', ')}`);args.types=f;} return resilientCall(sid,'getRecordActivities',args); }
+async function serverInfo(sid)             { const creds=connCreds.get(sid)||{}; const sessions=await ensureCrmSession(sid).catch(()=>({})); const sub=connAuth.get(sid)?.sub??await getSubBySid(sid)??sid; return { prefix:PREFIX, port:PORT, entity:CODE, endpoint:ENDPOINT, api_strategy:API_STRATEGY==='8'?'Modern (v8 + v4 Fallback)':'Legacy (v4.1)', crm_user:creds.user||'?', auth:'gateway-session', required_group:REQUIRED_GROUP, v8_session:!!sessions.v8, v4_session:!!sessions.v4, session_active:!!(await getCrmSession(sub)), active_connections:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), persistence:'redis' }; }
 
-function flatList(el) {
-  return (el || []).map(e => flatNvl(e.name_value_list || e));
-}
-
-function toNvl(obj) {
-  return Object.entries(obj).map(([n, v]) => ({ name: n, value: String(v ?? '') }));
-}
-
-const MODULE_RE    = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const IDENT_RE     = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const UUID_RE      = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_QUERY_LEN    = 2000;
-const MAX_ORDER_BY_LEN = 200;
-const MAX_RESULTS_CAP  = 100;
-const MAX_FIELDS       = 50;
-
-function validateModule(module) {
-  if (!module || !MODULE_RE.test(module)) {
-    throw new McpError(ErrorCode.InvalidParams, `Invalid module name: ${module}`);
-  }
-}
-
-function validateId(id) {
-  if (!id || !UUID_RE.test(String(id))) {
-    throw new McpError(ErrorCode.InvalidParams, `Invalid record ID (expected UUID): ${id}`);
-  }
-}
-
-function validateIdent(name, label = 'field') {
-  if (!name || !IDENT_RE.test(String(name))) {
-    throw new McpError(ErrorCode.InvalidParams, `Invalid ${label} name: ${name}`);
-  }
-}
-
-function validateFieldList(fields) {
-  if (!Array.isArray(fields)) return;
-  if (fields.length > MAX_FIELDS) {
-    throw new McpError(ErrorCode.InvalidParams, `Too many fields (max ${MAX_FIELDS})`);
-  }
-  for (const f of fields) validateIdent(f, 'field');
-}
-
-function validateQuery(query) {
-  if (query == null) return;
-  if (typeof query !== 'string') throw new McpError(ErrorCode.InvalidParams, 'query must be a string');
-  if (query.length > MAX_QUERY_LEN) throw new McpError(ErrorCode.InvalidParams, `Query exceeds maximum length of ${MAX_QUERY_LEN} characters`);
-}
-
-function validateOrderBy(order_by) {
-  if (order_by == null) return;
-  if (typeof order_by !== 'string') throw new McpError(ErrorCode.InvalidParams, 'order_by must be a string');
-  if (order_by.length > MAX_ORDER_BY_LEN) throw new McpError(ErrorCode.InvalidParams, `order_by exceeds maximum length of ${MAX_ORDER_BY_LEN} characters`);
-}
-
-function coerceNumeric(val, defaultVal, min, max) {
-  const n = Number.isInteger(val) ? val : parseInt(val, 10);
-  if (!Number.isFinite(n)) return defaultVal;
-  return Math.max(min, Math.min(max, n));
-}
-
-async function searchRecords(sid, { module, query='', fields=[], max_results=20, offset=0, order_by='' }) {
-  validateModule(module);
-  validateQuery(query);
-  validateOrderBy(order_by);
-  validateFieldList(fields);
-  const safeMax    = coerceNumeric(max_results, 20, 1, MAX_RESULTS_CAP);
-  const safeOffset = coerceNumeric(offset, 0, 0, 1_000_000);
-  const r = await crmCall(sid, 'get_entry_list', {
-    module_name: module,
-    query,
-    order_by,
-    offset: safeOffset,
-    select_fields: fields,
-    link_name_to_fields_array: [],
-    max_results: safeMax,
-    deleted: 0,
-    favorites: false,
-  });
-  return {
-    module,
-    records: flatList(r.entry_list),
-    result_count: r.result_count || 0,
-    total_count: parseInt(r.total_count || '0', 10),
-    next_offset: r.next_offset || 0,
-  };
-}
-
-async function searchText(sid, { search_string, modules=['Accounts','Contacts','Leads'], max_results=10 }) {
-  validateQuery(search_string);
-  if (!Array.isArray(modules) || modules.length === 0) {
-    throw new McpError(ErrorCode.InvalidParams, 'modules must be a non-empty array');
-  }
-  if (modules.length > 20) {
-    throw new McpError(ErrorCode.InvalidParams, 'modules array exceeds maximum of 20 entries');
-  }
-  for (const m of modules) validateModule(m);
-  const safeMax = coerceNumeric(max_results, 10, 1, MAX_RESULTS_CAP);
-  const r = await crmCall(sid, 'search_by_module', {
-    search_string,
-    modules,
-    offset: 0,
-    max_results: safeMax,
-    assigned_user_id: '',
-    select_fields: [],
-    unified_search_only: false,
-    favorites: false,
-  });
-  const out = {};
-  for (const e of (r.entry_list || [])) {
-    out[e.name] = (e.records || []).map(rec => {
-      const flat = {};
-      for (const k of Object.keys(rec)) {
-        const v = rec[k];
-        flat[k] = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
-      }
-      return flat;
-    });
-  }
-  return out;
-}
-
-async function getRecord(sid, { module, id, fields=[] }) {
-  validateModule(module);
-  validateId(id);
-  validateFieldList(fields);
-  const r = await crmCall(sid, 'get_entry', {
-    module_name: module,
-    id,
-    select_fields: fields,
-    link_name_to_fields_array: [],
-    track_view: false,
-  });
-  const recs = flatList(r.entry_list);
-  return recs.length ? recs[0] : null;
-}
-
-function validateFieldsObject(fields) {
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
-    throw new McpError(ErrorCode.InvalidParams, 'fields must be a non-null object');
-  }
-  const keys = Object.keys(fields);
-  if (keys.length > MAX_FIELDS) {
-    throw new McpError(ErrorCode.InvalidParams, `Too many fields (max ${MAX_FIELDS})`);
-  }
-  for (const k of keys) validateIdent(k, 'field');
-}
-
-async function createRecord(sid, { module, fields }) {
-  validateModule(module);
-  validateFieldsObject(fields);
-  const r = await crmCall(sid, 'set_entry', {
-    module_name: module,
-    name_value_list: toNvl(fields),
-  });
-  return { id: r.id, module, created: true };
-}
-
-async function updateRecord(sid, { module, id, fields }) {
-  validateModule(module);
-  validateId(id);
-  validateFieldsObject(fields);
-  const r = await crmCall(sid, 'set_entry', {
-    module_name: module,
-    name_value_list: [{ name: 'id', value: id }, ...toNvl(fields)],
-  });
-  return { id: r.id, module, updated: true };
-}
-
-async function deleteRecord(sid, { module, id }) {
-  validateModule(module);
-  validateId(id);
-  const r = await crmCall(sid, 'set_entry', {
-    module_name: module,
-    name_value_list: [
-      { name: 'id', value: id },
-      { name: 'deleted', value: '1' },
-    ],
-  });
-  return { id: r.id, module, deleted: true };
-}
-
-async function countRecords(sid, { module, query='' }) {
-  validateModule(module);
-  validateQuery(query);
-  const r = await crmCall(sid, 'get_entries_count', {
-    module_name: module,
-    query,
-    deleted: 0,
-  });
-  return { module, count: parseInt(r.result_count || '0', 10) };
-}
-
-async function getRelationships(sid, { module, id, link_field, related_fields=[], max_results=20, offset=0 }) {
-  validateModule(module);
-  validateId(id);
-  validateIdent(link_field, 'link_field');
-  validateFieldList(related_fields);
-  const safeMax    = coerceNumeric(max_results, 20, 1, MAX_RESULTS_CAP);
-  const safeOffset = coerceNumeric(offset, 0, 0, 1_000_000);
-  const r = await crmCall(sid, 'get_relationships', {
-    module_name: module,
-    module_id: id,
-    link_field_name: link_field,
-    related_module_query: '',
-    related_fields,
-    related_module_link_name_to_fields_array: [],
-    deleted: 0,
-    order_by: '',
-    offset: safeOffset,
-    limit: safeMax,
-  });
-  return {
-    records: flatList(r.entry_list),
-    count: (r.entry_list || []).length,
-  };
-}
-
-async function linkRecords(sid, { module, id, link_field, related_ids }) {
-  validateModule(module);
-  validateId(id);
-  validateIdent(link_field, 'link_field');
-  const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
-  if (ids.length > 100) throw new McpError(ErrorCode.InvalidParams, 'Too many related_ids (max 100)');
-  for (const rid of ids) validateId(rid);
-  const r = await crmCall(sid, 'set_relationship', {
-    module_name: module,
-    module_id: id,
-    link_field_name: link_field,
-    related_ids: ids,
-    name_value_list: [],
-    delete: 0,
-  });
-  return { created: r.created, failed: r.failed };
-}
-
-async function unlinkRecords(sid, { module, id, link_field, related_ids }) {
-  validateModule(module);
-  validateId(id);
-  validateIdent(link_field, 'link_field');
-  const ids = Array.isArray(related_ids) ? related_ids : [related_ids];
-  if (ids.length > 100) throw new McpError(ErrorCode.InvalidParams, 'Too many related_ids (max 100)');
-  for (const rid of ids) validateId(rid);
-  const r = await crmCall(sid, 'set_relationship', {
-    module_name: module,
-    module_id: id,
-    link_field_name: link_field,
-    related_ids: ids,
-    name_value_list: [],
-    delete: 1,
-  });
-  return { deleted: r.deleted, failed: r.failed };
-}
-
-async function getModuleFields(sid, { module }) {
-  validateModule(module);
-  const r = await crmCall(sid, 'get_module_fields', {
-    module_name: module,
-    fields: [],
-  });
-  return {
-    module: r.module_name,
-    table: r.table_name,
-    fields: Object.values(r.module_fields || {}).map(f => ({
-      name: f.name,
-      type: f.type,
-      label: f.label,
-      required: f.required,
-      options: f.options ? Object.keys(f.options) : undefined,
-    })),
-    relationships: Object.values(r.link_fields || {}).map(l => ({
-      name: l.name,
-      related_module: l.module,
-    })),
-  };
-}
-
-async function listModules(sid) {
-  const r = await crmCall(sid, 'get_available_modules', { filter: 'all' });
-  return (r.modules || []).map(m => ({
-    key: m.module_key,
-    label: m.module_label,
-  }));
-}
-
-async function serverInfo(sid) {
-  const creds = connCreds.get(sid) || {};
-  return {
-    prefix: PREFIX,
-    port: PORT,
-    entity: CODE,
-    endpoint: ENDPOINT,
-    crm_user: creds.user || '?',
-    auth: 'gateway-session',
-    required_group: REQUIRED_GROUP,
-    session_active: crmSessions.has(`${subBySid.get(sid) || sid}:${CODE}`),
-    active_connections: transports.size,
-    circuit_breaker: circuitBreaker.state.toLowerCase(),
-  };
-}
-
-async function logCall(sid, { name, status = 'Held', direction = 'Outbound', duration_hours = 0, duration_minutes = 15, date_start, description = '', assigned_user_id, contact_ids = [], account_ids = [] }) {
-  if (!name || typeof name !== 'string') throw new McpError(ErrorCode.InvalidParams, 'name is required');
-  if (!date_start) throw new McpError(ErrorCode.InvalidParams, 'date_start is required (format: YYYY-MM-DD HH:MM:SS)');
-  const fields = [
-    { name: 'name',             value: name },
-    { name: 'status',           value: status },
-    { name: 'direction',        value: direction },
-    { name: 'duration_hours',   value: String(duration_hours) },
-    { name: 'duration_minutes', value: String(duration_minutes) },
-    { name: 'date_start',       value: date_start },
-    { name: 'description',      value: description },
-  ];
-  if (assigned_user_id) fields.push({ name: 'assigned_user_id', value: assigned_user_id });
-  const r = await crmCall(sid, 'set_entry', { module_name: 'Calls', name_value_list: fields });
-  const callId = r.id;
-  const linked = { contacts: 0, accounts: 0 };
-  if (contact_ids.length) {
-    for (const cid of contact_ids) validateId(cid);
-    await crmCall(sid, 'set_relationship', { module_name: 'Calls', module_id: callId, link_field_name: 'contacts', related_ids: contact_ids, name_value_list: [], delete: 0 });
-    linked.contacts = contact_ids.length;
-  }
-  if (account_ids.length) {
-    for (const aid of account_ids) validateId(aid);
-    await crmCall(sid, 'set_relationship', { module_name: 'Calls', module_id: callId, link_field_name: 'accounts', related_ids: account_ids, name_value_list: [], delete: 0 });
-    linked.accounts = account_ids.length;
-  }
-  return { id: callId, module: 'Calls', created: true, linked };
-}
-
-async function createTask(sid, { name, status = 'Not Started', priority = 'Medium', date_due, date_start, description = '', assigned_user_id, contact_id, parent_type, parent_id }) {
-  if (!name || typeof name !== 'string') throw new McpError(ErrorCode.InvalidParams, 'name is required');
-  if (contact_id) validateId(contact_id);
-  if (parent_id) validateId(parent_id);
-  if (parent_type) validateModule(parent_type);
-  const nvl = [
-    { name: 'name',        value: name },
-    { name: 'status',      value: status },
-    { name: 'priority',    value: priority },
-    { name: 'description', value: description },
-  ];
-  if (date_due)          nvl.push({ name: 'date_due',          value: date_due });
-  if (date_start)        nvl.push({ name: 'date_start',        value: date_start });
-  if (assigned_user_id)  nvl.push({ name: 'assigned_user_id',  value: assigned_user_id });
-  if (contact_id)        nvl.push({ name: 'contact_id',        value: contact_id });
-  if (parent_type)       nvl.push({ name: 'parent_type',       value: parent_type });
-  if (parent_id)         nvl.push({ name: 'parent_id',         value: parent_id });
-  const r = await crmCall(sid, 'set_entry', { module_name: 'Tasks', name_value_list: nvl });
-  return { id: r.id, module: 'Tasks', created: true };
-}
-
-async function createLinkedNote(sid, { name, description = '', parent_type, parent_id, contact_id, assigned_user_id }) {
-  if (!name || typeof name !== 'string') throw new McpError(ErrorCode.InvalidParams, 'name is required');
-  if (parent_id) validateId(parent_id);
-  if (contact_id) validateId(contact_id);
-  if (parent_type) validateModule(parent_type);
-  const nvl = [
-    { name: 'name',        value: name },
-    { name: 'description', value: description },
-  ];
-  if (parent_type)      nvl.push({ name: 'parent_type',      value: parent_type });
-  if (parent_id)        nvl.push({ name: 'parent_id',        value: parent_id });
-  if (contact_id)       nvl.push({ name: 'contact_id',       value: contact_id });
-  if (assigned_user_id) nvl.push({ name: 'assigned_user_id', value: assigned_user_id });
-  const r = await crmCall(sid, 'set_entry', { module_name: 'Notes', name_value_list: nvl });
-  return { id: r.id, module: 'Notes', created: true };
-}
-
-async function getRecordActivities(sid, { module, id, types = ['calls', 'meetings', 'tasks', 'notes'], max_results = 10 }) {
-  validateModule(module);
-  validateId(id);
-  const safeMax = coerceNumeric(max_results, 10, 1, MAX_RESULTS_CAP);
-  const validTypes = ['calls', 'meetings', 'tasks', 'notes'];
-  const requestedTypes = types.filter(t => validTypes.includes(t));
-  if (requestedTypes.length === 0) throw new McpError(ErrorCode.InvalidParams, `types must include at least one of: ${validTypes.join(', ')}`);
-  const out = {};
-  for (const type of requestedTypes) {
-    try {
-      const r = await crmCall(sid, 'get_relationships', {
-        module_name: module,
-        module_id: id,
-        link_field_name: type,
-        related_module_query: '',
-        related_fields: ['id', 'name', 'status', 'date_start', 'date_due', 'date_entered', 'description'],
-        related_module_link_name_to_fields_array: [],
-        deleted: 0,
-        order_by: '',
-        offset: 0,
-        limit: safeMax,
-      });
-      out[type] = flatList(r.entry_list);
-    } catch {
-      out[type] = [];
-    }
-  }
-  return out;
-}
-
-async function getMany(sid, { module, ids, fields = [] }) {
-  validateModule(module);
-  if (!Array.isArray(ids) || ids.length === 0) throw new McpError(ErrorCode.InvalidParams, 'ids must be a non-empty array');
-  if (ids.length > 100) throw new McpError(ErrorCode.InvalidParams, 'Too many ids (max 100)');
-  for (const id of ids) validateId(id);
-  validateFieldList(fields);
-  const r = await crmCall(sid, 'get_entries', {
-    module_name: module,
-    ids,
-    select_fields: fields,
-    link_name_to_fields_array: [],
-  });
-  return { module, records: flatList(r.entry_list), count: (r.entry_list || []).length };
-}
-
-async function bulkUpsert(sid, { module, records }) {
-  validateModule(module);
-  if (!Array.isArray(records) || records.length === 0) throw new McpError(ErrorCode.InvalidParams, 'records must be a non-empty array');
-  if (records.length > 100) throw new McpError(ErrorCode.InvalidParams, 'Too many records (max 100)');
-  for (const rec of records) validateFieldsObject(rec);
-  const r = await crmCall(sid, 'set_entries', {
-    module_name: module,
-    name_value_lists: records.map(fields => toNvl(fields)),
-  });
-  return { ids: r.ids || [], count: (r.ids || []).length };
-}
-
-async function getDropdownValues(sid, { dropdown_name } = {}) {
-  const r = await crmCall(sid, 'get_language_definition', {
-    modules: ['app_list_strings'],
-    MD5: false,
-  });
-  const als = r?.app_list_strings || {};
-  if (dropdown_name) {
-    if (!als[dropdown_name]) throw new McpError(ErrorCode.InvalidParams, `Dropdown not found: ${dropdown_name}`);
-    return { dropdown_name, values: als[dropdown_name] };
-  }
-  return { available_dropdowns: Object.keys(als), count: Object.keys(als).length };
-}
-
-async function getRecent(sid, { modules = ['Accounts', 'Contacts', 'Leads'], max_results = 10 }) {
-  for (const m of modules) validateModule(m);
-  const safeMax = coerceNumeric(max_results, 10, 1, MAX_RESULTS_CAP);
-  const r = await crmCall(sid, 'get_last_viewed', { module_names: modules });
-  const items = Array.isArray(r) ? r : [];
-  return {
-    items: items.slice(0, safeMax).map(i => ({
-      id: i.id,
-      module: i.module_name,
-      name: i.item_summary || i.name,
-      viewed_at: i.date_entered,
-    })),
-    count: Math.min(items.length, safeMax),
-  };
-}
-
-async function getNoteAttachment(sid, { id }) {
-  validateId(id);
-  const r = await crmCall(sid, 'get_note_attachment', { id });
-  const att = r.note_attachment || {};
-  return {
-    id: att.id,
-    filename: att.filename,
-    file_mime_type: att.file_mime_type,
-    file_base64: att.file || null,
-  };
-}
-
-async function setNoteAttachment(sid, { id, filename, file_base64, file_mime_type }) {
-  validateId(id);
-  if (!filename || typeof filename !== 'string') throw new McpError(ErrorCode.InvalidParams, 'filename is required');
-  if (!file_base64 || typeof file_base64 !== 'string') throw new McpError(ErrorCode.InvalidParams, 'file_base64 is required');
-  const note = { id, filename, file: file_base64 };
-  if (file_mime_type) note.file_mime_type = file_mime_type;
-  const r = await crmCall(sid, 'set_note_attachment', { note });
-  return { id: r.id, attached: true };
-}
-
-async function getUpcomingActivities(sid) {
-  const r = await crmCall(sid, 'get_upcoming_activities', {});
-  const items = Array.isArray(r) ? r : [];
-  return { activities: items, count: items.length };
-}
-
+// ---------------------------------------------------------------------------
+// Tool Definitions (TOOLS)
+// ---------------------------------------------------------------------------
 const TOOLS = [
-  {
-    name: `${PREFIX}_search`,
-    description: 'Search records with SQL WHERE',
-    inputSchema: {
-      type: 'object',
-      required: ['module'],
-      properties: {
-        module: { type: 'string' },
-        query: { type: 'string' },
-        fields: { type: 'array', items: { type: 'string' } },
-        max_results: { type: 'number' },
-        offset: { type: 'number' },
-        order_by: { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_search_text`,
-    description: 'Full-text search',
-    inputSchema: {
-      type: 'object',
-      required: ['search_string'],
-      properties: {
-        search_string: { type: 'string' },
-        modules: { type: 'array', items: { type: 'string' } },
-        max_results: { type: 'number' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_get`,
-    description: 'Get record by UUID',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'id'],
-      properties: {
-        module: { type: 'string' },
-        id: { type: 'string' },
-        fields: { type: 'array', items: { type: 'string' } },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_create`,
-    description: 'Create record',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'fields'],
-      properties: {
-        module: { type: 'string' },
-        fields: { type: 'object', additionalProperties: { type: 'string' } },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_update`,
-    description: 'Update record',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'id', 'fields'],
-      properties: {
-        module: { type: 'string' },
-        id: { type: 'string' },
-        fields: { type: 'object', additionalProperties: { type: 'string' } },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_delete`,
-    description: 'Delete record',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'id'],
-      properties: {
-        module: { type: 'string' },
-        id: { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_count`,
-    description: 'Count records',
-    inputSchema: {
-      type: 'object',
-      required: ['module'],
-      properties: {
-        module: { type: 'string' },
-        query: { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_get_relationships`,
-    description: 'Get related records',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'id', 'link_field'],
-      properties: {
-        module: { type: 'string' },
-        id: { type: 'string' },
-        link_field: { type: 'string' },
-        related_fields: { type: 'array', items: { type: 'string' } },
-        max_results: { type: 'number' },
-        offset: { type: 'number' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_link_records`,
-    description: 'Link records',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'id', 'link_field', 'related_ids'],
-      properties: {
-        module: { type: 'string' },
-        id: { type: 'string' },
-        link_field: { type: 'string' },
-        related_ids: { type: 'array', items: { type: 'string' } },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_unlink_records`,
-    description: 'Unlink records',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'id', 'link_field', 'related_ids'],
-      properties: {
-        module: { type: 'string' },
-        id: { type: 'string' },
-        link_field: { type: 'string' },
-        related_ids: { type: 'array', items: { type: 'string' } },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_get_module_fields`,
-    description: 'Get module fields',
-    inputSchema: {
-      type: 'object',
-      required: ['module'],
-      properties: {
-        module: { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_list_modules`,
-    description: 'List modules',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: `${PREFIX}_server_info`,
-    description: 'Server info',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: `${PREFIX}_get_many`,
-    description: 'Fetch multiple records by ID list in one call',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'ids'],
-      properties: {
-        module: { type: 'string' },
-        ids: { type: 'array', items: { type: 'string' }, maxItems: 100 },
-        fields: { type: 'array', items: { type: 'string' } },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_bulk_upsert`,
-    description: 'Create or update multiple records in one call. Include "id" in a record\'s fields to update it, omit to create.',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'records'],
-      properties: {
-        module: { type: 'string' },
-        records: {
-          type: 'array',
-          items: { type: 'object', additionalProperties: { type: 'string' } },
-          maxItems: 100,
-        },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_get_dropdown_values`,
-    description: 'List all available dropdown names, or get key→label values for a specific dropdown (e.g. account_type_dom, industry_dom)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        dropdown_name: { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_get_recent`,
-    description: 'Get recently viewed records for the current user',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        modules: { type: 'array', items: { type: 'string' } },
-        max_results: { type: 'number' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_get_note_attachment`,
-    description: 'Download a file attachment from a Notes record. Returns filename and base64-encoded file content.',
-    inputSchema: {
-      type: 'object',
-      required: ['id'],
-      properties: {
-        id: { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_set_note_attachment`,
-    description: 'Upload a file attachment to an existing Notes record. File must be base64-encoded.',
-    inputSchema: {
-      type: 'object',
-      required: ['id', 'filename', 'file_base64'],
-      properties: {
-        id: { type: 'string' },
-        filename: { type: 'string' },
-        file_base64: { type: 'string' },
-        file_mime_type: { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_get_upcoming_activities`,
-    description: 'Get upcoming calls, meetings, and tasks for the current user',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: `${PREFIX}_log_call`,
-    description: 'Create a logged call (Held) or scheduled call and optionally link it to contacts and/or accounts in one step',
-    inputSchema: {
-      type: 'object',
-      required: ['name', 'date_start'],
-      properties: {
-        name:             { type: 'string' },
-        status:           { type: 'string', enum: ['Planned', 'Held', 'Not Held'], default: 'Held' },
-        direction:        { type: 'string', enum: ['Inbound', 'Outbound'], default: 'Outbound' },
-        duration_hours:   { type: 'number', default: 0 },
-        duration_minutes: { type: 'number', enum: [0, 15, 30, 45], default: 15 },
-        date_start:       { type: 'string', description: 'YYYY-MM-DD HH:MM:SS' },
-        description:      { type: 'string' },
-        assigned_user_id: { type: 'string' },
-        contact_ids:      { type: 'array', items: { type: 'string' } },
-        account_ids:      { type: 'array', items: { type: 'string' } },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_create_task`,
-    description: 'Create a task and optionally link it to a contact and/or a parent record (Account, Contact, Lead, etc.)',
-    inputSchema: {
-      type: 'object',
-      required: ['name'],
-      properties: {
-        name:             { type: 'string' },
-        status:           { type: 'string', enum: ['Not Started', 'In Progress', 'Completed', 'Pending Input', 'Deferred'], default: 'Not Started' },
-        priority:         { type: 'string', enum: ['High', 'Medium', 'Low'], default: 'Medium' },
-        date_due:         { type: 'string', description: 'YYYY-MM-DD HH:MM:SS' },
-        date_start:       { type: 'string', description: 'YYYY-MM-DD HH:MM:SS' },
-        description:      { type: 'string' },
-        assigned_user_id: { type: 'string' },
-        contact_id:       { type: 'string' },
-        parent_type:      { type: 'string', description: 'Module name of parent record e.g. Accounts, Contacts, Leads' },
-        parent_id:        { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_create_note`,
-    description: 'Create a note and optionally link it to a parent record (Account, Contact, Lead, etc.) and/or a contact',
-    inputSchema: {
-      type: 'object',
-      required: ['name'],
-      properties: {
-        name:             { type: 'string' },
-        description:      { type: 'string' },
-        parent_type:      { type: 'string', description: 'Module name of parent record e.g. Accounts, Contacts, Leads' },
-        parent_id:        { type: 'string' },
-        contact_id:       { type: 'string' },
-        assigned_user_id: { type: 'string' },
-      },
-    },
-  },
-  {
-    name: `${PREFIX}_get_record_activities`,
-    description: 'Get activity history for a record — calls, meetings, tasks, and/or notes linked to it',
-    inputSchema: {
-      type: 'object',
-      required: ['module', 'id'],
-      properties: {
-        module:      { type: 'string' },
-        id:          { type: 'string' },
-        types:       { type: 'array', items: { type: 'string', enum: ['calls', 'meetings', 'tasks', 'notes'] }, default: ['calls', 'meetings', 'tasks', 'notes'] },
-        max_results: { type: 'number' },
-      },
-    },
-  },
+  { name:`${PREFIX}_search`, description:'Search records with optional SQL WHERE filter', inputSchema:{type:'object',required:['module'],properties:{module:{type:'string'},query:{type:'string'},fields:{type:'array',items:{type:'string'}},max_results:{type:'number'},offset:{type:'number'},order_by:{type:'string'}}}},
+  { name:`${PREFIX}_search_text`, description:'Full-text search across multiple modules', inputSchema:{type:'object',required:['search_string'],properties:{search_string:{type:'string'},modules:{type:'array',items:{type:'string'}},max_results:{type:'number'}}}},
+  { name:`${PREFIX}_get`, description:'Get a single record by UUID', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'array',items:{type:'string'}}}}},
+  { name:`${PREFIX}_create`, description:'Create a new record', inputSchema:{type:'object',required:['module','fields'],properties:{module:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}}}}},
+  { name:`${PREFIX}_update`, description:'Update an existing record', inputSchema:{type:'object',required:['module','id','fields'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}}}}},
+  { name:`${PREFIX}_delete`, description:'Soft-delete a record', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'}}}},
+  { name:`${PREFIX}_count`, description:'Count records matching an optional SQL WHERE clause', inputSchema:{type:'object',required:['module'],properties:{module:{type:'string'},query:{type:'string'}}}},
+  { name:`${PREFIX}_get_relationships`, description:'Get related records via a named link field', inputSchema:{type:'object',required:['module','id','link_field'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_fields:{type:'array',items:{type:'string'}},max_results:{type:'number'},offset:{type:'number'}}}},
+  { name:`${PREFIX}_link_records`, description:'Create a relationship between records', inputSchema:{type:'object',required:['module','id','link_field','related_ids'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_ids:{type:'array',items:{type:'string'}}}}},
+  { name:`${PREFIX}_unlink_records`, description:'Remove a relationship between records', inputSchema:{type:'object',required:['module','id','link_field','related_ids'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_ids:{type:'array',items:{type:'string'}}}}},
+  { name:`${PREFIX}_get_module_fields`, description:'Get all field definitions for a module', inputSchema:{type:'object',required:['module'],properties:{module:{type:'string'}}}},
+  { name:`${PREFIX}_list_modules`, description:'List all available CRM modules', inputSchema:{type:'object',properties:{}}},
+  { name:`${PREFIX}_server_info`, description:'Get server status, API strategy, persistence info', inputSchema:{type:'object',properties:{}}},
+  { name:`${PREFIX}_get_many`, description:'Fetch multiple records by ID list in one call', inputSchema:{type:'object',required:['module','ids'],properties:{module:{type:'string'},ids:{type:'array',items:{type:'string'},maxItems:100},fields:{type:'array',items:{type:'string'}}}}},
+  { name:`${PREFIX}_bulk_upsert`, description:'Create or update multiple records. Include "id" in fields to update, omit to create.', inputSchema:{type:'object',required:['module','records'],properties:{module:{type:'string'},records:{type:'array',items:{type:'object',additionalProperties:{type:'string'}},maxItems:100}}}},
+  { name:`${PREFIX}_get_dropdown_values`, description:'List dropdown names or get key→label values for a specific dropdown', inputSchema:{type:'object',properties:{dropdown_name:{type:'string'}}}},
+  { name:`${PREFIX}_get_recent`, description:'Get recently viewed records for the current user', inputSchema:{type:'object',properties:{modules:{type:'array',items:{type:'string'}},max_results:{type:'number'}}}},
+  { name:`${PREFIX}_get_note_attachment`, description:'Download a file attachment from a Notes record', inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'}}}},
+  { name:`${PREFIX}_set_note_attachment`, description:'Upload a base64-encoded file attachment to a Notes record', inputSchema:{type:'object',required:['id','filename','file_base64'],properties:{id:{type:'string'},filename:{type:'string'},file_base64:{type:'string'},file_mime_type:{type:'string'}}}},
+  { name:`${PREFIX}_get_upcoming_activities`, description:'Get upcoming calls, meetings, and tasks for current user', inputSchema:{type:'object',properties:{}}},
+  { name:`${PREFIX}_log_call`, description:'Create a logged call and optionally link to contacts/accounts', inputSchema:{type:'object',required:['name','date_start'],properties:{name:{type:'string'},status:{type:'string',enum:['Planned','Held','Not Held'],default:'Held'},direction:{type:'string',enum:['Inbound','Outbound'],default:'Outbound'},duration_hours:{type:'number',default:0},duration_minutes:{type:'number',enum:[0,15,30,45],default:15},date_start:{type:'string'},description:{type:'string'},assigned_user_id:{type:'string'},contact_ids:{type:'array',items:{type:'string'}},account_ids:{type:'array',items:{type:'string'}}}}},
+  { name:`${PREFIX}_create_task`, description:'Create a task and optionally link to a contact/parent record', inputSchema:{type:'object',required:['name'],properties:{name:{type:'string'},status:{type:'string',enum:['Not Started','In Progress','Completed','Pending Input','Deferred'],default:'Not Started'},priority:{type:'string',enum:['High','Medium','Low'],default:'Medium'},date_due:{type:'string'},date_start:{type:'string'},description:{type:'string'},assigned_user_id:{type:'string'},contact_id:{type:'string'},parent_type:{type:'string'},parent_id:{type:'string'}}}},
+  { name:`${PREFIX}_create_note`, description:'Create a note and optionally link to a parent record/contact', inputSchema:{type:'object',required:['name'],properties:{name:{type:'string'},description:{type:'string'},parent_type:{type:'string'},parent_id:{type:'string'},contact_id:{type:'string'},assigned_user_id:{type:'string'}}}},
+  { name:`${PREFIX}_get_record_activities`, description:'Get activity history for a record', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},types:{type:'array',items:{type:'string',enum:['calls','meetings','tasks','notes']},default:['calls','meetings','tasks','notes']},max_results:{type:'number'}}}},
 ];
 
+// ---------------------------------------------------------------------------
+// MCP Server Factory
+// ---------------------------------------------------------------------------
 function createMcpServer(sid) {
-  const srv = new Server(
-    { name: `suitecrm-${PREFIX}`, version: '1.0.0' },
-    { capabilities: { tools: {} } }
-  );
-
-  srv.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-
+  const srv = new Server({ name:`suitecrm-${PREFIX}`, version:'1.0.0' }, { capabilities:{ tools:{} } });
+  srv.setRequestHandler(ListToolsRequestSchema, async () => ({ tools:TOOLS }));
   srv.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const { name, arguments: args = {} } = req.params;
-    const reqId = randomUUID();
-    const cLog = (connLoggers.get(sid) || logger).child({ reqId });
+    const { name, arguments: args={} } = req.params;
+    const cLog = (connLoggers.get(sid)||logger).child({ reqId:randomUUID() });
     const callStart = Date.now();
-    const end = metricToolDuration.startTimer({ entity: PREFIX, tool: name });
-    cLog.info({ audit: true, tool: name, args: redactAuditArgs(args) }, 'tool_call');
+    const end = metricToolDuration.startTimer({ entity:PREFIX, tool:name });
+    cLog.info({ audit:true, tool:name, args:redactAuditArgs(args) },'tool_call');
     try {
       let result;
-      if (name === `${PREFIX}_search`) result = await searchRecords(sid, args);
-      else if (name === `${PREFIX}_search_text`) result = await searchText(sid, args);
-      else if (name === `${PREFIX}_get`) result = await getRecord(sid, args);
-      else if (name === `${PREFIX}_create`) result = await createRecord(sid, args);
-      else if (name === `${PREFIX}_update`) result = await updateRecord(sid, args);
-      else if (name === `${PREFIX}_delete`) result = await deleteRecord(sid, args);
-      else if (name === `${PREFIX}_count`) result = await countRecords(sid, args);
-      else if (name === `${PREFIX}_get_relationships`) result = await getRelationships(sid, args);
-      else if (name === `${PREFIX}_link_records`) result = await linkRecords(sid, args);
-      else if (name === `${PREFIX}_unlink_records`) result = await unlinkRecords(sid, args);
-      else if (name === `${PREFIX}_get_module_fields`) result = await getModuleFields(sid, args);
-      else if (name === `${PREFIX}_list_modules`) result = await listModules(sid);
-      else if (name === `${PREFIX}_server_info`) result = await serverInfo(sid);
-      else if (name === `${PREFIX}_get_many`) result = await getMany(sid, args);
-      else if (name === `${PREFIX}_bulk_upsert`) result = await bulkUpsert(sid, args);
-      else if (name === `${PREFIX}_get_dropdown_values`) result = await getDropdownValues(sid, args);
-      else if (name === `${PREFIX}_get_recent`) result = await getRecent(sid, args);
-      else if (name === `${PREFIX}_get_note_attachment`) result = await getNoteAttachment(sid, args);
-      else if (name === `${PREFIX}_set_note_attachment`) result = await setNoteAttachment(sid, args);
-      else if (name === `${PREFIX}_get_upcoming_activities`) result = await getUpcomingActivities(sid);
-      else if (name === `${PREFIX}_log_call`) result = await logCall(sid, args);
-      else if (name === `${PREFIX}_create_task`) result = await createTask(sid, args);
-      else if (name === `${PREFIX}_create_note`) result = await createLinkedNote(sid, args);
-      else if (name === `${PREFIX}_get_record_activities`) result = await getRecordActivities(sid, args);
-      else throw new McpError(ErrorCode.MethodNotFound, `Unknown: ${name}`);
 
-      end();
-      metricToolCalls.inc({ entity: PREFIX, tool: name, status: 'success' });
-      cLog.info({ audit: true, tool: name, status: 'success', durationMs: Date.now() - callStart }, 'tool_done');
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    } catch (err) {
-      end();
-      metricToolCalls.inc({ entity: PREFIX, tool: name, status: 'error' });
-      cLog.error({ audit: true, tool: name, status: 'error', err: err.message }, 'tool_error');
-      return {
-        content: [{ type: 'text', text: `Error: ${err.message}` }],
-        isError: true,
+      // ACL pre-check for write mutations — queries SuiteCRM DB before forwarding to CRM
+      const writeMutations = {
+        [`${PREFIX}_create`]:      ACTION_MAP.create,
+        [`${PREFIX}_update`]:      ACTION_MAP.update,
+        [`${PREFIX}_delete`]:      ACTION_MAP.delete,
+        [`${PREFIX}_bulk_upsert`]: ACTION_MAP.update,
       };
+      if (writeMutations[name] && args.module) {
+        const crmUsername = connCreds.get(sid)?.user;
+        if (crmUsername) {
+          const denied = await isAclDenied(crmUsername, args.module, writeMutations[name]);
+          if (denied) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              `Permission denied: "${crmUsername}" is not allowed to perform "${writeMutations[name]}" on module "${args.module}"`
+            );
+          }
+        }
+      }
+
+      if      (name===`${PREFIX}_search`)                result=await searchRecords(sid,args);
+      else if (name===`${PREFIX}_search_text`)           result=await searchText(sid,args);
+      else if (name===`${PREFIX}_get`)                   result=await getRecord(sid,args);
+      else if (name===`${PREFIX}_create`)                result=await createRecord(sid,args);
+      else if (name===`${PREFIX}_update`)                result=await updateRecord(sid,args);
+      else if (name===`${PREFIX}_delete`)                result=await deleteRecord(sid,args);
+      else if (name===`${PREFIX}_count`)                 result=await countRecords(sid,args);
+      else if (name===`${PREFIX}_get_relationships`)     result=await getRelationships(sid,args);
+      else if (name===`${PREFIX}_link_records`)          result=await linkRecords(sid,args);
+      else if (name===`${PREFIX}_unlink_records`)        result=await unlinkRecords(sid,args);
+      else if (name===`${PREFIX}_get_module_fields`)     result=await getModuleFields(sid,args);
+      else if (name===`${PREFIX}_list_modules`)          result=await listModules(sid);
+      else if (name===`${PREFIX}_server_info`)           result=await serverInfo(sid);
+      else if (name===`${PREFIX}_get_many`)              result=await getMany(sid,args);
+      else if (name===`${PREFIX}_bulk_upsert`)           result=await bulkUpsert(sid,args);
+      else if (name===`${PREFIX}_get_dropdown_values`)   result=await getDropdownValues(sid,args);
+      else if (name===`${PREFIX}_get_recent`)            result=await getRecent(sid,args);
+      else if (name===`${PREFIX}_get_note_attachment`)   result=await getNoteAttachment(sid,args);
+      else if (name===`${PREFIX}_set_note_attachment`)   result=await setNoteAttachment(sid,args);
+      else if (name===`${PREFIX}_get_upcoming_activities`) result=await getUpcomingActivities(sid);
+      else if (name===`${PREFIX}_log_call`)              result=await logCall(sid,args);
+      else if (name===`${PREFIX}_create_task`)           result=await createTask(sid,args);
+      else if (name===`${PREFIX}_create_note`)           result=await createLinkedNote(sid,args);
+      else if (name===`${PREFIX}_get_record_activities`) result=await getRecordActivities(sid,args);
+      else throw new McpError(ErrorCode.MethodNotFound,`Unknown tool: ${name}`);
+      end(); metricToolCalls.inc({entity:PREFIX,tool:name,status:'success'});
+      cLog.info({audit:true,tool:name,status:'success',durationMs:Date.now()-callStart},'tool_done');
+      return { content:[{type:'text',text:JSON.stringify(result,null,2)}] };
+    } catch(err) {
+      end(); metricToolCalls.inc({entity:PREFIX,tool:name,status:'error'});
+      cLog.error({audit:true,tool:name,status:'error',err:err.message},'tool_error');
+      return { content:[{type:'text',text:`Error: ${err.message}`}], isError:true };
     }
   });
-
   return srv;
 }
 
 // ---------------------------------------------------------------------------
-// Rate limiters
+// Rate Limiters (Redis-backed for shared global limits)
 // ---------------------------------------------------------------------------
-const sseRL = rateLimit({
-  windowMs: 60 * 1000, max: 60,
-  standardHeaders: true, legacyHeaders: false,
-  message: { error: 'Too many connection attempts - try again shortly' },
-  keyGenerator: (req) => {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-    if (token) {
-      const sess = loadSessions()[token];
-      if (sess?.sub) { req._rlSess = sess; return sess.sub; }
-    }
-    return ipKeyGenerator(req);
-  },
-  handler: (req, res, next, options) => {
-    const key = req.rateLimit?.key || req.ip;
-    metricRateLimited.inc({ entity: PREFIX, route: 'sse' });
-    logger.warn({ route: 'sse', sub: key, email: req._rlSess?.email }, 'rate_limit_hit');
-    res.status(options.statusCode).json(options.message);
-  },
-});
-
-const messagesRL = rateLimit({
-  windowMs: 60 * 1000, max: 100,
-  standardHeaders: true, legacyHeaders: false,
-  message: { error: 'Too many tool calls - slow down' },
-  keyGenerator: (req) => subBySid.get(req.query.sessionId) || ipKeyGenerator(req),
-  handler: (req, res, next, options) => {
-    const key = req.rateLimit?.key || req.ip;
-    metricRateLimited.inc({ entity: PREFIX, route: 'messages' });
-    logger.warn({ route: 'messages', sub: key }, 'rate_limit_hit');
-    res.status(options.statusCode).json(options.message);
-  },
-});
-
-const deepHealthRL = rateLimit({
-  windowMs: 60 * 1000, max: 10,
-  standardHeaders: true, legacyHeaders: false,
-  message: { error: 'Too many health check requests' },
-  handler: (req, res, next, options) => {
-    metricRateLimited.inc({ entity: PREFIX, route: 'health_deep' });
-    res.status(options.statusCode).json(options.message);
-  },
-});
+const redisStore = (pfx) => new RedisStore({ sendCommand: (...args) => redis.call(...args), prefix:pfx });
+const sseRL = rateLimit({ windowMs:60000, max:60, standardHeaders:true, legacyHeaders:false, message:{error:'Too many connection attempts - try again shortly'}, store:redisStore('rl:sse:'), keyGenerator:async(req)=>{ const token=req.headers.authorization?.startsWith('Bearer ')?req.headers.authorization.slice(7).trim():''; if(token){ const session=await getAuthSession(token); if(session?.sub) return session.sub; return token; } return ipKeyGenerator(req); }, handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'sse'}); logger.warn({route:'sse'},'rate_limit_hit'); res.status(opts.statusCode).json(opts.message); } });
+const messagesRL = rateLimit({ windowMs:60000, max:100, standardHeaders:true, legacyHeaders:false, message:{error:'Too many tool calls - slow down'}, store:redisStore('rl:msg:'), keyGenerator:(req)=>req.query.sessionId||ipKeyGenerator(req), handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'messages'}); logger.warn({route:'messages'},'rate_limit_hit'); res.status(opts.statusCode).json(opts.message); } });
+const deepHealthRL = rateLimit({ windowMs:60000, max:10, standardHeaders:true, legacyHeaders:false, message:{error:'Too many health check requests'}, handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'health_deep'}); res.status(opts.statusCode).json(opts.message); } });
 
 // ---------------------------------------------------------------------------
-// Express app
+// Express App & Routes
 // ---------------------------------------------------------------------------
 const app = express();
 app.set('trust proxy', 1);
-app.use((req, res, next) =>
-  req.path === '/messages' ? next() : express.json()(req, res, next)
-);
+app.use((req,res,next) => req.path==='/messages' ? next() : express.json()(req,res,next));
 
-app.get('/health', (_req, res) =>
-  res.json({
-    status: 'ok',
-    entity: CODE,
-    port: PORT,
-    active: transports.size,
-    circuit_breaker: circuitBreaker.state.toLowerCase(),
-  })
-);
+app.get('/health', (_req,res) => res.json({ status:'ok', entity:CODE, port:PORT, active:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), persistence:'redis' }));
 
-app.get('/health/deep', deepHealthRL, async (_req, res) => {
-  const start = Date.now();
-  const checks = {};
-  let status = 'healthy';
-
+app.get('/health/deep', deepHealthRL, async (_req,res) => {
+  const start=Date.now(); const checks={}; let status='healthy';
+  try { const p=new URL(ENDPOINT); checks.endpoint={status:'ok',url:`${p.protocol}//${p.host}`}; } catch { checks.endpoint={status:'error',message:'Invalid endpoint URL'}; status='unhealthy'; }
+  try { await redis.ping(); checks.redis={status:'ok'}; } catch(e) { checks.redis={status:'error',message:e.message}; status='degraded'; }
   try {
-    const parsed = new URL(ENDPOINT);
-    checks.endpoint = { status: 'ok', url: `${parsed.protocol}//${parsed.host}` };
-  } catch {
-    checks.endpoint = { status: 'error', message: 'Invalid endpoint URL' };
-    status = 'unhealthy';
-  }
+    const crmStart=Date.now();
+    const body='method=get_server_info&input_type=JSON&response_type=JSON&rest_data=%7B%7D';
+    const crmData = await new Promise((resolve,reject) => {
+      const p=new URL(V4_ENDPOINT); const lib=p.protocol==='https:'?https:http;
+      const r=lib.request({ hostname:p.hostname, port:p.port||(p.protocol==='https:'?443:80), path:p.pathname, method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','Content-Length':Buffer.byteLength(body)}, rejectUnauthorized:TLS_OK }, (res) => { let raw=''; res.on('data',c=>raw+=c); res.on('end',()=>{ try{resolve(JSON.parse(raw));}catch{resolve({});} }); });
+      r.setTimeout(5000,()=>r.destroy(new Error('timeout')));
+      r.on('error',reject); r.write(body); r.end();
+    });
+    checks.crm={ status:'ok', latency_ms:Date.now()-crmStart, ...(crmData.suite_version?{version:crmData.suite_version}:{}) };
+  } catch(e) { checks.crm={status:'error',message:e.message}; if(status==='healthy') status='degraded'; }
+  checks.sessions={status:'ok',active:transports.size};
+  res.status(status==='unhealthy'?503:200).json({ status, entity:CODE, port:PORT, uptime:Math.floor(process.uptime()), connections:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), api_strategy:API_STRATEGY==='8'?'Modern (v8 + v4 Fallback)':'Legacy (v4.1)', persistence:'redis', checks, duration_ms:Date.now()-start });
+});
 
-  if (status !== 'unhealthy') {
-    try {
-      const t = Date.now();
-      await rawCall('get_server_info', {});
-      checks.api = { status: 'ok', latency_ms: Date.now() - t };
-    } catch (err) {
-      checks.api = { status: 'error', message: err.message };
-      status = 'degraded';
+app.get('/test', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req,res) => {
+  try { const s=await crm.login(req.crmCreds.user,req.crmCreds.pass); res.json({success:true,crm_user:req.crmCreds.user,entity:CODE,v8_session:!!s.v8,v4_session:!!s.v4}); }
+  catch(err) { res.status(401).json({success:false,error:err.message}); }
+});
+
+app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req,res) => {
+  if (transports.size>=100) { metricConnectionRejected.inc({entity:PREFIX}); return res.status(503).json({error:'At capacity'}); }
+  const transport=new SSEServerTransport(`${CODE?`/${CODE}`:''}/messages`,res);
+  const sid=transport.sessionId;
+  const srv=createMcpServer(sid);
+
+  // Register transport, credentials, auth, and close handler SYNCHRONOUSLY before any awaits.
+  // The MCP client immediately POSTs initialize to /messages after the SSE stream opens.
+  // If transports.set is deferred until after Redis awaits (~20-50ms), those POSTs return
+  // 404 → client drops the SSE and reconnects → eviction death-spiral.
+  const prevSids = subSids.get(req.auth.sub) ?? new Set();
+  subSids.set(req.auth.sub, new Set([sid]));
+  connCreds.set(sid,req.crmCreds);
+  connAuth.set(sid,{sub:req.auth.sub,email:req.auth.email});
+  transports.set(sid,transport);
+  const connLogger=logger.child({sub:req.auth.sub,email:req.auth.email,sessionId:sid});
+  connLoggers.set(sid,connLogger);
+
+  // Close handler must also be registered synchronously so it fires even if we are
+  // evicted by a concurrent reconnect during the async eviction phase below.
+  res.on('close',async()=>{
+    connLogger.info('sse_disconnected');
+    transports.delete(sid); connCreds.delete(sid); connLoggers.delete(sid); connAuth.delete(sid);
+    const sids=subSids.get(req.auth.sub); if(sids){sids.delete(sid); if(sids.size===0)subSids.delete(req.auth.sub);}
+    try { await delSubSidMapping(req.auth.sub,sid); } catch(err) { connLogger.error({err:err.message},'sse_close_mapping_delete_failed'); }
+    metricActiveConnections.set({entity:PREFIX},transports.size);
+  });
+
+  // Evict prior connections (async Redis ops happen here)
+  // Post-restart recovery: subSids was empty, but Redis may still hold the last known sid.
+  const lastRedisSid = await getSidBySub(req.auth.sub);
+  if (lastRedisSid && !prevSids.has(lastRedisSid)) prevSids.add(lastRedisSid);
+
+  const staleRedisDeletes = [];
+  for (const prevSid of prevSids) {
+    staleRedisDeletes.push(redis.del(`crm:sid2sub:${prevSid}`).catch(() => {}));
+    if (transports.has(prevSid)) {
+      connLoggers.get(prevSid)?.info('sse_evicted_by_reconnect');
+      transports.get(prevSid).close?.();
+      transports.delete(prevSid); connCreds.delete(prevSid); connLoggers.delete(prevSid); connAuth.delete(prevSid);
     }
   }
+  await Promise.all(staleRedisDeletes);
 
-  checks.sessions = { status: 'ok', active: transports.size };
-
-  res.status(status === 'unhealthy' ? 503 : 200).json({
-    status,
-    entity: CODE,
-    port: PORT,
-    uptime: Math.floor(process.uptime()),
-    connections: transports.size,
-    circuit_breaker: circuitBreaker.state.toLowerCase(),
-    checks,
-    duration_ms: Date.now() - start,
-  });
-});
-
-app.get('/test', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req, res) => {
-  try {
-    await crmLogin(req.crmCreds.user, req.crmCreds.pass);
-    res.json({ success: true, crm_user: req.crmCreds.user, entity: CODE });
-  } catch (err) {
-    res.status(401).json({ success: false, error: err.message });
-  }
-});
-
-app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, async (req, res) => {
-  if (transports.size >= 100) {
-    metricConnectionRejected.inc({ entity: PREFIX });
-    return res.status(503).json({ error: 'Too many connections' });
+  // If a concurrent reconnect evicted us during the async phase above, abort — the newer
+  // connection already owns this user's slot. Writing sub2sid now would overwrite theirs.
+  if (!transports.has(sid)) {
+    connLogger.info('sse_aborted_evicted_during_setup');
+    return;
   }
 
-  const transport = new SSEServerTransport(`${CODE ? `/${CODE}` : ''}/messages`, res);
-  const sid = transport.sessionId;
-  const srv = createMcpServer(sid);
+  await setSubSidMapping(req.auth.sub, sid);
 
-  // Evict any previous stale connection for this user
-  const prevSid = subToSid.get(req.auth.sub);
-  if (prevSid && transports.has(prevSid)) {
-    connLoggers.get(prevSid)?.info('sse_evicted_by_reconnect');
-    transports.get(prevSid).close?.();
-    transports.delete(prevSid);
-    connCreds.delete(prevSid);
-    subBySid.delete(prevSid);
-    connLoggers.delete(prevSid);
-  }
-  subToSid.set(req.auth.sub, sid);
+  // Post-write cleanup: remove zombie sid2sub entries for this user from previous process runs.
+  (async () => {
+    try {
+      const allKeys = []; let c = '0';
+      do { const [next, batch] = await redis.scan(c, 'MATCH', 'crm:sid2sub:*', 'COUNT', 100); allKeys.push(...batch); c = next; } while (c !== '0');
+      if (!allKeys.length) return;
+      const vals = await redis.mget(...allKeys);
+      const orphans = allKeys.filter((k, i) => k !== `crm:sid2sub:${sid}` && vals[i] === req.auth.sub);
+      if (orphans.length) { await redis.del(...orphans); logger.debug({ count: orphans.length, sub: req.auth.sub }, 'post_connect_zombie_cleanup'); }
+    } catch { /* non-fatal */ }
+  })();
 
-  connCreds.set(sid, req.crmCreds);
-  transports.set(sid, transport);
-  subBySid.set(sid, req.auth.sub);
-
-  const connLogger = logger.child({ sub: req.auth.sub, email: req.auth.email, sessionId: sid });
-  connLoggers.set(sid, connLogger);
   connLogger.info('sse_connected');
-
-  metricActiveConnections.set({ entity: PREFIX }, transports.size);
-  metricConnections.inc({ entity: PREFIX });
-
-  ensureCrmSession(sid).catch(err => {
-    connLogger.error({ err: err.message }, 'crm_login_failed');
-  });
-
-  res.on('close', () => {
-    connLogger.info('sse_disconnected');
-    transports.delete(sid);
-    connCreds.delete(sid);
-    subBySid.delete(sid);
-    connLoggers.delete(sid);
-    if (subToSid.get(req.auth.sub) === sid) subToSid.delete(req.auth.sub);
-    metricActiveConnections.set({ entity: PREFIX }, transports.size);
-  });
-
+  metricActiveConnections.set({entity:PREFIX},transports.size);
+  metricConnections.inc({entity:PREFIX});
+  ensureCrmSession(sid).catch(err=>connLogger.error({err:err.message},'crm_login_failed'));
   await srv.connect(transport);
 });
 
-app.post('/messages', messagesRL, async (req, res) => {
-  const sid = req.query.sessionId;
-  const t = transports.get(sid);
-  if (!t) return res.status(404).json({ error: 'Session not found' });
-
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  if (!token) return res.status(401).json({ error: 'Bearer token required' });
-  const session = loadSessions()[token];
-  const expectedSub = subBySid.get(sid);
-  if (!session || !expectedSub || session.sub !== expectedSub) {
-    return res.status(403).json({ error: 'Token does not match session owner' });
+app.post('/messages', messagesRL, async (req,res) => {
+  const sid=req.query.sessionId;
+  const t=transports.get(sid);
+  if (!t) return res.status(404).json({error:'Session not found'});
+  const token=req.headers.authorization?.startsWith('Bearer ')?req.headers.authorization.slice(7).trim():'';
+  if (!token) return res.status(401).json({error:'Bearer token required'});
+  const session=await getAuthSession(token);
+  // connAuth is authoritative for live connections; fall back to Redis only if not found in-process
+  const expectedSub = connAuth.get(sid)?.sub ?? await getSubBySid(sid);
+  if (!session||!expectedSub||session.sub!==expectedSub) return res.status(403).json({error:'Token does not match session owner'});
+  if (session.expiresAt<Date.now()) return res.status(401).json({error:'Session expired'});
+  // Re-check group membership on every tool call using the groups cached in the session.
+  // Groups reflect state at login time; for immediate revocation delete the session via POST /auth/logout.
+  if (REQUIRED_GROUP) {
+    const groups = session.groups || [];
+    if (!groups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase())) {
+      metricAuthFailures.inc({ entity: PREFIX });
+      logger.warn({ sub: session.sub, reason: 'group_check_failed_on_message' }, 'auth_failed');
+      return res.status(403).json({ error: `Not in group "${REQUIRED_GROUP}"` });
+    }
   }
-  if (session.expiresAt < Date.now()) {
-    return res.status(401).json({ error: 'Session expired' });
-  }
-
-  await t.handlePostMessage(req, res);
+  await t.handlePostMessage(req,res);
 });
+
+// Global error handler (catches Redis errors from async middlewares)
+app.use((err,req,res,_next)=>{ logger.error({err:err.message},'middleware_error'); res.status(503).json({error:'Service temporarily unavailable'}); });
 
 function gracefulShutdown(signal) {
-  logger.info({ connections: transports.size, signal }, 'shutdown');
-  for (const [, t] of transports) t.close?.();
-  process.exit(0);
+  logger.info({connections:transports.size,signal},'shutdown');
+  for (const [,t] of transports) t.close?.();
+  const timeout = setTimeout(() => { logger.error('shutdown_timeout'); process.exit(1); }, 3000);
+  redis.quit().finally(() => { clearTimeout(timeout); process.exit(0); });
 }
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM',()=>gracefulShutdown('SIGTERM'));
+process.on('SIGINT', ()=>gracefulShutdown('SIGINT'));
 
-const BIND_HOST = (process.env.BIND_HOST || '127.0.0.1').trim();
-app.listen(PORT, BIND_HOST, () => {
-  logger.info({ host: BIND_HOST, port: PORT }, 'server_listening');
-});
+const BIND_HOST=(process.env.BIND_HOST||'127.0.0.1').trim();
+// Run before accepting connections so reconnect burst starts with a clean slate
+cleanupOrphanSidMappings().then(() =>
+  app.listen(PORT, BIND_HOST, () => logger.info({ host: BIND_HOST, port: PORT, persistence: 'redis' }, 'server_listening'))
+);
 
-// ---------------------------------------------------------------------------
-// Metrics server (separate port, localhost only)
-// ---------------------------------------------------------------------------
-const metricsServer = http.createServer(async (req, res) => {
-  if (req.url === '/metrics' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': metricsRegistry.contentType });
-    res.end(await metricsRegistry.metrics());
-  } else {
-    res.writeHead(404); res.end();
-  }
+const metricsServer=http.createServer(async(req,res)=>{
+  if (req.url==='/metrics'&&req.method==='GET') { res.writeHead(200,{'Content-Type':metricsRegistry.contentType}); res.end(await metricsRegistry.metrics()); }
+  else { res.writeHead(404); res.end(); }
 });
-metricsServer.listen(METRICS_PORT, METRICS_BIND, () => {
-  logger.info({ host: METRICS_BIND, port: METRICS_PORT }, 'metrics_listening');
-});
+metricsServer.listen(METRICS_PORT,METRICS_BIND,()=>logger.info({host:METRICS_BIND,port:METRICS_PORT},'metrics_listening'));

@@ -4,7 +4,7 @@ services:
   # Handles OAuth2/OIDC login and issues session tokens.
   # One instance per deployment (shared across all entities).
   suitecrm-mcp-auth:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.4.0
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v5.0.0
     command: node auth.mjs
     working_dir: /app
     ports:
@@ -13,7 +13,7 @@ services:
       - suitecrm-state:/etc/suitecrm-mcp
       - ./entities.json:/etc/suitecrm-mcp/entities.json:ro   # copy from entities.example.json and edit
     environment:
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD:-mcp_secure_redis_pass}@redis:6379
       AUTH0_DOMAIN: your-tenant.auth0.com
       AUTH0_CLIENT_ID: your-client-id
       AUTH0_CLIENT_SECRET: your-client-secret
@@ -39,7 +39,7 @@ services:
   # exposing this on a public VPS - the auth service alone does not protect
   # the SSE port from unauthenticated connection attempts.
   suitecrm-mcp:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v4.4.0
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v5.0.0
     ports:
       - "127.0.0.1:3101:3101"   # change to "3101:3101" only behind a reverse proxy
     volumes:
@@ -57,7 +57,7 @@ services:
       # NODE_TLS_REJECT_UNAUTHORIZED: "0"  # only for self-signed certs
       # CIRCUIT_BREAKER_THRESHOLD: "5"     # failures before circuit opens
       # CIRCUIT_BREAKER_RESET_MS: "60000"  # recovery window ms
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD:-mcp_secure_redis_pass}@redis:6379
     depends_on:
       redis:
         condition: service_started
@@ -71,6 +71,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-mcp_secure_redis_pass} --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
 
   # ── Prometheus ───────────────────────────────────────────────────────────────
   # Optional monitoring stack. Remove this and grafana if you don't need metrics.
@@ -142,6 +145,7 @@ services:
 
 volumes:
   suitecrm-state:     # shared runtime config (entities.json etc) - sessions now in Redis
+  redis_data:         # persistent cache for sessions and user profiles
   prometheus_data:
   grafana_data:
   loki_data:

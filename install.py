@@ -464,6 +464,10 @@ def write_entities_json(entities):
 
 def install_auth_service(auth_cfg):
     """Write auth.env and a systemd unit for suitecrm-mcp-auth (auth.mjs)."""
+    pass_file = Path(ENV_DIR) / "redis_pass"
+    redis_pass = pass_file.read_text().strip() if pass_file.exists() else ""
+    default_redis = f"redis://:{redis_pass}@127.0.0.1:6379" if redis_pass else "redis://127.0.0.1:6379"
+
     lines = [
         "# SuiteCRM MCP Auth Service",
         f"AUTH0_DOMAIN={auth_cfg['AUTH0_DOMAIN']}",
@@ -477,7 +481,7 @@ def install_auth_service(auth_cfg):
         "BIND_HOST=127.0.0.1",
         "METRICS_PORT=9091",
         "METRICS_BIND=127.0.0.1",
-        f"REDIS_URL={auth_cfg.get('REDIS_URL', 'redis://127.0.0.1:6379')}",
+        f"REDIS_URL={auth_cfg.get('REDIS_URL', default_redis)}",
         "",
     ]
     write_file(AUTH_ENV_FILE, "\n".join(lines), mode="600")
@@ -667,6 +671,42 @@ def install_certbot():
     else:
         ok("certbot: present")
 
+def install_redis():
+    if not shutil.which("redis-server"):
+        info("Installing Redis ...")
+        run(["apt-get", "update", "-qq"])
+        run(["apt-get", "install", "-y", "redis-server"])
+        ok("Redis installed")
+    else:
+        ok("Redis: present")
+
+    # Secure Redis and configure persistence
+    redis_conf = "/etc/redis/redis.conf"
+    if Path(redis_conf).exists():
+        content = Path(redis_conf).read_text()
+        changed = False
+        pass_file = Path(ENV_DIR) / "redis_pass"
+        if pass_file.exists():
+            redis_pass = pass_file.read_text().strip()
+        else:
+            redis_pass = secrets.token_urlsafe(16)
+            os.makedirs(ENV_DIR, exist_ok=True)
+            pass_file.write_text(redis_pass)
+            run(["chmod", "600", str(pass_file)])
+            
+        if "requirepass " not in content:
+            content += f"\nrequirepass {redis_pass}\n"
+            changed = True
+            
+        if "maxmemory-policy allkeys-lru" not in content:
+            content += "\nmaxmemory 256mb\nmaxmemory-policy allkeys-lru\n"
+            changed = True
+            
+        if changed:
+            Path(redis_conf).write_text(content)
+            run(["systemctl", "restart", "redis-server"])
+            ok("Redis configured with persistence, maxmemory, and authentication")
+
 def install_server():
     info(f"Installing server to {SERVER_DIR} ...")
     os.makedirs(SERVER_DIR, exist_ok=True)
@@ -679,6 +719,25 @@ def install_server():
     shutil.copy(pkg, f"{SERVER_DIR}/package.json")
     if lock.exists():
         shutil.copy(lock, f"{SERVER_DIR}/package-lock.json")
+    # Copy all additional modules required by index.mjs at runtime
+    for extra in ("redis.mjs", "acl-check.mjs", "auth.mjs"):
+        extra_src = script_dir() / "server" / extra
+        if extra_src.exists():
+            shutil.copy(extra_src, f"{SERVER_DIR}/{extra}")
+    # Copy bridge modules (hybrid, legacy, graphql)
+    bridges_src = script_dir() / "server" / "bridges"
+    bridges_dst = Path(SERVER_DIR) / "bridges"
+    if bridges_src.is_dir():
+        if bridges_dst.exists():
+            shutil.rmtree(bridges_dst)
+        shutil.copytree(bridges_src, bridges_dst)
+    # Copy admin scripts (add_user, migrate_profiles)
+    scripts_src = script_dir() / "server" / "scripts"
+    scripts_dst = Path(SERVER_DIR) / "scripts"
+    if scripts_src.is_dir():
+        if scripts_dst.exists():
+            shutil.rmtree(scripts_dst)
+        shutil.copytree(scripts_src, scripts_dst)
     run(["npm", "ci", "--omit=dev", "--silent"], cwd=SERVER_DIR)
     ok("Server installed")
 
@@ -693,6 +752,10 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
     is_multi=False: writes /etc/suitecrm-mcp/gateway.env, service suitecrm-mcp
     oauth_cfg: dict of OAuth env vars written into the env file.
     """
+    pass_file = Path(ENV_DIR) / "redis_pass"
+    redis_pass = pass_file.read_text().strip() if pass_file.exists() else ""
+    redis_url = f"redis://:{redis_pass}@127.0.0.1:6379" if redis_pass else "redis://127.0.0.1:6379"
+
     label    = data.get("label", code)
     endpoint = data["endpoint"]
     port     = data["port"]
@@ -716,7 +779,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             "BIND_HOST=127.0.0.1",
             f"METRICS_PORT={metrics_port}",
             "METRICS_BIND=127.0.0.1",
-            "REDIS_URL=redis://127.0.0.1:6379",
+            f"REDIS_URL={redis_url}",
             "NODE_NO_WARNINGS=1",
         ]
         if data.get("group"):
@@ -733,7 +796,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             "BIND_HOST=127.0.0.1",
             f"METRICS_PORT={metrics_port}",
             "METRICS_BIND=127.0.0.1",
-            "REDIS_URL=redis://127.0.0.1:6379",
+            f"REDIS_URL={redis_url}",
             "NODE_NO_WARNINGS=1",
         ]
         if data.get("group"):
@@ -1338,6 +1401,9 @@ def main():
 
     # Node.js
     info("Checking Node.js ..."); install_node(); print()
+
+    # Redis
+    info("Checking Redis ..."); install_redis(); print()
 
     # nginx (multi always; single only when --domain)
     if is_multi or args.domain:
