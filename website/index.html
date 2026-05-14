@@ -2151,6 +2151,49 @@
       </div>
     </section>
 
+    <!-- Security Model -->
+<section id="security-model">
+      <div class="wrap">
+        <div class="section-label fade-up">Security Model</div>
+        <h2 class="section-title fade-up">Hardened by design.</h2>
+        <p class="section-sub fade-up">Every layer of the auth stack is explicit. Nothing is trusted by default.</p>
+        <div class="features-grid">
+          <div class="feature-card fade-up delay-1">
+            <h3>Credentials Stay Server-Side</h3>
+            <p>CRM username and password are stored in the gateway profile store. Clients only hold a personal API key.
+              No CRM secrets on user machines.</p>
+          </div>
+          <div class="feature-card fade-up delay-2">
+            <h3>OAuth / OIDC Login</h3>
+            <p>Users authenticate through your identity provider (Auth0, Azure AD, or any OIDC provider). The gateway
+              issues a revocable personal API key on successful login.</p>
+          </div>
+          <div class="feature-card fade-up delay-3">
+            <h3>API Keys Expire</h3>
+            <p>Keys expire after 30 days by default (configurable). Admins can revoke any key immediately. Keys are
+              scoped per user and per entity.</p>
+          </div>
+          <div class="feature-card fade-up delay-4">
+            <h3>Redacted Audit Logs</h3>
+            <p>All tool calls are logged with user sub, entity, and tool name. Sensitive fields - tokens, passwords,
+              search strings - are redacted before writing.</p>
+          </div>
+          <div class="feature-card fade-up delay-5">
+            <h3>Per-Entity Access Control</h3>
+            <p>Group membership controls which CRM entities a user can access. No group, no connection - even with a
+              valid API key.</p>
+          </div>
+          <div class="feature-card fade-up delay-6">
+            <h3>Redis Runtime Block</h3>
+            <p>Gateway sessions, user profiles, CRM sessions, bridge handoffs, and rate limits live in Redis so restarts
+              do not wipe active support context.</p>
+          </div>
+        </div>
+        <p class="obs-footer fade-up" style="margin-top:32px;">Full observability via Prometheus metrics, Grafana
+          dashboards, Loki log aggregation, and <code>mcp-admin health</code>.</p>
+      </div>
+    </section>
+
     <!-- Why Gateway -->
 <section id="why-not-api">
       <div class="wrap">
@@ -2211,49 +2254,6 @@
             </tbody>
           </table>
         </div>
-      </div>
-    </section>
-
-    <!-- Security Model -->
-<section id="security-model">
-      <div class="wrap">
-        <div class="section-label fade-up">Security Model</div>
-        <h2 class="section-title fade-up">Hardened by design.</h2>
-        <p class="section-sub fade-up">Every layer of the auth stack is explicit. Nothing is trusted by default.</p>
-        <div class="features-grid">
-          <div class="feature-card fade-up delay-1">
-            <h3>Credentials Stay Server-Side</h3>
-            <p>CRM username and password are stored in the gateway profile store. Clients only hold a personal API key.
-              No CRM secrets on user machines.</p>
-          </div>
-          <div class="feature-card fade-up delay-2">
-            <h3>OAuth / OIDC Login</h3>
-            <p>Users authenticate through your identity provider (Auth0, Azure AD, or any OIDC provider). The gateway
-              issues a revocable personal API key on successful login.</p>
-          </div>
-          <div class="feature-card fade-up delay-3">
-            <h3>API Keys Expire</h3>
-            <p>Keys expire after 30 days by default (configurable). Admins can revoke any key immediately. Keys are
-              scoped per user and per entity.</p>
-          </div>
-          <div class="feature-card fade-up delay-4">
-            <h3>Redacted Audit Logs</h3>
-            <p>All tool calls are logged with user sub, entity, and tool name. Sensitive fields - tokens, passwords,
-              search strings - are redacted before writing.</p>
-          </div>
-          <div class="feature-card fade-up delay-5">
-            <h3>Per-Entity Access Control</h3>
-            <p>Group membership controls which CRM entities a user can access. No group, no connection - even with a
-              valid API key.</p>
-          </div>
-          <div class="feature-card fade-up delay-6">
-            <h3>Redis Runtime Block</h3>
-            <p>Gateway sessions, user profiles, CRM sessions, bridge handoffs, and rate limits live in Redis so restarts
-              do not wipe active support context.</p>
-          </div>
-        </div>
-        <p class="obs-footer fade-up" style="margin-top:32px;">Full observability via Prometheus metrics, Grafana
-          dashboards, Loki log aggregation, and <code>mcp-admin health</code>.</p>
       </div>
     </section>
 
