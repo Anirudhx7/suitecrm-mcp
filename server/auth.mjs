@@ -3,7 +3,7 @@
  * Port 3100 - handles OAuth2 login + token polling
  */
 import express from 'express';
-import { readFileSync, writeFileSync, renameSync } from 'fs';
+import { readFileSync } from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomBytes } from 'crypto';
@@ -11,7 +11,7 @@ import pino from 'pino';
 import { Registry, Counter, Gauge, collectDefaultMetrics } from 'prom-client';
 import http from 'http';
 import rateLimit from 'express-rate-limit';
-import { createClient } from 'redis';
+import { redis } from './redis.mjs';
 
 function escHtml(s) {
   return String(s)
@@ -20,12 +20,6 @@ function escHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;');
-}
-
-function atomicWrite(path, data) {
-  const tmp = path + '.tmp.' + process.pid;
-  writeFileSync(tmp, JSON.stringify(data, null, 2));
-  renameSync(tmp, path);
 }
 
 function parseCookies(req) {
@@ -55,25 +49,16 @@ const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
 const AUTH0_AUDIENCE      = process.env.AUTH0_AUDIENCE;
 const GATEWAY_URL         = process.env.GATEWAY_PUBLIC_URL;
 const CALLBACK_URL        = `${GATEWAY_URL}/auth/callback`;
-const PROFILES_FILE       = '/etc/suitecrm-mcp/user-profiles.json';
-const SESSIONS_FILE       = '/etc/suitecrm-mcp/sessions.json';
-const BRIDGE_SESSIONS_FILE = '/etc/suitecrm-mcp/bridge-sessions.json';
-const CRM_HOSTS_FILE      = '/etc/suitecrm-mcp/crm-hosts.json';
+const CRM_HOSTS_FILE      = process.env.CRM_HOSTS_FILE || '/etc/suitecrm-mcp/crm-hosts.json';
 const SESSION_TTL_MS      = parseInt(process.env.SESSION_TTL_DAYS || '30') * 24 * 60 * 60 * 1000;
 const SESSION_TTL_DAYS    = parseInt(process.env.SESSION_TTL_DAYS || '30');
 const BRIDGE_SESSION_TTL_MS = 15 * 60 * 1000;
-const NS            = AUTH0_AUDIENCE + '/';
-const GROUPS_CLAIM  = process.env.OAUTH_GROUPS_CLAIM || (NS + 'groups');
-const REDIS_URL     = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const NS = AUTH0_AUDIENCE + '/';
 
 const logger = pino({
   base: { service: 'suitecrm-mcp-auth' },
   timestamp: pino.stdTimeFunctions.isoTime,
 });
-
-const redis = createClient({ url: REDIS_URL });
-redis.on('error', err => logger.error({ err: err.message }, 'redis_error'));
-await redis.connect();
 
 const metricsRegistry = new Registry();
 collectDefaultMetrics({ register: metricsRegistry });
@@ -94,12 +79,11 @@ const metricBridgeSessions = new Counter({
 
 new Gauge({
   name: 'suitecrm_auth_sessions_active',
-  help: 'Non-expired gateway sessions currently stored',
+  help: 'Non-expired gateway sessions currently stored in Redis',
   registers: [metricsRegistry],
   async collect() {
     this.reset();
-    const keys = await redis.keys('mcp:session:*');
-    this.set(keys.length);
+    try { this.set(await countActiveSessions()); } catch { this.set(0); }
   },
 });
 
@@ -110,62 +94,72 @@ const API_KEY_RE = /^[0-9a-f]{64}$/;
 // Safely extract a scalar string from a query param (prevents array injection)
 function qs(v) { return typeof v === 'string' ? v : ''; }
 
-async function getProfile(sub) {
-  try {
-    const data = await redis.get(`mcp:profile:${sub}`);
-    return data ? JSON.parse(data) : null;
-  } catch (err) {
-    logger.error({ sub, err: err.message }, 'redis_get_profile_failed');
-    return null;
+// ---------------------------------------------------------------------------
+// Redis session helpers — replaces sessions.json read/write
+// ---------------------------------------------------------------------------
+const SK = (k) => `auth:session:${k}`;
+
+async function getSession(apiKey) {
+  const raw = await redis.get(SK(apiKey));
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function setSession(apiKey, session) {
+  const ttlSec = Math.max(1, Math.ceil((session.expiresAt - Date.now()) / 1000));
+  await redis.set(SK(apiKey), JSON.stringify(session), 'EX', ttlSec);
+}
+
+async function deleteSession(apiKey) {
+  await redis.del(SK(apiKey));
+}
+
+async function getAllSessionsForUser(sub) {
+  const keys = await scanSessionKeys();
+  if (!keys.length) return [];
+  const values = await redis.mget(...keys);
+  const results = [];
+  for (let i = 0; i < keys.length; i++) {
+    if (!values[i]) continue;
+    const s = JSON.parse(values[i]);
+    if (s.sub === sub) results.push([keys[i].slice('auth:session:'.length), s]);
+  }
+  return results;
+}
+
+async function countActiveSessions() {
+  const keys = await scanSessionKeys();
+  return keys.length;
+}
+
+async function scanSessionKeys() {
+  const keys = [];
+  let cursor = '0';
+  do {
+    const [next, batch] = await redis.scan(cursor, 'MATCH', 'auth:session:*', 'COUNT', 100);
+    keys.push(...batch);
+    cursor = next;
+  } while (cursor !== '0');
+  return keys;
+}
+
+const BS = (nonce) => `auth:bridge:${nonce}`;
+const getBridgeSession    = (nonce)       => redis.get(BS(nonce)).then(r => r ? JSON.parse(r) : null);
+const setBridgeSession    = (nonce, data) => redis.set(BS(nonce), JSON.stringify(data), 'EX', Math.ceil(BRIDGE_SESSION_TTL_MS / 1000));
+const updateBridgeSession = async (nonce, patch) => {
+  const s = await getBridgeSession(nonce);
+  if (!s) return false;
+  const ttl = await redis.ttl(BS(nonce));
+  await redis.set(BS(nonce), JSON.stringify({ ...s, ...patch }), 'EX', ttl > 0 ? ttl : Math.ceil(BRIDGE_SESSION_TTL_MS / 1000));
+  return true;
+};
+const delBridgeSession    = (nonce)       => redis.del(BS(nonce));
+
+function loadEntities() {
+  try { return JSON.parse(readFileSync('/etc/suitecrm-mcp/entities.json', 'utf8')); } catch (e) {
+    logger.warn({ err: e.message }, 'entities_load_failed');
+    return {};
   }
 }
-
-async function saveProfile(sub, profile) {
-  try {
-    await redis.set(`mcp:profile:${sub}`, JSON.stringify(profile));
-  } catch (err) {
-    logger.error({ sub, err: err.message }, 'redis_save_profile_failed');
-  }
-}
-
-async function getSession(token) {
-  try {
-    const data = await redis.get(`mcp:session:${token}`);
-    return data ? JSON.parse(data) : null;
-  } catch (err) {
-    logger.error({ token: token.slice(0, 8), err: err.message }, 'redis_get_session_failed');
-    return null;
-  }
-}
-
-async function saveSession(token, session, ttlSeconds) {
-  try {
-    await redis.set(`mcp:session:${token}`, JSON.stringify(session), {
-      EX: ttlSeconds || (30 * 24 * 60 * 60)
-    });
-  } catch (err) {
-    logger.error({ token: token.slice(0, 8), err: err.message }, 'redis_save_session_failed');
-  }
-}
-
-async function listUserSessions(sub) {
-  const keys = await redis.keys('mcp:session:*');
-  const userSessions = [];
-  for (const key of keys) {
-    const s = await redis.get(key);
-    if (!s) continue;
-    const session = JSON.parse(s);
-    if (session.sub === sub) {
-      userSessions.push({ token: key.split(':').pop(), ...session });
-    }
-  }
-  return userSessions;
-}
-
-async function deleteSession(token) {
-  await redis.del(`mcp:session:${token}`);
-}
-
 async function exchangeCode(code) {
   const body = new URLSearchParams({
     grant_type:    'authorization_code',
@@ -179,7 +173,11 @@ async function exchangeCode(code) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body:    body.toString(),
   });
-  if (!res.ok) throw new Error(`Token exchange failed: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    logger.error({ status: res.status, body: body.slice(0, 200) }, 'token_exchange_failed');
+    throw new Error('Authentication failed — please try again');
+  }
   return res.json();
 }
 
@@ -194,7 +192,6 @@ async function verifyAndDecodeAccessToken(accessToken) {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!uiRes.ok) throw new Error(`Access token rejected by Auth0: ${uiRes.status}`);
-  const userinfo = await uiRes.json();
 
   const payload = decodeJwtPayload(accessToken);
   const now = Math.floor(Date.now() / 1000);
@@ -202,33 +199,33 @@ async function verifyAndDecodeAccessToken(accessToken) {
   if (payload.iss && payload.iss !== `https://${AUTH0_DOMAIN}/`) {
     throw new Error(`Issuer mismatch: got ${payload.iss}`);
   }
-  // Merge userinfo so profile claims (preferred_username, email) are available even when
-  // the access token omits them. JWT payload wins on conflict.
-  return { ...userinfo, ...payload };
+  return payload;
 }
 
-async function provisionCrmAccounts(sub, email, crmUsername, userGroups) {
+async function provisionCrmAccounts(sub, email, sam, userGroups) {
   let crmHosts = {};
-  try { crmHosts = JSON.parse(readFileSync(CRM_HOSTS_FILE, 'utf8')); } catch {}
+  try { crmHosts = JSON.parse(readFileSync(CRM_HOSTS_FILE, 'utf8')); } catch (e) { logger.warn({ err: e.message }, 'crm_hosts_load_failed'); }
 
-  let profile = await getProfile(sub);
-  if (!profile) profile = { email, name: email, entities: {} };
+  // Redis is the single source of truth for profiles
+  const existing = await redis.hget('crm:profiles', sub).catch(() => null);
+  const profile = existing ? JSON.parse(existing) : { email, name: email, entities: {} };
   profile.email = email || profile.email;
   profile.name  = email || profile.name;
+  if (!profile.entities) profile.entities = {};
 
-  const crmUser = crmUsername;
+  const crmUser = sam.includes('@') ? sam.split('@')[0].toLowerCase() : sam.toLowerCase();
 
-  for (const [code, data] of Object.entries(loadEntities())) {
-    const requiredGroup = data.group;
-    const hasGroup = userGroups.some(g => g.toLowerCase() === requiredGroup.toLowerCase());
-    if (!hasGroup) continue;
-    if (profile.entities[code]?.user) continue;
+  const toProvision = Object.entries(loadEntities()).filter(([code, data]) => {
+    const hasGroup = userGroups.some(g => g.toLowerCase() === (data.group || '').toLowerCase());
+    return hasGroup && !profile.entities[code]?.user;
+  });
 
-    const crmPass = randomBytes(16).toString('hex');
-    const host    = crmHosts[code];
-
-    if (host?.ssh_host && host?.ssh_user && host?.command) {
-      try {
+  if (toProvision.length > 0) {
+    // Run all SSH provisioning calls in parallel — avoids serial 10s-per-entity stacking
+    const results = await Promise.allSettled(toProvision.map(async ([code]) => {
+      const crmPass = randomBytes(16).toString('hex');
+      const host    = crmHosts[code];
+      if (host?.ssh_host && host?.ssh_user && host?.command) {
         await execFileAsync('ssh', [
           '-i',  host.ssh_key || '/etc/suitecrm-mcp/ssh-key.pem',
           '-o',  'StrictHostKeyChecking=accept-new',
@@ -238,19 +235,26 @@ async function provisionCrmAccounts(sub, email, crmUsername, userGroups) {
           host.command,
           crmUser,
           crmPass,
-        ]);
+        ], { timeout: 20000 }); // hard cap — kills SSH if remote command hangs past 20s
         logger.info({ crmUser, entity: code }, 'crm_user_provisioned');
-      } catch (err) {
-        const msg = (err.stderr || err.message || '').trim().slice(0, 200);
+      }
+      return { code, crmPass };
+    }));
+
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const [code] = toProvision[i];
+      if (r.status === 'fulfilled') {
+        profile.entities[code] = { user: crmUser, pass: r.value.crmPass };
+      } else {
+        const msg = (r.reason?.stderr || r.reason?.message || '').trim().slice(0, 200);
         logger.error({ entity: code, err: msg }, 'crm_provision_failed');
-        continue;
       }
     }
-
-    profile.entities[code] = { user: crmUser, pass: crmPass };
   }
 
-  await saveProfile(sub, profile);
+  await redis.hset('crm:profiles', sub, JSON.stringify(profile));
+  logger.info({ sub: sub.slice(-8), entities: Object.keys(profile.entities) }, 'profile_saved_to_redis');
   return profile;
 }
 
@@ -325,42 +329,32 @@ app.get('/auth/callback', async (req, res) => {
     const payload = await verifyAndDecodeAccessToken(tokens.access_token);
 
     const sub        = payload.sub;
-    const sam           = payload[`${NS}samaccountname`] || '';
-    const preferredUser = payload.preferred_username || '';
-    const email         = sam.includes('@') ? sam : (payload.email || preferredUser || '');
-    const userGroups    = payload[GROUPS_CLAIM] || [];
-    const linuxUser     = email.split('@')[0].toLowerCase();
-
-    // Derive CRM username: samaccountname → preferred_username → email; reject if none resolvable
-    const rawIdent    = sam || preferredUser || payload.email || '';
-    const crmUsername = rawIdent
-      ? (rawIdent.includes('@') ? rawIdent.split('@')[0].toLowerCase() : rawIdent.toLowerCase())
-      : '';
-    if (!crmUsername) {
-      logger.warn({ sub: sub.slice(-8) }, 'login_rejected_no_crm_username');
-      return res.status(400).send('Cannot determine CRM username from IdP claims. Contact your administrator.');
-    }
+    const sam        = payload[`${NS}samaccountname`] || '';
+    const email      = sam.includes('@') ? sam : (payload.email || '');
+    const userGroups = payload[`${NS}groups`] || [];
+    const linuxUser  = email.split('@')[0].toLowerCase();
 
     logger.info({ email, sub: sub.slice(-8) }, 'login');
 
-    await provisionCrmAccounts(sub, email, crmUsername, userGroups);
+    await provisionCrmAccounts(sub, email, sam, userGroups);
 
     // Reuse existing valid session for this user, or create a new one in Redis
-    const userSessions = await listUserSessions(sub);
+    const userSessions = (await getAllSessionsForUser(sub))
+      .sort(([, a], [, b]) => b.createdAt - a.createdAt);
 
     let apiKey;
     let daysLeft;
 
     if (userSessions.length > 0) {
-      apiKey = userSessions[0].token;
-      daysLeft = Math.ceil((userSessions[0].expiresAt - Date.now()) / (24 * 60 * 60 * 1000));
+      [apiKey] = userSessions[0];
+      daysLeft = Math.ceil((userSessions[0][1].expiresAt - Date.now()) / (24 * 60 * 60 * 1000));
       // Clean up any older duplicate sessions for the same user
-      for (let i = 1; i < userSessions.length; i++) await deleteSession(userSessions[i].token);
+      for (let i = 1; i < userSessions.length; i++) await deleteSession(userSessions[i][0]);
       logger.info({ email, daysLeft }, 'session_reused');
       metricLogins.inc({ result: 'reused' });
     } else {
       apiKey = randomBytes(32).toString('hex');
-      const sessionData = {
+      const newSession = {
         sub,
         email,
         linuxUser,
@@ -368,24 +362,15 @@ app.get('/auth/callback', async (req, res) => {
         createdAt: Date.now(),
         expiresAt: Date.now() + SESSION_TTL_MS,
       };
-      await saveSession(apiKey, sessionData, Math.floor(SESSION_TTL_MS / 1000));
       daysLeft = SESSION_TTL_DAYS;
+      await setSession(apiKey, newSession);
       logger.info({ email }, 'session_created');
       metricLogins.inc({ result: 'new' });
     }
 
     if (nonce) {
-      const bs = await redis.get(`mcp:bridge:${nonce}`);
-      if (bs) {
-        const bridgeSession = JSON.parse(bs);
-        bridgeSession.status = 'ready';
-        bridgeSession.apiKey  = apiKey;
-        bridgeSession.sub     = sub;
-        bridgeSession.email   = email;
-        bridgeSession.groups  = userGroups;
-        await redis.set(`mcp:bridge:${nonce}`, JSON.stringify(bridgeSession), { EX: 900 });
-        logger.info({ nonce: nonce.slice(0, 16) }, 'bridge_session_ready');
-      }
+      const updated = await updateBridgeSession(nonce, { status: 'ready', apiKey, sub, email, groups: userGroups });
+      if (updated) logger.info({ nonce: nonce.slice(0, 16) }, 'bridge_session_ready');
     }
 
     // Build entity list from entities.json filtered by user's groups
@@ -404,7 +389,8 @@ app.get('/auth/callback', async (req, res) => {
   <title>SuiteCRM MCP Gateway - Authenticated</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="preload" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"></noscript>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{--brand-50:#eef2ff;--brand-100:#e0e7ff;--brand-200:#c7d2fe;--brand-400:#818cf8;--brand-500:#6366f1;--brand-600:#4f46e5;--brand-700:#4338ca;--emerald-400:#34d399;--emerald-500:#10b981}
@@ -475,6 +461,10 @@ app.get('/auth/callback', async (req, res) => {
     .panel-note code{background:rgba(99,102,241,.08);color:#4338ca;padding:.1rem .35rem;border-radius:.3rem;font-size:.78rem;font-family:'JetBrains Mono','Fira Code','Menlo',monospace}
     pre{background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:.9rem 1rem;font-size:.78rem;line-height:1.65;overflow-x:auto;white-space:pre;color:#e2e8f0;font-family:'JetBrains Mono','Fira Code','Menlo',monospace}
     #cdPre{max-height:420px;overflow-y:auto}
+    .os-tabs{display:flex;gap:.5rem;margin-top:.85rem;margin-bottom:.6rem}
+    .os-tab{background:transparent;border:1px solid #e2e8f0;border-radius:.45rem;padding:.3rem .75rem;font-size:.78rem;font-family:'Outfit',sans-serif;font-weight:600;color:#64748b;cursor:pointer;transition:all .2s}
+    .os-tab:hover{border-color:var(--brand-400);color:var(--brand-600)}
+    .os-tab.active{background:var(--brand-100);border-color:var(--brand-200);color:var(--brand-700)}
     pre .cmd-line{display:block}
     pre .cmd-line.first-line::before{content:'$ ';color:#818cf8;font-weight:700;-webkit-user-select:none;user-select:none}
     pre .cmd-gap{display:block;height:.6rem}
@@ -544,7 +534,7 @@ app.get('/auth/callback', async (req, res) => {
         <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="panel-body">
-        <p class="panel-note">Open your terminal (macOS: <strong>Terminal</strong> or <strong>iTerm</strong> / Windows: <strong>PowerShell</strong> or <strong>Command Prompt</strong>) and paste:</p>
+        <p class="panel-note">Open your terminal (macOS: <strong>Terminal</strong> or <strong>iTerm</strong> / Windows: <strong>PowerShell</strong> or <strong>Command Prompt</strong>) and paste. Then <strong>start a new Claude Code session</strong> for the servers to be picked up.</p>
         <div class="copy-row"><button class="copy-btn" onclick="event.stopPropagation();copyCC(this)">Copy</button></div>
         <pre id="ccPre"></pre>
       </div>
@@ -556,7 +546,12 @@ app.get('/auth/callback', async (req, res) => {
         <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="panel-body">
-        <p class="panel-note">Add to your Claude Desktop config file, then fully quit and reopen Claude Desktop.<br><strong>macOS:</strong> <code>~/Library/Application Support/Claude/claude_desktop_config.json</code><br><strong>Windows:</strong> <code>%APPDATA%\\Claude\\claude_desktop_config.json</code></p>
+        <div class="os-tabs">
+          <button class="os-tab active" onclick="event.stopPropagation();switchOsTab('mac',this)">macOS / Linux</button>
+          <button class="os-tab" onclick="event.stopPropagation();switchOsTab('win',this)">Windows</button>
+        </div>
+        <p class="panel-note" id="cdNoteEl"></p>
+        <p class="panel-note" id="cdHintEl" style="font-size:.75rem;margin-top:-.3rem;color:#94a3b8"></p>
         <div class="copy-row"><button class="copy-btn" onclick="event.stopPropagation();copyEl('cdPre',this)">Copy</button></div>
         <pre id="cdPre"></pre>
       </div>
@@ -581,6 +576,9 @@ const GW_ENTITIES = ${JSON.stringify(entities.map(({code,label})=>({code,label})
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 var _ccRawText = '';
+var _cdJson = {};
+var _cdPath = {};
+var _cdHint = {};
 
 (function init(){
   const namePart = GW_EMAIL.split('@')[0];
@@ -604,11 +602,7 @@ var _ccRawText = '';
   GW_ENTITIES.forEach(({code,label},i)=>{
     const url  = code==='default' ? GW_BASE+'/sse' : GW_BASE+'/'+code+'/sse';
     const name = code==='default' ? 'suitecrm'     : 'suitecrm_'+code;
-    const lines = [
-      'claude mcp add --transport sse '+name+' \\\\',
-      '  '+url+' \\\\',
-      '  --header "Authorization: Bearer '+GW_APIKEY+'"'
-    ];
+    const line = 'claude mcp add --transport sse '+name+' '+url+' --header "Authorization: Bearer '+GW_APIKEY+'"';
 
     if(i > 0){
       rawParts.push('');
@@ -617,28 +611,47 @@ var _ccRawText = '';
       pre.appendChild(gap);
     }
 
-    lines.forEach((text,j)=>{
-      rawParts.push(text);
-      const span=document.createElement('span');
-      span.className = j===0 ? 'cmd-line first-line' : 'cmd-line';
-      span.textContent = text;
-      pre.appendChild(span);
-    });
+    rawParts.push(line);
+    const span=document.createElement('span');
+    span.className='cmd-line first-line';
+    span.textContent=line;
+    pre.appendChild(span);
   });
 
   _ccRawText = rawParts.filter(l=>l!=='').join('\\n');
 
-  // Claude Desktop JSON
-  const json={mcpServers:Object.fromEntries(GW_ENTITIES.map(({code})=>{
-    const url  = code==='default' ? GW_BASE+'/sse' : GW_BASE+'/'+code+'/sse';
-    const name = code==='default' ? 'suitecrm'     : 'suitecrm_'+code;
-    return [name,{type:'sse',url,headers:{Authorization:'Bearer '+GW_APIKEY}}];
-  }))};
-  document.getElementById('cdPre').textContent = JSON.stringify(json,null,2);
+  // Claude Desktop JSON — platform-specific
+  function buildCdJson(os){
+    return {mcpServers:Object.fromEntries(GW_ENTITIES.map(({code})=>{
+      const url  = code==='default' ? GW_BASE+'/sse' : GW_BASE+'/'+code+'/sse';
+      const name = code==='default' ? 'suitecrm'     : 'suitecrm_'+code;
+      const entry = os==='win'
+        ? {command:'cmd',args:['/C','npx','mcp-remote',url,'--transport','sse-only','--header','Authorization:Bearer '+GW_APIKEY]}
+        : {command:'npx',args:['-y','mcp-remote',url,'--transport','sse-only','--header','Authorization:Bearer '+GW_APIKEY]};
+      return [name, entry];
+    }))};
+  }
+  _cdJson.mac = JSON.stringify(buildCdJson('mac'),null,2);
+  _cdJson.win = JSON.stringify(buildCdJson('win'),null,2);
+  _cdPath.mac = 'Add to your Claude Desktop config, then fully quit and reopen.<br><strong>Path:</strong> <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>';
+  _cdPath.win = 'Add to your Claude Desktop config, then fully quit and reopen.<br><strong>Path:</strong> <code>%APPDATA%\\\\Claude\\\\claude_desktop_config.json</code>';
+  _cdHint.mac = '';
+  _cdHint.win = 'Uses <code>cmd /C npx</code> to bypass spaces in Node.js&#x27;s default install path (<code>C:\\\\Program Files\\\\nodejs\\\\</code>). Using <code>&quot;command&quot;:&quot;npx&quot;</code> directly will break on a standard Windows Node.js install.';
+  document.getElementById('cdPre').textContent = _cdJson.mac;
+  document.getElementById('cdNoteEl').innerHTML = _cdPath.mac;
+  document.getElementById('cdHintEl').innerHTML = _cdHint.mac;
 })();
 
 function togglePanel(id){
   document.getElementById(id).classList.toggle('open');
+}
+
+function switchOsTab(os,btn){
+  document.querySelectorAll('.os-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('cdPre').textContent=_cdJson[os];
+  document.getElementById('cdNoteEl').innerHTML=_cdPath[os];
+  document.getElementById('cdHintEl').innerHTML=_cdHint[os];
 }
 
 function copyCC(btn){
@@ -671,7 +684,7 @@ function copyEl(id,btn){
 });
 
 // ========================================================================
-// SECURE BRIDGE AUTH ENDPOINTS (v4.x)
+// SECURE BRIDGE AUTH ENDPOINTS (v3.1+)
 // ========================================================================
 
 const logoutLimiter = rateLimit({
@@ -708,15 +721,12 @@ app.post('/auth/bridge/start', bridgeStartLimiter, async (req, res) => {
   const nonce        = randomBytes(32).toString('hex');
   const clientSecret = randomBytes(32).toString('hex');
 
-  const sessionData = {
+  await setBridgeSession(nonce, {
     linuxUser:    linux_user,
     clientSecret,
     createdAt:    Date.now(),
-    expiresAt:    Date.now() + BRIDGE_SESSION_TTL_MS,
     status:       'pending',
-  };
-  
-  await redis.set(`mcp:bridge:${nonce}`, JSON.stringify(sessionData), { EX: 900 });
+  });
 
   const loginUrl = `${GATEWAY_URL}/auth/login?nonce=${nonce}`;
   logger.info({ linuxUser: linux_user, nonce: nonce.slice(0, 16) }, 'bridge_session_started');
@@ -737,21 +747,38 @@ app.get('/auth/bridge/poll/:nonce', bridgePollLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Invalid nonce format' });
   }
 
-  const data = await redis.get(`mcp:bridge:${nonce}`);
-  if (!data) return res.status(404).json({ status: 'not_found' });
+  const session = await getBridgeSession(nonce);
 
-  const session = JSON.parse(data);
+  if (!session) return res.status(404).json({ status: 'not_found' });
 
   if (session.clientSecret !== clientSecret) {
     return res.status(403).json({ error: 'Invalid client secret' });
   }
 
   if (session.status === 'ready' && session.apiKey) {
-    await redis.del(`mcp:bridge:${nonce}`);
+    // Session was written to Redis during the OAuth callback; safety fallback if missing
+    const existing = await getSession(session.apiKey);
+    if (!existing) {
+      if (!session.sub) {
+        logger.error({ nonce: nonce.slice(0, 16) }, 'bridge_session_missing_sub');
+        return res.status(500).json({ error: 'Session data incomplete — please re-authenticate' });
+      }
+      await setSession(session.apiKey, {
+        sub:       session.sub,
+        email:     session.email || session.linuxUser,
+        linuxUser: session.linuxUser,
+        groups:    session.groups || [],
+        createdAt: Date.now(),
+        expiresAt: Date.now() + SESSION_TTL_MS,
+      });
+    }
+
+    const apiKey = session.apiKey;
+    await delBridgeSession(nonce);
     logger.info({ linuxUser: session.linuxUser }, 'bridge_session_completed');
     metricBridgeSessions.inc({ event: 'completed' });
 
-    return res.json({ status: 'ready', api_key: session.apiKey });
+    return res.json({ status: 'ready', api_key: apiKey });
   }
 
   res.json({ status: 'pending' });
@@ -763,9 +790,8 @@ app.post('/auth/logout', logoutLimiter, async (req, res) => {
   const authHeader = req.headers.authorization || '';
   const token = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '')
     || qs(req.headers['x-gateway-token']);
-  
   if (API_KEY_RE.test(token)) {
-    await redis.del(`mcp:session:${token}`);
+    await deleteSession(token);
   }
   res.json({ success: true });
 });
@@ -778,41 +804,6 @@ app.listen(PORT, BIND_HOST, () => {
   logger.info({ host: BIND_HOST, port: PORT }, 'listening');
 });
 
-// Purge stale bridge-session nonces every hour. Nonces are also cleaned on
-// each /auth/start and /auth/poll call, but periodic cleanup covers cases where
-// users abandon the flow without polling.
-setInterval(() => {
-  const bs = loadBridgeSessions();
-  const before = Object.keys(bs).length;
-  cleanExpiredBridgeSessions(bs);
-  const removed = before - Object.keys(bs).length;
-  if (removed > 0) {
-    saveBridgeSessions(bs);
-    logger.info({ removed }, 'bridge_sessions_purged');
-  }
-}, 60 * 60 * 1000).unref();
-
-// Purge expired gateway tokens from sessions.json every hour. Also runs once on
-// startup so stale tokens from a prior run are cleared immediately.
-try {
-  const sessions = loadSessions();
-  const before = Object.keys(sessions).length;
-  cleanExpiredSessions(sessions);
-  const removed = before - Object.keys(sessions).length;
-  if (removed > 0) { saveSessions(sessions); logger.info({ removed }, 'gateway_sessions_purged'); }
-} catch (err) {
-  logger.warn({ err: err.message }, 'startup gateway_sessions_purge failed — continuing');
-}
-setInterval(() => {
-  const sessions = loadSessions();
-  const before = Object.keys(sessions).length;
-  cleanExpiredSessions(sessions);
-  const removed = before - Object.keys(sessions).length;
-  if (removed > 0) {
-    saveSessions(sessions);
-    logger.info({ removed }, 'gateway_sessions_purged');
-  }
-}, 60 * 60 * 1000).unref();
 
 const METRICS_PORT = parseInt(process.env.METRICS_PORT || '9091', 10);
 const METRICS_BIND = (process.env.METRICS_BIND || '127.0.0.1').trim();

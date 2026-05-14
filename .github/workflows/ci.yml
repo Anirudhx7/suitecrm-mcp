@@ -25,6 +25,11 @@ jobs:
         run: |
           node --check server/index.mjs
           node --check server/auth.mjs
+          node --check server/redis.mjs
+          node --check server/acl-check.mjs
+          node --check server/bridges/legacy.mjs
+          node --check server/bridges/graphql.mjs
+          node --check server/bridges/hybrid.mjs
       - name: Check installer syntax
         run: python3 -m py_compile install.py install-bridge.py
       - name: Validate docker-compose config
