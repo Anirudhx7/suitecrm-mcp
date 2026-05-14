@@ -1937,69 +1937,6 @@
       </div>
     </section>
 
-    <!-- Why Gateway -->
-<section id="why-not-api">
-      <div class="wrap">
-        <div class="section-label fade-up">Comparison</div>
-        <h2 class="section-title fade-up">Why not just call<br>the API directly?</h2>
-        <p class="section-sub fade-up">The SuiteCRM API works. It just puts the burden - and the risk - on every client.
-        </p>
-        <div class="compare-wrap fade-up">
-          <table class="compare-table">
-            <thead>
-              <tr>
-                <th>Concern</th>
-                <th>Direct SuiteCRM API</th>
-                <th>suitecrm-mcp gateway</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Auth</td>
-                <td>CRM credentials on every client</td>
-                <td>OAuth/OIDC login, personal API key</td>
-              </tr>
-              <tr>
-                <td>Tool schema</td>
-                <td>Raw JSON, no descriptions</td>
-                <td>24 typed MCP tools with descriptions</td>
-              </tr>
-              <tr>
-                <td>Multi-client</td>
-                <td>Manual per-client setup</td>
-                <td>One gateway, any MCP client</td>
-              </tr>
-              <tr>
-                <td>API Routing</td>
-                <td>Manual fallback logic in client</td>
-                <td>Smart hybrid routing: SuiteCRM v8 GraphQL with v4.1 REST fallback</td>
-              </tr>
-              <tr>
-                <td>Key management</td>
-                <td>CRM admin per user</td>
-                <td>Inspect, test, issue, revoke, and flush from <code>mcp-admin</code></td>
-              </tr>
-              <tr>
-                <td>Observability</td>
-                <td>None</td>
-                <td>Prometheus + Grafana + Loki</td>
-              </tr>
-              <tr>
-                <td>Session handling</td>
-                <td>Manual login per call</td>
-                <td>Redis-backed gateway sessions and CRM session renewal</td>
-              </tr>
-              <tr>
-                <td>Audit logging</td>
-                <td>None</td>
-                <td>Structured JSON, redacted</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
     <!-- How It Works -->
 <section id="how-it-works">
       <div class="wrap">
@@ -2210,6 +2147,69 @@
             </p>
             <a href="docs.html#connect-openclaw" class="client-link">Setup guide →</a>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Why Gateway -->
+<section id="why-not-api">
+      <div class="wrap">
+        <div class="section-label fade-up">Comparison</div>
+        <h2 class="section-title fade-up">Why not just call<br>the API directly?</h2>
+        <p class="section-sub fade-up">The SuiteCRM API works. It just puts the burden - and the risk - on every client.
+        </p>
+        <div class="compare-wrap fade-up">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th>Concern</th>
+                <th>Direct SuiteCRM API</th>
+                <th>suitecrm-mcp gateway</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Auth</td>
+                <td>CRM credentials on every client</td>
+                <td>OAuth/OIDC login, personal API key</td>
+              </tr>
+              <tr>
+                <td>Tool schema</td>
+                <td>Raw JSON, no descriptions</td>
+                <td>24 typed MCP tools with descriptions</td>
+              </tr>
+              <tr>
+                <td>Multi-client</td>
+                <td>Manual per-client setup</td>
+                <td>One gateway, any MCP client</td>
+              </tr>
+              <tr>
+                <td>API Routing</td>
+                <td>Manual fallback logic in client</td>
+                <td>Smart hybrid routing: SuiteCRM v8 GraphQL with v4.1 REST fallback</td>
+              </tr>
+              <tr>
+                <td>Key management</td>
+                <td>CRM admin per user</td>
+                <td>Inspect, test, issue, revoke, and flush from <code>mcp-admin</code></td>
+              </tr>
+              <tr>
+                <td>Observability</td>
+                <td>None</td>
+                <td>Prometheus + Grafana + Loki</td>
+              </tr>
+              <tr>
+                <td>Session handling</td>
+                <td>Manual login per call</td>
+                <td>Redis-backed gateway sessions and CRM session renewal</td>
+              </tr>
+              <tr>
+                <td>Audit logging</td>
+                <td>None</td>
+                <td>Structured JSON, redacted</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </section>
