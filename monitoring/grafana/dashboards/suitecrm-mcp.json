@@ -1,21 +1,159 @@
 {
   "title": "SuiteCRM MCP Gateway",
   "uid": "suitecrm-mcp",
-  "version": 4,
+  "version": 18,
   "schemaVersion": 38,
   "refresh": "30s",
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "entity",
         "type": "query",
         "datasource": "Prometheus",
-        "query": "label_values(suitecrm_mcp_active_connections, entity)",
+        "query": "label_values(suitecrm_mcp_gateway_sessions_active, entity)",
         "multi": true,
         "includeAll": true,
-        "current": { "text": "All", "value": "$__all" },
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
         "refresh": 2
+      },
+      {
+        "name": "log_level",
+        "label": "Log Level",
+        "type": "custom",
+        "query": "All : .*,Info : 30,Warn : 40,Error : 50",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "Info",
+            "value": "30"
+          },
+          {
+            "selected": false,
+            "text": "Warn",
+            "value": "40"
+          },
+          {
+            "selected": false,
+            "text": "Error",
+            "value": "50"
+          }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "log_search",
+        "label": "Log Search",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      },
+      {
+        "name": "log_msg",
+        "label": "Message Type",
+        "type": "custom",
+        "query": "All : .*,Rate Limited : rate_limit_hit,SSE Connect : sse_connected,SSE Disconnect : sse_disconnected,SSE Evicted : sse_evicted_by_reconnect,Tool Call : tool_call,Login : login,CRM Login Failed : crm_login_failed,CRM Provision Failed : crm_provision_failed,Session Reused : session_reused,Auth Failure : auth_failure",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "Rate Limited",
+            "value": "rate_limit_hit"
+          },
+          {
+            "selected": false,
+            "text": "SSE Connect",
+            "value": "sse_connected"
+          },
+          {
+            "selected": false,
+            "text": "SSE Disconnect",
+            "value": "sse_disconnected"
+          },
+          {
+            "selected": false,
+            "text": "SSE Evicted",
+            "value": "sse_evicted_by_reconnect"
+          },
+          {
+            "selected": false,
+            "text": "Tool Call",
+            "value": "tool_call"
+          },
+          {
+            "selected": false,
+            "text": "Login",
+            "value": "login"
+          },
+          {
+            "selected": false,
+            "text": "CRM Login Failed",
+            "value": "crm_login_failed"
+          },
+          {
+            "selected": false,
+            "text": "CRM Provision Failed",
+            "value": "crm_provision_failed"
+          },
+          {
+            "selected": false,
+            "text": "Session Reused",
+            "value": "session_reused"
+          },
+          {
+            "selected": false,
+            "text": "Auth Failure",
+            "value": "auth_failure"
+          }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "log_user",
+        "label": "User Filter",
+        "type": "textbox",
+        "query": ".*",
+        "current": {
+          "selected": false,
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 0,
+        "description": "Email or sub \u2014 regex, leave as .* for all users"
       }
     ]
   },
@@ -24,7 +162,12 @@
       "id": 1,
       "title": "Active Connections",
       "type": "stat",
-      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "sum(suitecrm_mcp_active_connections{entity=~\"$entity\"})",
@@ -34,16 +177,29 @@
       "options": {
         "colorMode": "background",
         "graphMode": "area",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 15 },
-              { "color": "red", "value": 25 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 15
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
             ]
           }
         }
@@ -53,7 +209,12 @@
       "id": 2,
       "title": "Active Connections by Entity",
       "type": "stat",
-      "gridPos": { "x": 6, "y": 0, "w": 18, "h": 4 },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 18,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "suitecrm_mcp_active_connections",
@@ -63,7 +224,11 @@
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "orientation": "horizontal"
       }
     },
@@ -71,33 +236,51 @@
       "id": 3,
       "title": "Tool Calls / min",
       "type": "stat",
-      "gridPos": { "x": 0, "y": 4, "w": 6, "h": 4 },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
-          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\"}[1m])) * 60",
+          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\"}[$__rate_interval])) * 60",
           "legendFormat": "calls/min"
         }
       ],
       "options": {
         "colorMode": "value",
         "graphMode": "area",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
       "id": 4,
       "title": "Error Rate",
       "type": "stat",
-      "gridPos": { "x": 6, "y": 4, "w": 6, "h": 4 },
+      "gridPos": {
+        "x": 6,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
-          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", status=\"error\"}[5m])) / sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\"}[5m])) * 100",
+          "expr": "(sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", status=\"error\"}[$__rate_interval])) or vector(0)) / (sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\"}[$__rate_interval])) > 0) * 100 or vector(0)",
           "legendFormat": "error %"
         }
       ],
       "options": {
         "colorMode": "background",
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "unit": "percent"
       },
       "fieldConfig": {
@@ -106,9 +289,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 10 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
             ]
           }
         }
@@ -118,25 +310,43 @@
       "id": 5,
       "title": "Auth Failures",
       "type": "stat",
-      "gridPos": { "x": 12, "y": 4, "w": 6, "h": 4 },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
-          "expr": "sum(increase(suitecrm_mcp_auth_failures_total{entity=~\"$entity\"}[1h]))",
-          "legendFormat": "last 1h"
+          "expr": "sum(increase(suitecrm_mcp_auth_failures_total{entity=~\"$entity\"}[$__range])) or vector(0)",
+          "legendFormat": "selected range"
         }
       ],
       "options": {
         "colorMode": "background",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 3 },
-              { "color": "red", "value": 10 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
             ]
           }
         }
@@ -146,95 +356,137 @@
       "id": 6,
       "title": "Session Renewals",
       "type": "stat",
-      "gridPos": { "x": 18, "y": 4, "w": 6, "h": 4 },
+      "gridPos": {
+        "x": 18,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
-          "expr": "sum(increase(suitecrm_mcp_session_renewals_total{entity=~\"$entity\"}[1h]))",
-          "legendFormat": "last 1h"
+          "expr": "sum(increase(suitecrm_mcp_session_renewals_total{entity=~\"$entity\"}[$__range])) or vector(0)",
+          "legendFormat": "selected range"
         }
       ],
       "options": {
         "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
       "id": 7,
       "title": "Tool Calls Over Time",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "sum by (entity) (rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", status=\"success\"}[2m])) * 60",
+          "expr": "sum by (entity) (rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", status=\"success\"}[$__rate_interval])) * 60",
           "legendFormat": "{{entity}} success"
         },
         {
-          "expr": "sum by (entity) (rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", status=\"error\"}[2m])) * 60",
+          "expr": "sum by (entity) (rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", status=\"error\"}[$__rate_interval])) * 60",
           "legendFormat": "{{entity}} error"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "reqpm" }
+        "defaults": {
+          "unit": "reqpm"
+        }
       }
     },
     {
       "id": 8,
       "title": "Tool Call Latency (p50 / p95 / p99)",
       "type": "timeseries",
-      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le, entity) (rate(suitecrm_mcp_tool_duration_seconds_bucket{entity=~\"$entity\"}[5m])))",
+          "expr": "histogram_quantile(0.50, suitecrm_mcp:tool_duration_seconds_bucket:rate1m{entity=~\"$entity\"})",
           "legendFormat": "p50 {{entity}}"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(suitecrm_mcp_tool_duration_seconds_bucket{entity=~\"$entity\"}[5m])))",
+          "expr": "histogram_quantile(0.95, suitecrm_mcp:tool_duration_seconds_bucket:rate1m{entity=~\"$entity\"})",
           "legendFormat": "p95 {{entity}}"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(suitecrm_mcp_tool_duration_seconds_bucket{entity=~\"$entity\"}[5m])))",
+          "expr": "histogram_quantile(0.99, suitecrm_mcp:tool_duration_seconds_bucket:rate1m{entity=~\"$entity\"})",
           "legendFormat": "p99 {{entity}}"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "s" }
+        "defaults": {
+          "unit": "s"
+        }
       }
     },
     {
       "id": 9,
       "title": "CRM API Latency by Method (p95)",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, method) (rate(suitecrm_mcp_crm_api_duration_seconds_bucket{entity=~\"$entity\"}[5m])))",
+          "expr": "histogram_quantile(0.95, suitecrm_mcp:crm_api_duration_seconds_bucket:rate1m{entity=~\"$entity\"})",
           "legendFormat": "p95 {{method}}"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "s" }
+        "defaults": {
+          "unit": "s"
+        }
       }
     },
     {
       "id": 10,
       "title": "Top Tools by Call Count",
       "type": "barchart",
-      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "topk(10, sum by (tool) (increase(suitecrm_mcp_tool_calls_total{entity=~\"$entity\"}[1h])))",
+          "expr": "topk(10, sum by (tool) (increase(suitecrm_mcp_tool_calls_total{entity=~\"$entity\"}[$__range])))",
           "legendFormat": "{{tool}}"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short" }
+        "defaults": {
+          "unit": "short"
+        }
       }
     },
     {
       "id": 11,
       "title": "Active Connections History",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 6 },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 6
+      },
       "targets": [
         {
           "expr": "suitecrm_mcp_active_connections{entity=~\"$entity\"}",
@@ -242,21 +494,34 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short", "min": 0 }
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        }
       }
     },
     {
       "id": 12,
       "title": "Status & Capacity",
       "type": "row",
-      "gridPos": { "x": 0, "y": 30, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 13,
       "title": "Uptime",
       "type": "stat",
-      "gridPos": { "x": 0, "y": 31, "w": 8, "h": 4 },
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 8,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "time() - process_start_time_seconds{entity=~\"$entity\"}",
@@ -266,17 +531,28 @@
       "options": {
         "colorMode": "value",
         "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
-        "defaults": { "unit": "dtdurations" }
+        "defaults": {
+          "unit": "dtdurations"
+        }
       }
     },
     {
       "id": 14,
       "title": "Active Connections (cap 100)",
       "type": "stat",
-      "gridPos": { "x": 8, "y": 31, "w": 8, "h": 4 },
+      "gridPos": {
+        "x": 8,
+        "y": 31,
+        "w": 8,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "sum(suitecrm_mcp_active_connections{entity=~\"$entity\"})",
@@ -286,7 +562,11 @@
       "options": {
         "colorMode": "background",
         "graphMode": "area",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -294,9 +574,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 80 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
             ]
           }
         }
@@ -306,7 +595,12 @@
       "id": 15,
       "title": "Entity Processes (Up/Down)",
       "type": "stat",
-      "gridPos": { "x": 16, "y": 31, "w": 8, "h": 4 },
+      "gridPos": {
+        "x": 16,
+        "y": 31,
+        "w": 8,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "up{job=~\"suitecrm.*\"}",
@@ -316,19 +610,41 @@
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "orientation": "horizontal"
       },
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
           ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           }
         }
@@ -338,42 +654,44 @@
       "id": 16,
       "title": "Users & Sessions",
       "type": "row",
-      "gridPos": { "x": 0, "y": 35, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
-      "id": 17,
-      "title": "Profiles Configured",
+      "id": 200,
+      "title": "Gateway Sessions by Entity",
       "type": "stat",
-      "gridPos": { "x": 0, "y": 36, "w": 6, "h": 4 },
-      "targets": [
-        {
-          "expr": "suitecrm_mcp_profiles_configured{entity=~\"$entity\"}",
-          "legendFormat": "{{entity}}"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 6,
+        "h": 4
       },
-      "fieldConfig": { "defaults": { "unit": "short" } }
-    },
-    {
-      "id": 18,
-      "title": "Gateway Sessions Active",
-      "type": "stat",
-      "gridPos": { "x": 6, "y": 36, "w": 6, "h": 4 },
       "targets": [
         {
-          "expr": "suitecrm_mcp_gateway_sessions_active{entity=~\"$entity\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (entity) (suitecrm_mcp_gateway_sessions_active)",
           "legendFormat": "{{entity}}"
         }
       ],
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "auto"
       },
       "fieldConfig": {
         "defaults": {
@@ -381,8 +699,97 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "yellow", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 17,
+      "title": "Auth Logins (24h)",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"success\"}[24h]))",
+          "legendFormat": "success"
+        },
+        {
+          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"failure\"}[24h]))",
+          "legendFormat": "failure"
+        },
+        {
+          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"reused\"}[24h]))",
+          "legendFormat": "reused"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Gateway Sessions Active",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 36,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "suitecrm_auth_sessions_active",
+          "legendFormat": "sessions"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "yellow",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           }
         }
@@ -390,19 +797,28 @@
     },
     {
       "id": 19,
-      "title": "CRM Sessions Active (in-memory)",
+      "title": "CRM Session Renewals (1h)",
       "type": "stat",
-      "gridPos": { "x": 12, "y": 36, "w": 6, "h": 4 },
+      "gridPos": {
+        "x": 12,
+        "y": 36,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
-          "expr": "sum(suitecrm_mcp_user_crm_session_active{entity=~\"$entity\"})",
-          "legendFormat": "users with CRM session"
+          "expr": "sum(increase(suitecrm_mcp_session_renewals_total{entity=~\"$entity\"}[1h]))",
+          "legendFormat": "renewals"
         }
       ],
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -410,8 +826,14 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "yellow", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "yellow",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           }
         }
@@ -421,7 +843,12 @@
       "id": 20,
       "title": "CRM Sessions Cached (total in-memory)",
       "type": "stat",
-      "gridPos": { "x": 18, "y": 36, "w": 6, "h": 4 },
+      "gridPos": {
+        "x": 18,
+        "y": 36,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "suitecrm_mcp_crm_sessions_cached{entity=~\"$entity\"}",
@@ -431,98 +858,40 @@
       "options": {
         "colorMode": "value",
         "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
-      "fieldConfig": { "defaults": { "unit": "short" } }
-    },
-    {
-      "id": 21,
-      "title": "User Status (mcp-admin list equivalent)",
-      "type": "table",
-      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 10 },
-      "targets": [
-        {
-          "expr": "suitecrm_mcp_user_crm_session_active{entity=~\"$entity\"}",
-          "legendFormat": "",
-          "instant": true,
-          "refId": "A",
-          "format": "table"
-        },
-        {
-          "expr": "suitecrm_mcp_user_gateway_session_active",
-          "legendFormat": "",
-          "instant": true,
-          "refId": "B",
-          "format": "table"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "labelsToFields",
-          "options": { "mode": "columns" }
-        },
-        {
-          "id": "merge",
-          "options": {}
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": { "Time": true, "sub": true, "__name__": true },
-            "renameByName": {
-              "email": "Email",
-              "entity": "Entity",
-              "crm_user": "CRM User",
-              "Value #A": "CRM Session",
-              "Value #B": "Gateway Session"
-            },
-            "indexByName": {
-              "Email": 0,
-              "Entity": 1,
-              "CRM User": 2,
-              "CRM Session": 3,
-              "Gateway Session": 4
-            }
-          }
-        }
-      ],
       "fieldConfig": {
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "CRM Session" },
-            "properties": [
-              { "id": "custom.displayMode", "value": "color-background" },
-              { "id": "mappings", "value": [
-                { "type": "value", "options": { "0": { "text": "No", "color": "red" }, "1": { "text": "Yes", "color": "green" } } }
-              ]},
-              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "Gateway Session" },
-            "properties": [
-              { "id": "custom.displayMode", "value": "color-background" },
-              { "id": "mappings", "value": [
-                { "type": "value", "options": { "0": { "text": "No", "color": "red" }, "1": { "text": "Yes", "color": "green" } } }
-              ]},
-              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }
-            ]
-          }
-        ]
+        "defaults": {
+          "unit": "short"
+        }
       }
     },
     {
       "id": 22,
       "title": "System Health",
       "type": "row",
-      "gridPos": { "x": 0, "y": 50, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 23,
       "title": "Heap Used vs Total",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 51, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 51,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
           "expr": "nodejs_heap_size_used_bytes",
@@ -533,29 +902,47 @@
           "legendFormat": "total"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "bytes" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
     },
     {
       "id": 24,
       "title": "CPU Usage %",
       "type": "timeseries",
-      "gridPos": { "x": 12, "y": 51, "w": 6, "h": 8 },
+      "gridPos": {
+        "x": 12,
+        "y": 51,
+        "w": 6,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "rate(process_cpu_seconds_total[1m]) * 100",
+          "expr": "rate(process_cpu_seconds_total[$__rate_interval]) * 100",
           "legendFormat": "cpu %"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "percent" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      }
     },
     {
       "id": 25,
       "title": "Event Loop Lag p99",
       "type": "timeseries",
-      "gridPos": { "x": 18, "y": 51, "w": 6, "h": 8 },
+      "gridPos": {
+        "x": 18,
+        "y": 51,
+        "w": 6,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, rate(nodejs_eventloop_lag_seconds_bucket[5m]))",
+          "expr": "nodejs_eventloop_lag_p99_seconds{entity=~\"$entity\"}",
           "legendFormat": "p99 lag"
         }
       ],
@@ -565,9 +952,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.05 },
-              { "color": "red", "value": 0.1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
             ]
           }
         }
@@ -577,10 +973,15 @@
       "id": 26,
       "title": "GC Duration p99",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 59, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 59,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, rate(nodejs_gc_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.99, suitecrm_mcp:gc_duration_seconds_bucket:rate1m)",
           "legendFormat": "p99 gc"
         }
       ],
@@ -590,9 +991,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.05 },
-              { "color": "red", "value": 0.1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
             ]
           }
         }
@@ -602,7 +1012,12 @@
       "id": 27,
       "title": "Open File Descriptors",
       "type": "timeseries",
-      "gridPos": { "x": 12, "y": 59, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 12,
+        "y": 59,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
           "expr": "process_open_fds",
@@ -613,20 +1028,34 @@
           "legendFormat": "max"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "id": 28,
       "title": "CRM Backend Health",
       "type": "row",
-      "gridPos": { "x": 0, "y": 67, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 67,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 29,
       "title": "Circuit Breaker State",
       "type": "state-timeline",
-      "gridPos": { "x": 0, "y": 68, "w": 24, "h": 5 },
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 24,
+        "h": 5
+      },
       "targets": [
         {
           "expr": "suitecrm_mcp_circuit_breaker_state{entity=~\"$entity\"}",
@@ -641,21 +1070,44 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": {
-              "0": { "text": "Closed", "color": "green" },
-              "1": { "text": "Half-Open", "color": "yellow" },
-              "2": { "text": "OPEN", "color": "red" }
-            }}
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Closed",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "Half-Open",
+                  "color": "yellow"
+                },
+                "2": {
+                  "text": "OPEN",
+                  "color": "red"
+                }
+              }
+            }
           ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 2 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
             ]
           },
-          "custom": { "fillOpacity": 90 }
+          "custom": {
+            "fillOpacity": 90
+          }
         }
       }
     },
@@ -663,56 +1115,94 @@
       "id": 30,
       "title": "CRM Errors by Code / min",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 73, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 8,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "sum by (crm_code) (rate(suitecrm_mcp_crm_errors_total{entity=~\"$entity\"}[5m])) * 60",
+          "expr": "sum by (crm_code) (rate(suitecrm_mcp_crm_errors_total{entity=~\"$entity\"}[$__rate_interval])) * 60",
           "legendFormat": "code {{crm_code}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "id": 31,
       "title": "CRM Sessions Cached Over Time",
       "type": "timeseries",
-      "gridPos": { "x": 8, "y": 73, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 8,
+        "y": 73,
+        "w": 8,
+        "h": 8
+      },
       "targets": [
         {
           "expr": "suitecrm_mcp_crm_sessions_cached{entity=~\"$entity\"}",
           "legendFormat": "{{entity}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "min": 0 } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        }
+      }
     },
     {
       "id": 32,
       "title": "Session Renewals / min",
       "type": "timeseries",
-      "gridPos": { "x": 16, "y": 73, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 16,
+        "y": 73,
+        "w": 8,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "rate(suitecrm_mcp_session_renewals_total{entity=~\"$entity\"}[5m]) * 60",
+          "expr": "rate(suitecrm_mcp_session_renewals_total{entity=~\"$entity\"}[$__rate_interval]) * 60",
           "legendFormat": "{{entity}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "id": 33,
       "title": "Security",
       "type": "row",
-      "gridPos": { "x": 0, "y": 81, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 81,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 34,
       "title": "Auth Failures / min",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 82, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 82,
+        "w": 8,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "rate(suitecrm_mcp_auth_failures_total{entity=~\"$entity\"}[5m]) * 60",
+          "expr": "rate(suitecrm_mcp_auth_failures_total{entity=~\"$entity\"}[$__rate_interval]) * 60",
           "legendFormat": "{{entity}}"
         }
       ],
@@ -722,9 +1212,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.1 },
-              { "color": "red", "value": 1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
             ]
           }
         }
@@ -734,23 +1233,37 @@
       "id": 35,
       "title": "Rate Limit Hits by Route / min",
       "type": "timeseries",
-      "gridPos": { "x": 8, "y": 82, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 8,
+        "y": 82,
+        "w": 8,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "rate(suitecrm_mcp_rate_limited_total{entity=~\"$entity\"}[5m]) * 60",
+          "expr": "rate(suitecrm_mcp_rate_limited_total{entity=~\"$entity\"}[$__rate_interval]) * 60",
           "legendFormat": "{{route}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "id": 36,
       "title": "Connection Rejections / min",
       "type": "timeseries",
-      "gridPos": { "x": 16, "y": 82, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 16,
+        "y": 82,
+        "w": 8,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "rate(suitecrm_mcp_connection_rejected_total{entity=~\"$entity\"}[5m]) * 60",
+          "expr": "rate(suitecrm_mcp_connection_rejected_total{entity=~\"$entity\"}[$__rate_interval]) * 60",
           "legendFormat": "{{entity}}"
         }
       ],
@@ -760,8 +1273,14 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 0.01 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
             ]
           }
         }
@@ -771,30 +1290,53 @@
       "id": 37,
       "title": "Tool Breakdown",
       "type": "row",
-      "gridPos": { "x": 0, "y": 90, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 90,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 38,
       "title": "Write vs Read Rate / min",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 91, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 91,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", tool=~\".*_(search|search_text|get|get_many|get_relationships|get_module_fields|get_dropdown_values|get_recent|get_note_attachment|get_record_activities|get_upcoming_activities|list_modules|count|server_info)\"}[5m])) * 60",
+          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", tool=~\".*_(search|search_text|get|count|get_relationships|get_module_fields|list_modules|server_info)\"}[$__rate_interval])) * 60",
           "legendFormat": "reads"
         },
         {
-          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", tool=~\".*_(create|update|delete|bulk_upsert|link_records|unlink_records|log_call|create_task|create_note|set_note_attachment)\"}[5m])) * 60",
+          "expr": "sum(rate(suitecrm_mcp_tool_calls_total{entity=~\"$entity\", tool=~\".*_(create|update|delete|link_records|unlink_records|bulk_upsert|log_call|create_task|create_note|set_note_attachment)\"}[$__rate_interval])) * 60",
           "legendFormat": "writes"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "writes" },
-            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "writes"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
           }
         ]
       }
@@ -803,51 +1345,111 @@
       "id": 39,
       "title": "Error Rate per Tool / min",
       "type": "barchart",
-      "gridPos": { "x": 12, "y": 91, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 12,
+        "y": 91,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "topk(24, sum by (tool) (rate(suitecrm_mcp_tool_calls_total{status=\"error\", entity=~\"$entity\"}[15m])) * 60)",
+          "expr": "topk(13, sum by (tool) (rate(suitecrm_mcp_tool_calls_total{status=\"error\", entity=~\"$entity\"}[$__rate_interval])) * 60)",
           "legendFormat": "{{tool}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "id": 40,
       "title": "p95 Latency per Tool",
       "type": "table",
-      "gridPos": { "x": 0, "y": 99, "w": 24, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 99,
+        "w": 24,
+        "h": 8
+      },
       "targets": [
         {
-          "expr": "sort_desc(histogram_quantile(0.95, sum by (le, tool) (rate(suitecrm_mcp_tool_duration_seconds_bucket{entity=~\"$entity\"}[5m]))))",
+          "expr": "sort_desc(histogram_quantile(0.95, suitecrm_mcp:tool_duration_by_tool_seconds_bucket:rate1m{entity=~\"$entity\"}))",
           "legendFormat": "{{tool}}",
           "instant": true,
           "format": "table"
         }
       ],
       "transformations": [
-        { "id": "labelsToFields", "options": { "mode": "columns" } },
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
         {
           "id": "organize",
           "options": {
-            "excludeByName": { "Time": true, "__name__": true, "le": true },
-            "renameByName": { "tool": "Tool", "Value": "p95 Latency (s)" }
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "le": true
+            },
+            "renameByName": {
+              "tool": "Tool",
+              "Value": "p95 Latency (s)"
+            }
           }
         },
-        { "id": "sortBy", "options": { "fields": [{ "displayName": "p95 Latency (s)", "desc": true }] } }
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": [
+              {
+                "displayName": "p95 Latency (s)",
+                "desc": true
+              }
+            ]
+          }
+        }
       ],
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "p95 Latency (s)" },
+            "matcher": {
+              "id": "byName",
+              "options": "p95 Latency (s)"
+            },
             "properties": [
-              { "id": "unit", "value": "s" },
-              { "id": "custom.displayMode", "value": "color-background-solid" },
-              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 1 },
-                { "color": "red", "value": 5 }
-              ]}}
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background-solid"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
+                  ]
+                }
+              }
             ]
           }
         ]
@@ -857,20 +1459,36 @@
       "id": 41,
       "title": "Logs",
       "type": "row",
-      "gridPos": { "x": 0, "y": 107, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 107,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 42,
       "title": "Gateway Logs",
       "type": "logs",
-      "gridPos": { "x": 0, "y": 108, "w": 24, "h": 10 },
-      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": {
+        "x": 0,
+        "y": 108,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "loki", "uid": "Loki" },
-          "expr": "{service=\"suitecrm-mcp\", entity=~\"$entity\"}",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "{job=\"suitecrm-mcp\", unit=~\"suitecrm-mcp-($entity).service\", level=~\"$log_level\"} | json | msg =~ \"$log_msg\" |~ \"(?i)$log_user\" |~ \"(?i)$log_search\"",
           "legendFormat": ""
         }
       ],
@@ -880,19 +1498,33 @@
         "sortOrder": "Descending",
         "wrapLogMessage": true
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     },
     {
       "id": 43,
       "title": "Audit Log (audit=true entries only)",
       "type": "logs",
-      "gridPos": { "x": 0, "y": 118, "w": 24, "h": 10 },
-      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": {
+        "x": 0,
+        "y": 118,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "loki", "uid": "Loki" },
-          "expr": "{service=\"suitecrm-mcp\"} | json | audit = \"true\"",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "{job=\"suitecrm-mcp\", level=~\"$log_level\"} | json | audit = \"true\" | msg =~ \"$log_msg\" |~ \"(?i)$log_user\" |~ \"(?i)$log_search\"",
           "legendFormat": ""
         }
       ],
@@ -902,19 +1534,33 @@
         "sortOrder": "Descending",
         "wrapLogMessage": true
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     },
     {
       "id": 44,
       "title": "Auth Service Logs",
       "type": "logs",
-      "gridPos": { "x": 0, "y": 128, "w": 24, "h": 8 },
-      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": {
+        "x": 0,
+        "y": 128,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "loki", "uid": "Loki" },
-          "expr": "{service=\"suitecrm-mcp-auth\"} | json",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "{unit=\"suitecrm-mcp-auth.service\", level=~\"$log_level\"} | json | msg =~ \"$log_msg\" |~ \"(?i)$log_user\" |~ \"(?i)$log_search\"",
           "legendFormat": ""
         }
       ],
@@ -924,39 +1570,58 @@
         "sortOrder": "Descending",
         "wrapLogMessage": true
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     },
     {
       "id": 45,
       "title": "Connection Rate / min",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 136, "w": 12, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 136,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(suitecrm_mcp_connections_total{entity=~\"$entity\"}[5m]) * 60",
+          "expr": "rate(suitecrm_mcp_connections_total{entity=~\"$entity\"}[$__rate_interval]) * 60",
           "legendFormat": "{{entity}}"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short" }
+        "defaults": {
+          "unit": "short"
+        }
       }
     },
     {
       "id": 46,
-      "title": "Circuit Breaker Openings (24h)",
+      "title": "Circuit Breaker Openings",
       "type": "stat",
-      "gridPos": { "x": 12, "y": 136, "w": 6, "h": 4 },
+      "gridPos": {
+        "x": 12,
+        "y": 136,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "increase(suitecrm_mcp_circuit_breaker_openings_total{entity=~\"$entity\"}[24h])",
+          "expr": "increase(suitecrm_mcp_circuit_breaker_openings_total{entity=~\"$entity\"}[$__range])",
           "legendFormat": "{{entity}}"
         }
       ],
       "options": {
         "colorMode": "background",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -964,13 +1629,679 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 5 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
             ]
           }
         }
       }
+    },
+    {
+      "id": 47,
+      "title": "Who's Online",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 144,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": true
+    },
+    {
+      "id": 50,
+      "title": "Process Health",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 157,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 51,
+      "title": "Service Uptime & Last Restart",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 158,
+        "w": 10,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "format": "table",
+          "expr": "time() - process_start_time_seconds{entity=~\"$entity\"}"
+        },
+        {
+          "refId": "B",
+          "instant": true,
+          "format": "table",
+          "expr": "process_start_time_seconds{entity=~\"$entity\"} * 1000"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "exported_entity": true
+            },
+            "renameByName": {
+              "entity": "Entity",
+              "job": "Service",
+              "Value #A": "Uptime",
+              "Value #B": "Last Restart"
+            },
+            "indexByName": {
+              "Entity": 0,
+              "Service": 1,
+              "Uptime": 2,
+              "Last Restart": 3
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Uptime"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dtdurations"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last Restart"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Entity",
+            "desc": false
+          }
+        ]
+      }
+    },
+    {
+      "id": 52,
+      "title": "Heap Memory Trend",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 10,
+        "y": 158,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "nodejs_heap_size_used_bytes{entity=~\"$entity\"} / 1024 / 1024",
+          "legendFormat": "{{entity}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "MiB",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 53,
+      "title": "Profiles Configured",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 36,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "suitecrm_mcp_profiles_configured{entity=~\"$entity\"}",
+          "legendFormat": "{{entity}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
+        }
+      }
+    },
+    {
+      "id": 54,
+      "title": "Active Users Now",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 167,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "count(suitecrm_mcp_user_gateway_session_active{entity=~\"$entity\"} == 1) or vector(0)",
+          "legendFormat": "users online"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
+        }
+      }
+    },
+    {
+      "id": 55,
+      "title": "Who's Online",
+      "type": "table",
+      "gridPos": {
+        "x": 4,
+        "y": 167,
+        "w": 20,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "suitecrm_mcp_user_gateway_session_active{entity=~\"$entity\"} == 1",
+          "legendFormat": "{{email}} / {{entity}}",
+          "instant": true
+        },
+        {
+          "expr": "suitecrm_mcp_user_crm_session_active{entity=~\"$entity\"} == 1",
+          "legendFormat": "CRM: {{email}} / {{entity}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "auto"
+          }
+        }
+      }
+    },
+    {
+      "id": 56,
+      "title": "Redis Monitoring",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 177,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 58,
+      "title": "Redis Connected Clients",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 178,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "redis_connected_clients",
+          "legendFormat": "clients"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 59,
+      "title": "Redis Memory Used",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 178,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes / 1024 / 1024",
+          "legendFormat": "MB"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 104857600
+              },
+              {
+                "color": "red",
+                "value": 524288000
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 60,
+      "title": "Redis Hit Rate",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 178,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "rate(rate(redis_keyspace_hits_total[5m])[5m]) / (rate(rate(redis_keyspace_hits_total[5m])[5m]) + rate(rate(redis_keyspace_misses_total[5m])[5m])) * 100",
+          "legendFormat": "hit %"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "unit": "percent"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 61,
+      "title": "Redis Commands / sec",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 178,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "rate(redis_commands_processed_total[5m])",
+          "legendFormat": "cmd/s"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 62,
+      "title": "Redis Memory Usage",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 182,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes",
+          "legendFormat": "used"
+        },
+        {
+          "expr": "redis_memory_max_bytes",
+          "legendFormat": "max"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 63,
+      "title": "Redis Connected Clients",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 182,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "redis_connected_clients",
+          "legendFormat": "clients"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 64,
+      "title": "Profile Analytics",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 190,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 65,
+      "title": "Profiles by Entity",
+      "type": "barchart",
+      "gridPos": {
+        "x": 0,
+        "y": 191,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "suitecrm_mcp_profiles_configured",
+          "legendFormat": "{{entity}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 66,
+      "title": "Users with Active CRM Sessions",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 191,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "suitecrm_mcp_user_crm_session_active",
+          "legendFormat": "{{email}}",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "email": "Email",
+              "entity": "Entity",
+              "Value": "Has Session"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Has Session"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "No",
+                        "color": "red"
+                      },
+                      "1": {
+                        "text": "Yes",
+                        "color": "green"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 67,
+      "title": "Redis Key Count by Pattern",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 199,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "count(redis_db_keys{db=\"db0\"})",
+          "legendFormat": "Total Keys",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "Value #A": "Total Keys"
+            }
+          }
+        }
+      ]
     }
   ]
 }

@@ -698,8 +698,11 @@ def install_redis():
             content += f"\nrequirepass {redis_pass}\n"
             changed = True
             
-        if "maxmemory-policy allkeys-lru" not in content:
-            content += "\nmaxmemory 256mb\nmaxmemory-policy allkeys-lru\n"
+        if "maxmemory-policy volatile-lru" not in content:
+            if "maxmemory-policy allkeys-lru" in content:
+                content = content.replace("maxmemory-policy allkeys-lru", "maxmemory-policy volatile-lru")
+            else:
+                content += "\nmaxmemory 256mb\nmaxmemory-policy volatile-lru\n"
             changed = True
             
         if changed:
@@ -1070,6 +1073,16 @@ def apply_update_hardening(codes, is_multi):
                 ok(f"  [{code}] Patched unit with hardening directives")
             else:
                 ok(f"  [{code}] Unit: no changes needed")
+
+    # Fix Redis eviction policy from allkeys-lru to volatile-lru
+    redis_conf = Path("/etc/redis/redis.conf")
+    if redis_conf.exists():
+        rc = redis_conf.read_text()
+        if "allkeys-lru" in rc:
+            rc = rc.replace("allkeys-lru", "volatile-lru")
+            redis_conf.write_text(rc)
+            run(["systemctl", "restart", "redis-server"])
+            ok("Redis eviction policy updated to volatile-lru")
 
 # ---------------------------------------------------------------------------
 # Status display

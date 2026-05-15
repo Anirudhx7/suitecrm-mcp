@@ -100,7 +100,7 @@ try {
     $check = $pdo->prepare("SELECT COUNT(*) FROM users WHERE user_name = ?");
     $check->execute([$crm_user]);
     if ($check->fetchColumn() == 0) { echo 0; exit; }
-    $stmt = $pdo->prepare("UPDATE users SET user_hash = ?, external_auth_only = 0, system_generated_password = 0 WHERE user_name = ?");
+    $stmt = $pdo->prepare("UPDATE users SET user_hash = ?, external_auth_only = 0, system_generated_password = 0, authenticate_id = 'SugarAuthenticate' WHERE user_name = ?");
     $stmt->execute([$hash, $crm_user]);
     echo 1;
 } catch (Exception $e) {

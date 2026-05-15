@@ -195,21 +195,11 @@ const subSids     = new Map(); // sub -> Set<sid>  (all live connections per use
 // Redis-backed state helpers (replaces in-memory Maps)
 // ---------------------------------------------------------------------------
 
-// Auth sessions: check Redis first, fall back to sessions.json (auth.mjs writes there).
-// Lazy-promotes file sessions into Redis on first use so subsequent lookups hit Redis.
+// Auth sessions: look up token in Redis; null if missing or Redis is down.
 async function getAuthSession(token) {
   try {
     const raw = await redis.get(`auth:session:${token}`);
-    if (raw) return JSON.parse(raw);
-  } catch { /* Redis down — fall through to file */ }
-  try {
-    const sessions = JSON.parse(readFileSync(process.env.SESSIONS_FILE || '/etc/suitecrm-mcp/sessions.json', 'utf8'));
-    const session = sessions[token] || null;
-    if (session) {
-      const ttlSec = Math.max(1, Math.ceil((session.expiresAt - Date.now()) / 1000));
-      redis.setex(`auth:session:${token}`, ttlSec, JSON.stringify(session)).catch(() => {});
-    }
-    return session;
+    return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
@@ -554,32 +544,70 @@ async function getRecordActivities(sid,args){ validateModule(args.module); valid
 async function serverInfo(sid)             { const creds=connCreds.get(sid)||{}; const sessions=await ensureCrmSession(sid).catch(()=>({})); const sub=connAuth.get(sid)?.sub??await getSubBySid(sid)??sid; return { prefix:PREFIX, port:PORT, entity:CODE, endpoint:ENDPOINT, api_strategy:API_STRATEGY==='8'?'Modern (v8 + v4 Fallback)':'Legacy (v4.1)', crm_user:creds.user||'?', auth:'gateway-session', required_group:REQUIRED_GROUP, v8_session:!!sessions.v8, v4_session:!!sessions.v4, session_active:!!(await getCrmSession(sub)), active_connections:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), persistence:'redis' }; }
 
 // ---------------------------------------------------------------------------
+// Dry-run handler — returns a preview object without touching the CRM
+// ---------------------------------------------------------------------------
+async function handleDryRun(sid, name, args) {
+  const short = name.replace(`${PREFIX}_`, '');
+  if (short === 'update') {
+    let current = {};
+    try { current = (await getRecord(sid, { module:args.module, id:args.id }))?.record ?? {}; } catch {}
+    const would_change = {};
+    for (const [k, v] of Object.entries(args.fields || {})) {
+      const before = current[k] ?? null;
+      if (String(before) !== String(v)) would_change[k] = { before, after:v };
+    }
+    return { dry_run:true, action:'update', module:args.module, id:args.id, would_change };
+  }
+  if (short === 'delete') {
+    let record = {};
+    try { record = (await getRecord(sid, { module:args.module, id:args.id }))?.record ?? {}; } catch {}
+    return { dry_run:true, action:'delete', module:args.module, id:args.id, would_delete:record };
+  }
+  if (short === 'bulk_upsert') {
+    const records = args.records || [];
+    const would_create = records.filter(r => !r.id);
+    const would_update = records.filter(r => !!r.id);
+    return { dry_run:true, action:'bulk_upsert', module:args.module, would_create_count:would_create.length, would_update_count:would_update.length, records };
+  }
+  if (short === 'set_note_attachment') {
+    const bytes = args.file_base64 ? Math.floor(args.file_base64.length * 0.75) : 0;
+    return { dry_run:true, action:'set_note_attachment', id:args.id, filename:args.filename, file_mime_type:args.file_mime_type||'application/octet-stream', estimated_size_bytes:bytes };
+  }
+  if (short === 'link_records' || short === 'unlink_records') {
+    return { dry_run:true, action:short, module:args.module, id:args.id, link_field:args.link_field, related_ids:args.related_ids };
+  }
+  // create / log_call / create_task / create_note
+  const { dry_run:_, ...fields } = args;
+  return { dry_run:true, action:'create', would_create:fields };
+}
+
+// ---------------------------------------------------------------------------
 // Tool Definitions (TOOLS)
 // ---------------------------------------------------------------------------
 const TOOLS = [
   { name:`${PREFIX}_search`, description:'Search records with optional SQL WHERE filter', inputSchema:{type:'object',required:['module'],properties:{module:{type:'string'},query:{type:'string'},fields:{type:'array',items:{type:'string'}},max_results:{type:'number'},offset:{type:'number'},order_by:{type:'string'}}}},
   { name:`${PREFIX}_search_text`, description:'Full-text search across multiple modules', inputSchema:{type:'object',required:['search_string'],properties:{search_string:{type:'string'},modules:{type:'array',items:{type:'string'}},max_results:{type:'number'}}}},
   { name:`${PREFIX}_get`, description:'Get a single record by UUID', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'array',items:{type:'string'}}}}},
-  { name:`${PREFIX}_create`, description:'Create a new record', inputSchema:{type:'object',required:['module','fields'],properties:{module:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}}}}},
-  { name:`${PREFIX}_update`, description:'Update an existing record', inputSchema:{type:'object',required:['module','id','fields'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}}}}},
-  { name:`${PREFIX}_delete`, description:'Soft-delete a record', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'}}}},
+  { name:`${PREFIX}_create`, description:'Create a new record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','fields'],properties:{module:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}},dry_run:{type:'boolean'}}}},
+  { name:`${PREFIX}_update`, description:'Update an existing record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id','fields'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}},dry_run:{type:'boolean'}}}},
+  { name:`${PREFIX}_delete`, description:'Soft-delete a record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_count`, description:'Count records matching an optional SQL WHERE clause', inputSchema:{type:'object',required:['module'],properties:{module:{type:'string'},query:{type:'string'}}}},
   { name:`${PREFIX}_get_relationships`, description:'Get related records via a named link field', inputSchema:{type:'object',required:['module','id','link_field'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_fields:{type:'array',items:{type:'string'}},max_results:{type:'number'},offset:{type:'number'}}}},
-  { name:`${PREFIX}_link_records`, description:'Create a relationship between records', inputSchema:{type:'object',required:['module','id','link_field','related_ids'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_ids:{type:'array',items:{type:'string'}}}}},
-  { name:`${PREFIX}_unlink_records`, description:'Remove a relationship between records', inputSchema:{type:'object',required:['module','id','link_field','related_ids'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_ids:{type:'array',items:{type:'string'}}}}},
+  { name:`${PREFIX}_link_records`, description:'Create a relationship between records. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id','link_field','related_ids'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_ids:{type:'array',items:{type:'string'}},dry_run:{type:'boolean'}}}},
+  { name:`${PREFIX}_unlink_records`, description:'Remove a relationship between records. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id','link_field','related_ids'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_ids:{type:'array',items:{type:'string'}},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_get_module_fields`, description:'Get all field definitions for a module', inputSchema:{type:'object',required:['module'],properties:{module:{type:'string'}}}},
   { name:`${PREFIX}_list_modules`, description:'List all available CRM modules', inputSchema:{type:'object',properties:{}}},
   { name:`${PREFIX}_server_info`, description:'Get server status, API strategy, persistence info', inputSchema:{type:'object',properties:{}}},
   { name:`${PREFIX}_get_many`, description:'Fetch multiple records by ID list in one call', inputSchema:{type:'object',required:['module','ids'],properties:{module:{type:'string'},ids:{type:'array',items:{type:'string'},maxItems:100},fields:{type:'array',items:{type:'string'}}}}},
-  { name:`${PREFIX}_bulk_upsert`, description:'Create or update multiple records. Include "id" in fields to update, omit to create.', inputSchema:{type:'object',required:['module','records'],properties:{module:{type:'string'},records:{type:'array',items:{type:'object',additionalProperties:{type:'string'}},maxItems:100}}}},
+  { name:`${PREFIX}_bulk_upsert`, description:'Create or update multiple records. Include "id" in fields to update, omit to create. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','records'],properties:{module:{type:'string'},records:{type:'array',items:{type:'object',additionalProperties:{type:'string'}},maxItems:100},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_get_dropdown_values`, description:'List dropdown names or get key→label values for a specific dropdown', inputSchema:{type:'object',properties:{dropdown_name:{type:'string'}}}},
   { name:`${PREFIX}_get_recent`, description:'Get recently viewed records for the current user', inputSchema:{type:'object',properties:{modules:{type:'array',items:{type:'string'}},max_results:{type:'number'}}}},
   { name:`${PREFIX}_get_note_attachment`, description:'Download a file attachment from a Notes record', inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'}}}},
-  { name:`${PREFIX}_set_note_attachment`, description:'Upload a base64-encoded file attachment to a Notes record', inputSchema:{type:'object',required:['id','filename','file_base64'],properties:{id:{type:'string'},filename:{type:'string'},file_base64:{type:'string'},file_mime_type:{type:'string'}}}},
+  { name:`${PREFIX}_set_note_attachment`, description:'Upload a base64-encoded file attachment to a Notes record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['id','filename','file_base64'],properties:{id:{type:'string'},filename:{type:'string'},file_base64:{type:'string'},file_mime_type:{type:'string'},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_get_upcoming_activities`, description:'Get upcoming calls, meetings, and tasks for current user', inputSchema:{type:'object',properties:{}}},
-  { name:`${PREFIX}_log_call`, description:'Create a logged call and optionally link to contacts/accounts', inputSchema:{type:'object',required:['name','date_start'],properties:{name:{type:'string'},status:{type:'string',enum:['Planned','Held','Not Held'],default:'Held'},direction:{type:'string',enum:['Inbound','Outbound'],default:'Outbound'},duration_hours:{type:'number',default:0},duration_minutes:{type:'number',enum:[0,15,30,45],default:15},date_start:{type:'string'},description:{type:'string'},assigned_user_id:{type:'string'},contact_ids:{type:'array',items:{type:'string'}},account_ids:{type:'array',items:{type:'string'}}}}},
-  { name:`${PREFIX}_create_task`, description:'Create a task and optionally link to a contact/parent record', inputSchema:{type:'object',required:['name'],properties:{name:{type:'string'},status:{type:'string',enum:['Not Started','In Progress','Completed','Pending Input','Deferred'],default:'Not Started'},priority:{type:'string',enum:['High','Medium','Low'],default:'Medium'},date_due:{type:'string'},date_start:{type:'string'},description:{type:'string'},assigned_user_id:{type:'string'},contact_id:{type:'string'},parent_type:{type:'string'},parent_id:{type:'string'}}}},
-  { name:`${PREFIX}_create_note`, description:'Create a note and optionally link to a parent record/contact', inputSchema:{type:'object',required:['name'],properties:{name:{type:'string'},description:{type:'string'},parent_type:{type:'string'},parent_id:{type:'string'},contact_id:{type:'string'},assigned_user_id:{type:'string'}}}},
+  { name:`${PREFIX}_log_call`, description:'Create a logged call and optionally link to contacts/accounts. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['name','date_start'],properties:{name:{type:'string'},status:{type:'string',enum:['Planned','Held','Not Held'],default:'Held'},direction:{type:'string',enum:['Inbound','Outbound'],default:'Outbound'},duration_hours:{type:'number',default:0},duration_minutes:{type:'number',enum:[0,15,30,45],default:15},date_start:{type:'string'},description:{type:'string'},assigned_user_id:{type:'string'},contact_ids:{type:'array',items:{type:'string'}},account_ids:{type:'array',items:{type:'string'}},dry_run:{type:'boolean'}}}},
+  { name:`${PREFIX}_create_task`, description:'Create a task and optionally link to a contact/parent record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['name'],properties:{name:{type:'string'},status:{type:'string',enum:['Not Started','In Progress','Completed','Pending Input','Deferred'],default:'Not Started'},priority:{type:'string',enum:['High','Medium','Low'],default:'Medium'},date_due:{type:'string'},date_start:{type:'string'},description:{type:'string'},assigned_user_id:{type:'string'},contact_id:{type:'string'},parent_type:{type:'string'},parent_id:{type:'string'},dry_run:{type:'boolean'}}}},
+  { name:`${PREFIX}_create_note`, description:'Create a note and optionally link to a parent record/contact. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['name'],properties:{name:{type:'string'},description:{type:'string'},parent_type:{type:'string'},parent_id:{type:'string'},contact_id:{type:'string'},assigned_user_id:{type:'string'},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_get_record_activities`, description:'Get activity history for a record', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},types:{type:'array',items:{type:'string',enum:['calls','meetings','tasks','notes']},default:['calls','meetings','tasks','notes']},max_results:{type:'number'}}}},
 ];
 
@@ -598,24 +626,50 @@ function createMcpServer(sid) {
     try {
       let result;
 
-      // ACL pre-check for write mutations — queries SuiteCRM DB before forwarding to CRM
-      const writeMutations = {
-        [`${PREFIX}_create`]:      ACTION_MAP.create,
-        [`${PREFIX}_update`]:      ACTION_MAP.update,
-        [`${PREFIX}_delete`]:      ACTION_MAP.delete,
-        [`${PREFIX}_bulk_upsert`]: ACTION_MAP.update,
+      // ACL pre-check — queries SuiteCRM DB before forwarding to CRM.
+      // [action, moduleArgField, fixedModule] — null moduleArgField + fixedModule = hardcoded module.
+      // Tools with no module context (search_text, get_recent, get_upcoming_activities) are intentionally omitted.
+      const aclChecks = {
+        [`${PREFIX}_create`]:               [ACTION_MAP.create, 'module'],
+        [`${PREFIX}_update`]:               [ACTION_MAP.update, 'module'],
+        [`${PREFIX}_delete`]:               [ACTION_MAP.delete, 'module'],
+        [`${PREFIX}_bulk_upsert`]:          [ACTION_MAP.update, 'module'],
+        [`${PREFIX}_log_call`]:             [ACTION_MAP.create, null, 'Calls'],
+        [`${PREFIX}_create_task`]:          [ACTION_MAP.create, null, 'Tasks'],
+        [`${PREFIX}_create_note`]:          [ACTION_MAP.create, null, 'Notes'],
+        [`${PREFIX}_set_note_attachment`]:  [ACTION_MAP.update, null, 'Notes'],
+        [`${PREFIX}_link_records`]:         [ACTION_MAP.update, 'module'],
+        [`${PREFIX}_unlink_records`]:       [ACTION_MAP.update, 'module'],
+        [`${PREFIX}_search`]:               [ACTION_MAP.list,   'module'],
+        [`${PREFIX}_count`]:                [ACTION_MAP.list,   'module'],
+        [`${PREFIX}_get`]:                  [ACTION_MAP.view,   'module'],
+        [`${PREFIX}_get_many`]:             [ACTION_MAP.view,   'module'],
+        [`${PREFIX}_get_relationships`]:    [ACTION_MAP.view,   'module'],
+        [`${PREFIX}_get_note_attachment`]:  [ACTION_MAP.view,   null, 'Notes'],
+        [`${PREFIX}_get_record_activities`]:[ACTION_MAP.view,   'module'],
       };
-      if (writeMutations[name] && args.module) {
+      const aclEntry = aclChecks[name];
+      if (aclEntry) {
+        const [action, moduleField, fixedModule] = aclEntry;
+        const module = fixedModule || (moduleField ? args[moduleField] : null);
         const crmUsername = connCreds.get(sid)?.user;
-        if (crmUsername) {
-          const denied = await isAclDenied(crmUsername, args.module, writeMutations[name]);
+        if (crmUsername && module) {
+          const denied = await isAclDenied(crmUsername, module, action, args.id || null);
           if (denied) {
             throw new McpError(
               ErrorCode.InvalidRequest,
-              `Permission denied: "${crmUsername}" is not allowed to perform "${writeMutations[name]}" on module "${args.module}"`
+              `Permission denied: "${crmUsername}" is not allowed to perform "${action}" on module "${module}"`
             );
           }
         }
+      }
+
+      // Dry-run intercept — fires after ACL check, before CRM bridge
+      if (args.dry_run === true) {
+        const dryResult = await handleDryRun(sid, name, args);
+        end(); metricToolCalls.inc({entity:PREFIX,tool:name,status:'success'});
+        cLog.info({audit:true,tool:name,status:'dry_run',durationMs:Date.now()-callStart},'tool_done');
+        return { content:[{type:'text',text:JSON.stringify(dryResult,null,2)}] };
       }
 
       if      (name===`${PREFIX}_search`)                result=await searchRecords(sid,args);
@@ -682,7 +736,7 @@ app.get('/health/deep', deepHealthRL, async (_req,res) => {
     const body='method=get_server_info&input_type=JSON&response_type=JSON&rest_data=%7B%7D';
     const crmData = await new Promise((resolve,reject) => {
       const p=new URL(V4_ENDPOINT); const lib=p.protocol==='https:'?https:http;
-      const r=lib.request({ hostname:p.hostname, port:p.port||(p.protocol==='https:'?443:80), path:p.pathname, method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','Content-Length':Buffer.byteLength(body)}, rejectUnauthorized:TLS_OK }, (res) => { let raw=''; res.on('data',c=>raw+=c); res.on('end',()=>{ try{resolve(JSON.parse(raw));}catch{resolve({});} }); });
+      const r=lib.request({ hostname:p.hostname, port:p.port||(p.protocol==='https:'?443:80), path:p.pathname, method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','Content-Length':Buffer.byteLength(body)}, rejectUnauthorized:TLS_OK }, (res) => { if(res.statusCode<200||res.statusCode>=300){res.resume();return reject(new Error(`HTTP ${res.statusCode}`));} let raw=''; res.on('data',c=>raw+=c); res.on('end',()=>{ try{resolve(JSON.parse(raw));}catch{resolve({});} }); });
       r.setTimeout(5000,()=>r.destroy(new Error('timeout')));
       r.on('error',reject); r.write(body); r.end();
     });

@@ -79,7 +79,7 @@ Built for production environments where data integrity and privacy are non-negot
 - **No credentials on client machines** - MCP clients hold only an opaque API key; CRM passwords live on the gateway
 - **Group-based entity access** - JWT group claims gate which CRM instances each user can reach
 - **Session auto-renewal** - CRM sessions re-authenticate transparently on expiry
-- **Stateless & Scalable** - auth sessions and profiles cached in Redis, enabling horizontal scaling and zero-downtime restarts
+- **Stateless & Scalable** - auth sessions and profiles cached in Redis, enabling zero-downtime restarts and horizontal scaling behind a load balancer with sticky session routing (SSE connections are per-process; the `/messages` endpoint must reach the same process that owns the SSE transport)
 - **Unified installer** - one script handles single CRM (no nginx) or N CRMs behind nginx, with interactive OAuth setup
 - **Entity-prefixed tools** - run multiple CRM instances side-by-side without name collisions
 
@@ -162,7 +162,7 @@ Users log in once via Auth0 or Azure AD; the gateway issues a personal API key. 
 
 **Smart Hybrid Routing:** The gateway automatically routes basic CRUD operations and record fetching through the blazing-fast SuiteCRM 8 GraphQL API. If an AI requests a complex search requiring raw SQL filters (which GraphQL does not support), the gateway intercepts it and transparently fails over to the legacy v4.1 REST API—ensuring absolute 100% feature parity with no manual intervention.
 
-**Stateless Persistence:** By moving auth sessions and user profiles from local memory/files to Redis, the gateway is completely stateless. This allows for horizontal scaling (running multiple gateway instances behind a load balancer), global rate limiting, and seamless restarts without dropping active AI connections.
+**Stateless Persistence:** By moving auth sessions and user profiles from local memory/files to Redis, the gateway is completely stateless. This allows for horizontal scaling (running multiple gateway instances behind a load balancer), global rate limiting, and seamless restarts without dropping active AI connections. When running multiple instances behind a load balancer, sticky session routing is required: SSE transports and their `/messages` endpoint must land on the same process.
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -311,10 +311,10 @@ sudo python3 install.py --remove crm2
 
 The fastest way to run the gateway without touching Node.js or system packages. A pre-built image is published to GitHub Container Registry on every push to `main`.
 
-For production, pin to a release tag such as `v5.0.1` instead of floating on `latest`.
+For production, pin to a release tag such as `v5.1.0` instead of floating on `latest`.
 
 ```bash
-curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v5.0.1/docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/anirudhx7/suitecrm-mcp/v5.1.0/docker-compose.yml
 ```
 
 Create your entity config (the auth service reads this to build MCP client commands):
@@ -363,7 +363,7 @@ Each container handles exactly one CRM entity. For N entities, add N service blo
 services:
 
   suitecrm-mcp-auth:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v5.0.1
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v5.1.0
     command: node auth.mjs
     working_dir: /app
     ports:
@@ -382,7 +382,7 @@ services:
     restart: unless-stopped
 
   suitecrm-mcp-crm1:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v5.0.1
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v5.1.0
     ports:
       - "127.0.0.1:3101:3101"   # expose via reverse proxy only
       - "127.0.0.1:9101:9090"   # entity metrics (Prometheus)
@@ -402,7 +402,7 @@ services:
     restart: unless-stopped
 
   suitecrm-mcp-crm2:
-    image: ghcr.io/anirudhx7/suitecrm-mcp:v5.0.1
+    image: ghcr.io/anirudhx7/suitecrm-mcp:v5.1.0
     ports:
       - "127.0.0.1:3102:3102"   # expose via reverse proxy only
       - "127.0.0.1:9102:9090"   # entity metrics (Prometheus)

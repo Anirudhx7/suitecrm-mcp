@@ -6,7 +6,7 @@
  */
 
 import { Command } from 'commander';
-import { createClient } from 'redis';
+import Redis from 'ioredis';
 import { createHash } from 'crypto';
 import { readFileSync, writeFileSync } from 'fs';
 import { execFile } from 'child_process';
@@ -48,11 +48,11 @@ function saveJson(path, data) {
 
 // ── Redis client ──────────────────────────────────────────────────────────────
 
-const redis = createClient({ url: REDIS_URL });
+const redis = new Redis(REDIS_URL, { lazyConnect: true, enableReadyCheck: false });
 redis.on('error', () => {});
 
 async function connect() {
-  if (!redis.isOpen) {
+  if (redis.status !== 'ready') {
     try { await redis.connect(); }
     catch (e) {
       console.error(c(`Error: cannot connect to Redis at ${REDIS_URL}: ${e.message}`, RED));
@@ -62,13 +62,22 @@ async function connect() {
 }
 
 async function disconnect() {
-  if (redis.isOpen) await redis.disconnect();
+  try { await redis.quit(); } catch {}
+}
+
+async function* scanKeys(pattern) {
+  let cursor = '0';
+  do {
+    const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+    cursor = next;
+    if (keys.length) yield keys;
+  } while (cursor !== '0');
 }
 
 // ── Redis profile helpers (crm:profiles HASH) ────────────────────────────────
 
 async function loadAllProfiles() {
-  const raw = await redis.hGetAll('crm:profiles');
+  const raw = await redis.hgetall('crm:profiles') || {};
   const profiles = {};
   for (const [sub, val] of Object.entries(raw)) {
     try { profiles[sub] = JSON.parse(val); } catch {}
@@ -77,18 +86,18 @@ async function loadAllProfiles() {
 }
 
 async function saveProfile(sub, profile) {
-  await redis.hSet('crm:profiles', sub, JSON.stringify(profile));
+  await redis.hset('crm:profiles', sub, JSON.stringify(profile));
 }
 
 async function deleteProfile(sub) {
-  await redis.hDel('crm:profiles', sub);
+  await redis.hdel('crm:profiles', sub);
 }
 
 // ── Redis session helpers (auth:session:* STRING keys) ────────────────────────
 
 async function loadAllSessions() {
   const sessions = {};
-  for await (const batch of redis.scanIterator({ MATCH: 'auth:session:*', COUNT: 100 })) {
+  for await (const batch of scanKeys('auth:session:*')) {
     for (const key of batch) {
       const tok  = key.slice('auth:session:'.length);
       const data = await redis.get(key);
@@ -650,6 +659,29 @@ async function cmdRestart(entityArg, opts) {
   }
 
   let anyBad = false;
+
+  // Always restart auth service first when --all
+  if (opts.all) {
+    process.stdout.write(`  ${c('auth', BOLD)} (Auth Service)  restarting ... `);
+    try {
+      await execFileAsync('systemctl', ['restart', 'suitecrm-mcp-auth.service']);
+      const deadline = Date.now() + 10000;
+      let ok = false;
+      while (Date.now() < deadline) {
+        const { data } = await fetchHealth(3100, '/health');
+        if (data && data.status === 'ok') { ok = true; break; }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      console.log(ok ? c('OK', GREEN) : c('restarted but health check timed out', YELLOW));
+      if (!ok) anyBad = true;
+    } catch (e) {
+      console.log(c('FAILED', RED));
+      const msg = (e.stderr || e.message || '').trim();
+      if (msg) console.log(`    ${c(msg, RED)}`);
+      anyBad = true;
+    }
+  }
+
   for (const code of codes) {
     const unit  = `suitecrm-mcp-${code}.service`;
     const label = entities[code]?.label || code;
@@ -683,9 +715,9 @@ async function cmdRestart(entityArg, opts) {
 
 async function cmdStats() {
   await connect();
-  const profileCount = Object.keys(await redis.hGetAll('crm:profiles')).length;
+  const profileCount = Object.keys(await redis.hgetall('crm:profiles') || {}).length;
   const sessions = [];
-  for await (const batch of redis.scanIterator({ MATCH: 'auth:session:*', COUNT: 100 })) {
+  for await (const batch of scanKeys('auth:session:*')) {
     sessions.push(...batch);
   }
   const info = await redis.info('memory');
@@ -708,7 +740,7 @@ async function cmdFlush(opts) {
   }
   await connect();
   let count = 0;
-  for await (const batch of redis.scanIterator({ MATCH: 'auth:session:*', COUNT: 100 })) {
+  for await (const batch of scanKeys('auth:session:*')) {
     for (const key of batch) { await redis.del(key); count++; }
   }
   console.log(c(`Flushed ${count} sessions. All users must re-authenticate.`, GREEN));
@@ -722,7 +754,7 @@ const program = new Command();
 program
   .name('mcp-admin')
   .description('SuiteCRM MCP Gateway admin tool')
-  .version('4.4.0');
+  .version('5.1.0');
 
 program
   .command('list')

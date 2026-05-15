@@ -136,3 +136,19 @@ Loki retention policies and access controls appropriate to your data classificat
 The Node.js installer uses `curl https://deb.nodesource.com/setup_lts.x | bash` to set up
 the NodeSource APT repository. This is a privileged shell pipeline fetched over HTTPS. If
 you require a fully auditable install, download and verify the script manually.
+
+### mcp-admin shell access
+
+`mcp-admin` connects directly to Redis using `REDIS_URL` from the environment. Any user with shell access to the gateway server can run `mcp-admin flush --yes-i-am-sure` and invalidate all sessions, or `mcp-admin remove` to delete user profiles. Restrict SSH access to the gateway host accordingly.
+
+### Alertmanager default receiver
+
+The bundled `monitoring/alertmanager/alertmanager.yml` routes all alerts to the `null` receiver — alerts fire but go nowhere. Before production use, replace the `null` receiver with a real notification target (Slack, PagerDuty, email). See the commented-out Slack example in that file.
+
+### Grafana email labels (GDPR)
+
+The `suitecrm_mcp_user_crm_session_active` and `suitecrm_mcp_user_gateway_session_active` Prometheus metrics include `email` as a label. The Grafana dashboard displays these values to anyone with Grafana access. For EU deployments, restrict Grafana access or replace the per-user gauges with aggregate counts.
+
+### Circuit breaker tuning
+
+The circuit breaker is shared per entity (not per user): 5 consecutive CRM failures from any user opens the circuit for all users of that entity for `CIRCUIT_BREAKER_RESET_MS` (default 60 000 ms). For smaller teams, consider lowering this via the env var (e.g. `CIRCUIT_BREAKER_RESET_MS=15000`) to reduce blast radius from transient errors.

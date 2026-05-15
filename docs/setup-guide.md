@@ -1,6 +1,6 @@
 # Complete Setup Guide
 
-End-to-end guide for deploying suitecrm-mcp v4.x from scratch.
+End-to-end guide for deploying suitecrm-mcp v5.x from scratch.
 
 ## 📖 Overview
 

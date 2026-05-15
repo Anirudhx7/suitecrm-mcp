@@ -1,77 +1,263 @@
 {
   "title": "SuiteCRM MCP - Fleet Overview",
   "uid": "suitecrm-mcp-fleet",
-  "version": 2,
+  "version": 8,
   "schemaVersion": 39,
-  "tags": ["suitecrm", "fleet"],
+  "tags": [
+    "suitecrm",
+    "fleet"
+  ],
   "refresh": "30s",
-  "time": { "from": "now-1h", "to": "now" },
-  "templating": { "list": [
-    {
-      "name": "entity",
-      "label": "Entity",
-      "type": "query",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "query": { "query": "label_values(suitecrm_mcp_tool_calls_total, entity)", "refId": "StandardVariableQuery" },
-      "refresh": 2,
-      "multi": true,
-      "includeAll": true,
-      "allValue": ".*",
-      "sort": 1,
-      "hide": 0
-    }
-  ] },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "entity",
+        "label": "Entity",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(suitecrm_mcp_tool_calls_total, entity)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1,
+        "hide": 0
+      },
+      {
+        "name": "log_level",
+        "label": "Log Level",
+        "type": "custom",
+        "query": "All : .*,Info : 30,Warn : 40,Error : 50",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "Info",
+            "value": "30"
+          },
+          {
+            "selected": false,
+            "text": "Warn",
+            "value": "40"
+          },
+          {
+            "selected": false,
+            "text": "Error",
+            "value": "50"
+          }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "log_search",
+        "label": "Log Search",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      },
+      {
+        "name": "log_msg",
+        "label": "Message Type",
+        "type": "custom",
+        "query": "All : .*,Rate Limited : rate_limit_hit,SSE Connect : sse_connected,SSE Disconnect : sse_disconnected,SSE Evicted : sse_evicted_by_reconnect,Tool Call : tool_call,Login : login,CRM Login Failed : crm_login_failed,CRM Provision Failed : crm_provision_failed,Session Reused : session_reused,Auth Failure : auth_failure",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "Rate Limited",
+            "value": "rate_limit_hit"
+          },
+          {
+            "selected": false,
+            "text": "SSE Connect",
+            "value": "sse_connected"
+          },
+          {
+            "selected": false,
+            "text": "SSE Disconnect",
+            "value": "sse_disconnected"
+          },
+          {
+            "selected": false,
+            "text": "SSE Evicted",
+            "value": "sse_evicted_by_reconnect"
+          },
+          {
+            "selected": false,
+            "text": "Tool Call",
+            "value": "tool_call"
+          },
+          {
+            "selected": false,
+            "text": "Login",
+            "value": "login"
+          },
+          {
+            "selected": false,
+            "text": "CRM Login Failed",
+            "value": "crm_login_failed"
+          },
+          {
+            "selected": false,
+            "text": "CRM Provision Failed",
+            "value": "crm_provision_failed"
+          },
+          {
+            "selected": false,
+            "text": "Session Reused",
+            "value": "session_reused"
+          },
+          {
+            "selected": false,
+            "text": "Auth Failure",
+            "value": "auth_failure"
+          }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "log_user",
+        "label": "User Filter",
+        "type": "textbox",
+        "query": ".*",
+        "current": {
+          "selected": false,
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 0,
+        "description": "Email or sub \u2014 regex, leave as .* for all users"
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
       "title": "Traffic",
       "type": "row",
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 2,
       "title": "Tool Calls / min by Entity",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 1, "w": 24, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "sum by (entity) (rate(suitecrm_mcp_tool_calls_total[5m]) * 60)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "sum by (entity) (rate(suitecrm_mcp_tool_calls_total[$__rate_interval]) * 60)",
           "legendFormat": "{{entity}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "reqpm",
-          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
         },
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi" },
-        "legend": { "displayMode": "list", "placement": "bottom" }
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
       }
     },
     {
       "id": 3,
       "title": "Health",
       "type": "row",
-      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 4,
       "title": "Circuit Breaker State",
       "type": "table",
-      "gridPos": { "x": 0, "y": 10, "w": 8, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
           "expr": "suitecrm_mcp_circuit_breaker_state",
           "legendFormat": "{{entity}}",
           "instant": true,
@@ -79,13 +265,27 @@
         }
       ],
       "transformations": [
-        { "id": "labelsToFields", "options": { "mode": "columns" } },
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
         {
           "id": "organize",
           "options": {
-            "excludeByName": { "Time": true, "__name__": true },
-            "renameByName": { "entity": "Entity", "Value": "State" },
-            "indexByName": { "Entity": 0, "State": 1 }
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "entity": "Entity",
+              "Value": "State"
+            },
+            "indexByName": {
+              "Entity": 0,
+              "State": 1
+            }
           }
         }
       ],
@@ -93,15 +293,45 @@
         "defaults": {},
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "State" },
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
             "properties": [
-              { "id": "displayName", "value": "State" },
+              {
+                "id": "displayName",
+                "value": "State"
+              },
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "0": { "text": "Closed", "color": "green" } } },
-                  { "type": "value", "options": { "1": { "text": "Half-Open", "color": "yellow" } } },
-                  { "type": "value", "options": { "2": { "text": "Open", "color": "red" } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Closed",
+                        "color": "green"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "1": {
+                        "text": "Half-Open",
+                        "color": "yellow"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "2": {
+                        "text": "Open",
+                        "color": "red"
+                      }
+                    }
+                  }
                 ]
               },
               {
@@ -109,29 +339,54 @@
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    { "color": "green", "value": null },
-                    { "color": "yellow", "value": 1 },
-                    { "color": "red", "value": 2 }
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 2
+                    }
                   ]
                 }
               },
-              { "id": "custom.displayMode", "value": "color-background" }
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
             ]
           }
         ]
       },
-      "options": { "sortBy": [] }
+      "options": {
+        "sortBy": []
+      }
     },
     {
       "id": 5,
       "title": "Active Connections",
       "type": "bargauge",
-      "gridPos": { "x": 8, "y": 10, "w": 8, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 8,
+        "y": 10,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
           "expr": "suitecrm_mcp_active_connections",
           "legendFormat": "{{entity}}"
         }
@@ -143,9 +398,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 80 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
             ]
           }
         },
@@ -154,146 +418,251 @@
       "options": {
         "orientation": "horizontal",
         "displayMode": "gradient",
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "showUnfilled": true
       }
     },
     {
       "id": 6,
-      "title": "Profiles Configured",
-      "type": "table",
-      "gridPos": { "x": 16, "y": 10, "w": 8, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "title": "Login Results (24h)",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 16,
+        "y": 10,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
-          "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "suitecrm_mcp_profiles_configured",
-          "legendFormat": "{{entity}}",
-          "instant": true,
-          "format": "table"
+          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"success\"}[24h]))",
+          "legendFormat": "success"
         },
         {
-          "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "suitecrm_mcp_gateway_sessions_active",
-          "legendFormat": "{{entity}}",
-          "instant": true,
-          "format": "table"
+          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"failure\"}[24h]))",
+          "legendFormat": "failure"
+        },
+        {
+          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"reused\"}[24h]))",
+          "legendFormat": "reused"
         }
       ],
       "transformations": [
-        { "id": "labelsToFields", "options": { "mode": "columns" } },
-        { "id": "merge", "options": {} },
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
-            "excludeByName": { "Time": true, "__name__": true },
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
             "renameByName": {
               "entity": "Entity",
               "Value #A": "Profiles",
               "Value #B": "Active Sessions"
             },
-            "indexByName": { "Entity": 0, "Profiles": 1, "Active Sessions": 2 }
+            "indexByName": {
+              "Entity": 0,
+              "Profiles": 1,
+              "Active Sessions": 2
+            }
           }
         }
       ],
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "options": { "sortBy": [] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "sortBy": []
+      }
     },
     {
       "id": 7,
       "title": "Errors",
       "type": "row",
-      "gridPos": { "x": 0, "y": 18, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 8,
       "title": "Error Rate by Entity %",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 19, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "sum by (entity) (rate(suitecrm_mcp_tool_calls_total{status=\"error\"}[5m])) / sum by (entity) (rate(suitecrm_mcp_tool_calls_total[5m])) * 100",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "sum by (entity) (rate(suitecrm_mcp_tool_calls_total{status=\"error\"}[$__rate_interval])) / sum by (entity) (rate(suitecrm_mcp_tool_calls_total[$__rate_interval])) * 100",
           "legendFormat": "{{entity}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
-          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 10 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi" },
-        "legend": { "displayMode": "list", "placement": "bottom" }
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
       }
     },
     {
       "id": 9,
       "title": "Auth Failures / min",
       "type": "timeseries",
-      "gridPos": { "x": 12, "y": 19, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "sum by (entity) (rate(suitecrm_mcp_auth_failures_total[5m]) * 60)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "sum by (entity) (rate(suitecrm_mcp_auth_failures_total[$__rate_interval]) * 60)",
           "legendFormat": "{{entity}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.1 },
-              { "color": "red", "value": 1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi" },
-        "legend": { "displayMode": "list", "placement": "bottom" }
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
       }
     },
     {
       "id": 10,
       "title": "Logs",
       "type": "row",
-      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 11,
       "title": "Live Logs (all entities)",
       "type": "logs",
-      "gridPos": { "x": 0, "y": 28, "w": 24, "h": 10 },
-      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "loki", "uid": "Loki" },
-          "expr": "{service=~\"suitecrm.*\"}",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "{job=\"suitecrm-mcp\", level=~\"$log_level\"} | json | msg =~ \"$log_msg\" |~ \"(?i)$log_user\" |~ \"(?i)$log_search\"",
           "legendFormat": ""
         }
       ],
@@ -303,43 +672,84 @@
         "sortOrder": "Descending",
         "wrapLogMessage": false
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     },
     {
       "id": 12,
       "title": "Auth",
       "type": "row",
-      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 13,
       "title": "Auth Service Health",
       "type": "stat",
-      "gridPos": { "x": 0, "y": 39, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 0,
+        "y": 39,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
           "expr": "up{job=\"suitecrm-mcp-auth\"}",
           "legendFormat": "auth"
         }
       ],
       "options": {
         "colorMode": "background",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
           ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           }
         }
@@ -347,43 +757,75 @@
     },
     {
       "id": 14,
-      "title": "Logins Today",
+      "title": "Total Logins",
       "type": "stat",
-      "gridPos": { "x": 4, "y": 39, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 4,
+        "y": 39,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "sum(increase(suitecrm_auth_logins_total[24h]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "sum(increase(suitecrm_auth_logins_total[$__range]))",
           "legendFormat": "logins"
         }
       ],
       "options": {
         "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
-        "defaults": { "unit": "short" }
+        "defaults": {
+          "unit": "short"
+        }
       }
     },
     {
       "id": 15,
       "title": "Active Gateway Sessions",
       "type": "stat",
-      "gridPos": { "x": 8, "y": 39, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "x": 8,
+        "y": 39,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
           "expr": "suitecrm_auth_sessions_active",
           "legendFormat": "sessions"
         }
       ],
       "options": {
         "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -391,9 +833,345 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null }
+              {
+                "color": "green",
+                "value": null
+              }
             ]
           }
+        }
+      }
+    },
+    {
+      "id": 16,
+      "title": "Users",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 17,
+      "title": "Active Sessions",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 4,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "suitecrm_auth_sessions_active",
+          "legendFormat": "sessions"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 18,
+      "title": "Total Rate Limit Hits",
+      "type": "stat",
+      "gridPos": {
+        "x": 4,
+        "y": 44,
+        "w": 4,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(suitecrm_mcp_rate_limited_total[$__range]))",
+          "legendFormat": "hits"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 200
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "title": "Process Health",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 54,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "title": "Service Uptime & Last Restart",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 55,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "format": "table",
+          "expr": "time() - process_start_time_seconds{job=~\"suitecrm-mcp.*\"}"
+        },
+        {
+          "refId": "B",
+          "instant": true,
+          "format": "table",
+          "expr": "process_start_time_seconds{job=~\"suitecrm-mcp.*\"} * 1000"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "exported_entity": true,
+              "entity": true
+            },
+            "renameByName": {
+              "job": "Service",
+              "Value #A": "Uptime",
+              "Value #B": "Last Restart"
+            },
+            "indexByName": {
+              "Service": 0,
+              "Uptime": 1,
+              "Last Restart": 2
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Uptime"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dtdurations"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last Restart"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Service",
+            "desc": false
+          }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "title": "Heap Memory All Services",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 55,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "nodejs_heap_size_used_bytes{job=~\"suitecrm-mcp.*\"} / 1024 / 1024",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "MiB",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "title": "Who's Online",
+      "type": "table",
+      "gridPos": {
+        "x": 4,
+        "y": 64,
+        "w": 20,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "suitecrm_mcp_user_gateway_session_active == 1",
+          "legendFormat": "{{email}} / {{entity}}",
+          "instant": true
+        },
+        {
+          "expr": "suitecrm_mcp_user_crm_session_active == 1",
+          "legendFormat": "CRM: {{email}} / {{entity}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "auto"
+          }
+        }
+      }
+    },
+    {
+      "id": 24,
+      "title": "Unique Active Users",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "count(count by (email) (suitecrm_mcp_user_gateway_session_active == 1)) or vector(0)",
+          "legendFormat": "users"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
         }
       }
     }

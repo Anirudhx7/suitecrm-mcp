@@ -286,7 +286,7 @@ app.get('/auth/login', loginLimiter, (req, res) => {
     audience:      AUTH0_AUDIENCE,
   });
   let state;
-  if (nonce) {
+  if (nonce && NONCE_RE.test(nonce)) {
     state = nonce;
   } else {
     state = randomBytes(16).toString('hex');
@@ -389,6 +389,7 @@ app.get('/auth/callback', loginLimiter, async (req, res) => {
       if (hasGroup) entities.push({ code, label: data.label, port: data.port });
     }
 
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: 'self'; connect-src 'none'; object-src 'none'; frame-ancestors 'none';");
     res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -634,7 +635,7 @@ var _cdHint = {};
       const url  = code==='default' ? GW_BASE+'/sse' : GW_BASE+'/'+code+'/sse';
       const name = code==='default' ? 'suitecrm'     : 'suitecrm_'+code;
       const entry = os==='win'
-        ? {command:'cmd',args:['/C','npx','mcp-remote',url,'--transport','sse-only','--header','Authorization:Bearer '+GW_APIKEY]}
+        ? {command:'cmd',args:['/C','npx','-y','mcp-remote',url,'--transport','sse-only','--header','Authorization:Bearer '+GW_APIKEY]}
         : {command:'npx',args:['-y','mcp-remote',url,'--transport','sse-only','--header','Authorization:Bearer '+GW_APIKEY]};
       return [name, entry];
     }))};

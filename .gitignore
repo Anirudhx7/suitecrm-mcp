@@ -21,6 +21,7 @@ CHANGELOG.md
 .planning/
 graphify-out/
 .graphify_*.json
+docs/superpowers/
 
 # Python
 __pycache__/

@@ -850,6 +850,12 @@
       margin-top: 32px;
     }
 
+    @media (max-width: 860px) {
+      .admin-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .admin-card {
       background: rgba(196, 93, 37, 0.07);
       border: 1px solid rgba(196, 93, 37, 0.18);
@@ -913,6 +919,14 @@
       color: var(--text-secondary);
       line-height: 1.8;
       overflow-x: auto;
+      word-break: break-word;
+    }
+
+    @media (max-width: 480px) {
+      .admin-terminal {
+        padding: 16px;
+        font-size: 0.78rem;
+      }
     }
 
     /* Observability */
@@ -1809,18 +1823,23 @@
     .prod-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 10px 24px;
+      gap: 0 24px;
       max-width: 860px;
     }
 
     .prod-item {
       display: flex;
-      align-items: baseline;
+      align-items: flex-start;
       gap: 10px;
       font-size: 0.88rem;
       color: var(--text-secondary);
-      padding: 8px 0;
+      padding: 9px 0;
       border-bottom: 1px solid rgba(196, 93, 37, 0.07);
+      line-height: 1.5;
+    }
+
+    .prod-item code {
+      white-space: nowrap;
     }
 
     .prod-check {
@@ -1828,10 +1847,10 @@
       font-size: 0.9rem;
       font-weight: 700;
       flex-shrink: 0;
-      line-height: 1.5;
+      margin-top: 1px;
     }
 
-    @media (max-width: 768px) {
+    @media (max-width: 860px) {
       .prod-grid {
         grid-template-columns: repeat(2, 1fr);
       }
@@ -2382,15 +2401,13 @@
         <p class="section-sub fade-up">Not a prototype. A checklist of what's already in the box.</p>
         <div class="prod-grid fade-up">
           <div class="prod-item"><span class="prod-check">+</span> Docker + systemd deployment</div>
-          <div class="prod-item"><span class="prod-check">+</span> <code>mcp-admin</code> installed at <code>/usr/local/bin</code></div>
+          <div class="prod-item"><span class="prod-check">+</span> <code>mcp-admin</code> ops CLI</div>
           <div class="prod-item"><span class="prod-check">+</span> Redis-backed sessions, profiles, bridge handoffs, and rate limits</div>
           <div class="prod-item"><span class="prod-check">+</span> SuiteCRM v8 GraphQL + v4.1 REST fallback</div>
           <div class="prod-item"><span class="prod-check">+</span> Prometheus metrics (17 metrics)</div>
-          <div class="prod-item"><span class="prod-check">+</span> Grafana dashboards (33-panel entity + fleet overview)
-          </div>
+          <div class="prod-item"><span class="prod-check">+</span> Grafana dashboards (33-panel entity + fleet overview)</div>
           <div class="prod-item"><span class="prod-check">+</span> Loki log aggregation</div>
-          <div class="prod-item"><span class="prod-check">+</span> Prometheus alerting rules (circuit breaker, auth
-            failures, latency SLO)</div>
+          <div class="prod-item"><span class="prod-check">+</span> Prometheus alerting rules (circuit breaker, auth failures, latency SLO)</div>
           <div class="prod-item"><span class="prod-check">+</span> Circuit breaker on CRM backend</div>
           <div class="prod-item"><span class="prod-check">+</span> Per-user rate limiting</div>
           <div class="prod-item"><span class="prod-check">+</span> TLS / Let's Encrypt support</div>
