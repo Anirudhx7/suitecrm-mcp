@@ -67,7 +67,8 @@ ENV_DIR            = "/etc/suitecrm-mcp"
 ENV_FILE           = "/etc/suitecrm-mcp/gateway.env"   # single-entity env
 ENTITIES_JSON      = "/etc/suitecrm-mcp/entities.json"  # runtime entity config for the server
 CRM_HOSTS_FILE     = "/etc/suitecrm-mcp/crm-hosts.json"  # SSH provisioning config
-PROFILES_FILE      = "/etc/suitecrm-mcp/user-profiles.json"
+# NOTE: user-profiles.json is no longer used. Profiles are stored in Redis
+# under the crm:profiles hash (key = SSO sub, value = JSON). Use mcp-admin to manage them.
 DOMAIN_FILE        = "/etc/suitecrm-mcp/domain"
 AUTH_ENV_FILE      = "/etc/suitecrm-mcp/auth.env"
 AUTH_SVC_NAME      = "suitecrm-mcp-auth"

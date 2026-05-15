@@ -660,7 +660,7 @@ curl https://mcp.yourserver.com/health
 - `HTTP 401` on SSE - API key invalid or expired; re-authenticate at `/auth/login`
 - `HTTP 403` on SSE - user not in the required group for this entity; check identity provider group membership
 - OAuth callback error - verify `OAUTH_REDIRECT_URI` matches exactly what is registered in your identity provider
-- `CRM login failed` after OAuth - CRM user not found or API access not enabled; check `user-profiles.json`
+- `CRM login failed` after OAuth - CRM user not found or API access not enabled; run `mcp-admin list` to verify the user has a profile in Redis
 - `Non-JSON response` - wrong CRM endpoint URL; check it ends in `/service/v4_1/rest.php`
 - `ECONNREFUSED` - service isn't running; `journalctl -u suitecrm-mcp`
 - SSE connection drops - normal for long idle periods; clients reconnect automatically
@@ -724,10 +724,10 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 
 - **HTTPS is required for production.** OAuth flows and API keys must not travel over plain HTTP. Use `--domain` to enable Let's Encrypt, or put the gateway behind a TLS-terminating proxy.
 - **API keys are personal and revocable.** Each user gets their own key tied to their identity. Admins can revoke a key instantly with `mcp-admin revoke <sub>`. Compromised keys do not expose other users.
-- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque API key. CRM credentials are stored in `/etc/suitecrm-mcp/user-profiles.json` (mode 600) on the gateway.
+- **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque API key. CRM credentials are stored in Redis under the `crm:profiles` hash on the gateway (access-controlled by Redis auth and network binding).
 - **Keep `AUTH0_CLIENT_SECRET` secret.** It is stored in `/etc/suitecrm-mcp/auth.env` (mode 600) and only read by the auth service.
 - Env files are written with mode `600` and the env directory with `700`
-- `entities.json` and `user-profiles.json` are in `.gitignore` - never commit them
+- `entities.json` is in `.gitignore` — never commit it (it contains CRM endpoints and group names)
 
 See [SECURITY.md](SECURITY.md) for full details on controls and known limitations.
 

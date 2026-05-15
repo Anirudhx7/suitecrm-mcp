@@ -43,7 +43,7 @@ services:
     ports:
       - "127.0.0.1:3101:3101"   # change to "3101:3101" only behind a reverse proxy
     volumes:
-      - suitecrm-state:/etc/suitecrm-mcp   # shared with auth service: sessions + user-profiles
+      - suitecrm-state:/etc/suitecrm-mcp   # shared with auth service: entities.json, SSH keys
     environment:
       SUITECRM_ENDPOINT: https://crm.example.com/legacy/service/v4_1/rest.php
       SUITECRM_PREFIX: suitecrm
