@@ -645,6 +645,11 @@ async function cmdRestart(entityArg, opts) {
   const entities = loadJson(ENTITIES_FILE);
   let codes;
 
+  if (!opts.all && !entityArg && !opts.monitoring) {
+    console.error(c('Error: specify an entity code, --all, or --monitoring', RED));
+    process.exit(1);
+  }
+
   if (opts.all) {
     codes = Object.keys(entities).sort();
   } else if (entityArg) {
@@ -654,11 +659,24 @@ async function cmdRestart(entityArg, opts) {
     }
     codes = [entityArg];
   } else {
-    console.error(c('Error: specify an entity code or --all', RED));
-    process.exit(1);
+    codes = [];
   }
 
   let anyBad = false;
+
+  // Restart monitoring stack if --monitoring (or --all --monitoring)
+  if (opts.monitoring) {
+    process.stdout.write(`  ${c('monitoring', BOLD)} (Monitoring Stack)  restarting ... `);
+    try {
+      await execFileAsync('systemctl', ['restart', 'suitecrm-mcp-monitoring.service']);
+      console.log(c('OK', GREEN));
+    } catch (e) {
+      console.log(c('FAILED', RED));
+      const msg = (e.stderr || e.message || '').trim();
+      if (msg) console.log(`    ${c(msg, RED)}`);
+      anyBad = true;
+    }
+  }
 
   // Always restart auth service first when --all
   if (opts.all) {
@@ -754,7 +772,7 @@ const program = new Command();
 program
   .name('mcp-admin')
   .description('SuiteCRM MCP Gateway admin tool')
-  .version('5.1.0');
+  .version('5.1.1');
 
 program
   .command('list')
@@ -843,6 +861,7 @@ program
   .description('Restart one or all MCP gateway instances')
   .argument('[entity]', 'Entity code to restart')
   .option('--all', 'Restart all gateway instances')
+  .option('--monitoring', 'Restart the monitoring stack (Prometheus/Grafana/Loki)')
   .action(cmdRestart);
 
 program

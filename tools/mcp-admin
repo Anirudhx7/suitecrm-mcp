@@ -1,6 +1,4 @@
 #!/bin/sh
 # SuiteCRM MCP Gateway admin CLI wrapper
-# Resolves node_modules from the installed server location.
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-NODE_MODULES="${SUITECRM_MCP_MODULES:-/opt/suitecrm-mcp/node_modules}"
-exec env NODE_PATH="$NODE_MODULES" node "${SCRIPT_DIR}/mcp-admin.mjs" "$@"
+# mcp-admin.mjs lives in SERVER_DIR so Node resolves imports from node_modules there.
+exec node /opt/suitecrm-mcp/mcp-admin.mjs "$@"

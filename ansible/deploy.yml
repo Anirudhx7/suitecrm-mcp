@@ -90,7 +90,7 @@
 
     - name: Fetch config discovery script from gateway
       slurp:
-        src: "{{ playbook_dir }}/find-suitecrm-config.sh"
+        src: "{{ playbook_dir }}/../scripts/find-suitecrm-config.sh"
       register: discovery_script
       delegate_to: gateway
       when: config_already_set.stdout == "0"
@@ -204,7 +204,7 @@
     # ── Update crm-hosts.json on gateway ─────────────────────────
     - name: Fetch update-crm-host.sh from gateway
       slurp:
-        src: "{{ playbook_dir }}/update-crm-host.sh"
+        src: "{{ playbook_dir }}/../scripts/update-crm-host.sh"
       register: update_script
       delegate_to: gateway
       when: hosts_check.rc != 0

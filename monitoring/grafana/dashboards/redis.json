@@ -1,0 +1,218 @@
+{
+  "uid": "redis-overview",
+  "title": "Redis",
+  "description": "Redis health, memory, keyspace and MCP session key breakdown",
+  "tags": ["redis", "suitecrm-mcp"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+
+    { "id": 1, "type": "stat", "title": "Redis Up",
+      "gridPos": { "x": 0, "y": 0, "w": 3, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"type":"value","options":{"0":{"text":"DOWN","color":"red"},"1":{"text":"UP","color":"green"}}}],
+          "thresholds": {"mode":"absolute","steps":[{"color":"red","value":null},{"color":"green","value":1}]},
+          "color": {"mode":"thresholds"}
+        }
+      },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "value" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "redis_up", "instant": true, "legendFormat": "" }]
+    },
+
+    { "id": 2, "type": "stat", "title": "Uptime",
+      "gridPos": { "x": 3, "y": 0, "w": 3, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "s", "color": {"mode":"fixed","fixedColor":"blue"} } },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "none" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "redis_uptime_in_seconds", "instant": true }]
+    },
+
+    { "id": 3, "type": "stat", "title": "Connected Clients",
+      "gridPos": { "x": 6, "y": 0, "w": 3, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":20},{"color":"red","value":50}]},
+          "color": {"mode":"thresholds"}
+        }
+      },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "background", "graphMode": "none" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "redis_connected_clients", "instant": true }]
+    },
+
+    { "id": 4, "type": "stat", "title": "Total Keys (db0)",
+      "gridPos": { "x": 9, "y": 0, "w": 3, "h": 4 },
+      "fieldConfig": { "defaults": { "color": {"mode":"fixed","fixedColor":"blue"} } },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "none" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "redis_db_keys{db=\"db0\"}", "instant": true }]
+    },
+
+    { "id": 5, "type": "stat", "title": "Used Memory",
+      "gridPos": { "x": 12, "y": 0, "w": 3, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":536870912},{"color":"red","value":1073741824}]},
+          "color": {"mode":"thresholds"}
+        }
+      },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "none" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "redis_memory_used_bytes", "instant": true }]
+    },
+
+    { "id": 6, "type": "stat", "title": "Memory Fragmentation Ratio",
+      "gridPos": { "x": 15, "y": 0, "w": 3, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "thresholds": {"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":1.5},{"color":"red","value":2.0}]},
+          "color": {"mode":"thresholds"}
+        }
+      },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "none" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "redis_mem_fragmentation_ratio", "instant": true }]
+    },
+
+    { "id": 7, "type": "stat", "title": "Hit Rate",
+      "gridPos": { "x": 18, "y": 0, "w": 3, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {"mode":"absolute","steps":[{"color":"red","value":null},{"color":"yellow","value":0.7},{"color":"green","value":0.9}]},
+          "color": {"mode":"thresholds"}
+        }
+      },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "none" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]) + 0.001)", "instant": true }]
+    },
+
+    { "id": 8, "type": "stat", "title": "Expired Keys / min",
+      "gridPos": { "x": 21, "y": 0, "w": 3, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": {"mode":"fixed","fixedColor":"orange"} } },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "none" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "rate(redis_expired_keys_total[1m]) * 60", "instant": true }]
+    },
+
+    { "id": 10, "type": "row", "title": "MCP Session Keys", "gridPos": { "x": 0, "y": 4, "w": 24, "h": 1 }, "collapsed": false },
+
+    { "id": 11, "type": "stat", "title": "Auth Sessions",
+      "description": "Active gateway auth sessions (auth:session:*)",
+      "gridPos": { "x": 0, "y": 5, "w": 4, "h": 4 },
+      "fieldConfig": { "defaults": { "color": {"mode":"fixed","fixedColor":"blue"} } },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "area" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "sum(redis_key_size{key=~\"auth:session:.*\"})", "instant": false, "legendFormat": "Auth Sessions" }]
+    },
+
+    { "id": 12, "type": "stat", "title": "CRM Sessions Cached",
+      "description": "Active CRM token sessions in Redis (crm:session:*)",
+      "gridPos": { "x": 4, "y": 5, "w": 4, "h": 4 },
+      "fieldConfig": { "defaults": { "color": {"mode":"fixed","fixedColor":"green"} } },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "area" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "sum(suitecrm_mcp_user_crm_session_active)", "instant": false, "legendFormat": "CRM Sessions" }]
+    },
+
+    { "id": 13, "type": "stat", "title": "Zombie sid2sub Keys",
+      "description": "crm:sid2sub:* entries not pointed to by any sub2sid — should be 0 or minimal",
+      "gridPos": { "x": 8, "y": 5, "w": 4, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":3},{"color":"red","value":10}]},
+          "color": {"mode":"thresholds"}
+        }
+      },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "background", "graphMode": "none" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "redis_db_keys{db=\"db0\"} - count(redis_key_size) or vector(0)", "instant": true, "hide": true },
+                  { "expr": "max(redis_db_keys{db=\"db0\"}) - (count(count by (key) (redis_key_size)) or vector(0))", "instant": true, "legendFormat": "orphan keys", "hide": true }]
+    },
+
+    { "id": 14, "type": "stat", "title": "sub→sid Mappings",
+      "description": "crm:sub2sid:* — active user-to-connection pointers. One per online user.",
+      "gridPos": { "x": 12, "y": 5, "w": 4, "h": 4 },
+      "fieldConfig": { "defaults": { "color": {"mode":"fixed","fixedColor":"purple"} } },
+      "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "area" },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "redis_db_keys{db=\"db0\"}", "instant": false, "legendFormat": "total db0 keys" }]
+    },
+
+    { "id": 20, "type": "row", "title": "Performance", "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 }, "collapsed": false },
+
+    { "id": 21, "type": "timeseries", "title": "Commands / sec",
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "options": { "tooltip": {"mode":"multi"} },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "rate(redis_commands_processed_total[1m])", "legendFormat": "commands/s" }]
+    },
+
+    { "id": 22, "type": "timeseries", "title": "Memory Used",
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "options": { "tooltip": {"mode":"multi"} },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "redis_memory_used_bytes", "legendFormat": "used" },
+        { "expr": "redis_memory_max_bytes", "legendFormat": "max (configured)" }
+      ]
+    },
+
+    { "id": 23, "type": "timeseries", "title": "Connected Clients",
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "options": { "tooltip": {"mode":"multi"} },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "redis_connected_clients", "legendFormat": "clients" },
+        { "expr": "redis_blocked_clients", "legendFormat": "blocked" }
+      ]
+    },
+
+    { "id": 24, "type": "timeseries", "title": "Keyspace Hits vs Misses",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "options": { "tooltip": {"mode":"multi"} },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "rate(redis_keyspace_hits_total[1m])", "legendFormat": "hits/s" },
+        { "expr": "rate(redis_keyspace_misses_total[1m])", "legendFormat": "misses/s" }
+      ]
+    },
+
+    { "id": 25, "type": "timeseries", "title": "Keys Expired / Evicted per min",
+      "gridPos": { "x": 0, "y": 26, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "options": { "tooltip": {"mode":"multi"} },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "rate(redis_expired_keys_total[1m]) * 60", "legendFormat": "expired/min" },
+        { "expr": "rate(redis_evicted_keys_total[1m]) * 60", "legendFormat": "evicted/min" }
+      ]
+    },
+
+    { "id": 26, "type": "timeseries", "title": "Network I/O",
+      "gridPos": { "x": 12, "y": 26, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+      "options": { "tooltip": {"mode":"multi"} },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "rate(redis_net_input_bytes_total[1m])", "legendFormat": "in" },
+        { "expr": "rate(redis_net_output_bytes_total[1m])", "legendFormat": "out" }
+      ]
+    }
+
+  ]
+}

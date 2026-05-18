@@ -365,7 +365,7 @@ async function profileMiddleware(req, res, next) {
       return res.status(403).json({
         error: 'No CRM profile',
         sub: req.auth.sub,
-        fix: `Run: node scripts/add_user.mjs "${req.auth.sub}" <crmUser> <crmPass> ${CODE}`,
+        fix: `Run: mcp-admin add --sub "${req.auth.sub}" --entity ${CODE} --user <crmUser> --pass <crmPass>`,
       });
     }
     req.crmProfile = profile;
@@ -381,7 +381,7 @@ function groupAccessMiddleware(req, res, next) {
   }
   const creds = req.crmProfile?.entities?.[CODE];
   if (!creds?.user || !creds?.pass)
-    return res.status(403).json({ error: `No CRM credentials for ${CODE}`, fix: `Run: node scripts/add_user.mjs "${req.auth.sub}" <crmUser> <crmPass> ${CODE}` });
+    return res.status(403).json({ error: `No CRM credentials for ${CODE}`, fix: `Run: mcp-admin add --sub "${req.auth.sub}" --entity ${CODE} --user <crmUser> --pass <crmPass>` });
   req.crmCreds = creds;
   next();
 }

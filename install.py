@@ -20,6 +20,7 @@ Multi entity (nginx always):
 Operations (both modes):
   sudo python3 install.py --status
   sudo python3 install.py --update
+  sudo python3 install.py --monitoring               # install Prometheus/Grafana/Loki stack
   sudo python3 install.py --uninstall                # single only
 
 entities.json format:
@@ -41,6 +42,7 @@ Options:
   --remove     Remove entity codes
   --status     Show service status
   --update     Update server code and restart
+  --monitoring Install Prometheus/Grafana/Loki/Alertmanager monitoring stack via Docker
   --uninstall  Remove single-entity install (single mode only)
 
 SSH provisioning (LDAP/SSO deployments):
@@ -78,6 +80,8 @@ NGINX_LINK    = "/etc/nginx/sites-enabled/suitecrm-mcp"
 NGINX_PORT    = 8080   # multi-entity plain HTTP listen port
 SVC_USER      = "suitecrm-mcp"
 SVC_NAME      = "suitecrm-mcp"  # single-entity service name
+MONITORING_DIR      = "/opt/suitecrm-mcp-monitoring"
+MONITORING_SVC_NAME = "suitecrm-mcp-monitoring"
 
 # Common SuiteCRM REST API path patterns (in order of likelihood)
 API_PATH_PATTERNS = [
@@ -278,13 +282,18 @@ def prompt_entity_config(entity_code=None, default_port=3101):
     tls_skip_str = input("  Disable TLS verification for self-signed certs? [y/N]: ").strip().lower()
     tls_skip = tls_skip_str in ("y", "yes")
 
-    return {
+    group = _prompt("Required AD/OAuth group (leave blank to allow any authenticated user)", "")
+
+    result = {
         "code": code,
         "label": label,
         "endpoint": endpoint,
         "port": port,
         "tls_skip": tls_skip,
     }
+    if group:
+        result["group"] = group
+    return result
 
 def interactive_setup():
     """
@@ -481,8 +490,9 @@ def install_auth_service(auth_cfg):
         "PORT=3100",
         "BIND_HOST=127.0.0.1",
         "METRICS_PORT=9091",
-        "METRICS_BIND=127.0.0.1",
+        "METRICS_BIND=0.0.0.0",
         f"REDIS_URL={auth_cfg.get('REDIS_URL', default_redis)}",
+        "TRUST_PROXY=1",
         "",
     ]
     write_file(AUTH_ENV_FILE, "\n".join(lines), mode="600")
@@ -524,12 +534,19 @@ def install_auth_service(auth_cfg):
 
 def install_profile_admin():
     src = script_dir() / "tools" / "mcp-admin"
+    mjs = script_dir() / "tools" / "mcp-admin.mjs"
     if not src.exists():
         warn("tools/mcp-admin not found - skipping admin tool install")
         return
     shutil.copy(src, PROFILE_ADMIN_DEST)
     run(["chmod", "750", PROFILE_ADMIN_DEST])
     run(["chown", "root:root", PROFILE_ADMIN_DEST])
+    # mcp-admin.mjs must live in SERVER_DIR so Node.js resolves its imports
+    # from the server's node_modules (ES modules ignore NODE_PATH).
+    if mjs.exists():
+        shutil.copy(mjs, f"{SERVER_DIR}/mcp-admin.mjs")
+        run(["chmod", "750", f"{SERVER_DIR}/mcp-admin.mjs"])
+        run(["chown", f"{SVC_USER}:{SVC_USER}", f"{SERVER_DIR}/mcp-admin.mjs"])
     ok(f"Admin tool: {PROFILE_ADMIN_DEST}")
 
 
@@ -711,6 +728,246 @@ def install_redis():
             run(["systemctl", "restart", "redis-server"])
             ok("Redis configured with persistence, maxmemory, and authentication")
 
+def install_docker():
+    if shutil.which("docker"):
+        r = run(["docker", "--version"], capture=True, check=False)
+        ok(f"Docker: {r.stdout.strip()}")
+        return
+    info("Installing Docker Engine ...")
+    run(["apt-get", "update", "-qq"])
+    run(["apt-get", "install", "-y", "ca-certificates", "curl", "gnupg"])
+    os.makedirs("/etc/apt/keyrings", exist_ok=True)
+    run("curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg")
+    run(["chmod", "a+r", "/etc/apt/keyrings/docker.gpg"])
+    arch_r = run(["dpkg", "--print-architecture"], capture=True)
+    arch = arch_r.stdout.strip()
+    codename_r = run(["bash", "-c", ". /etc/os-release && echo $VERSION_CODENAME"], capture=True)
+    codename = codename_r.stdout.strip()
+    repo_line = (
+        f"deb [arch={arch} signed-by=/etc/apt/keyrings/docker.gpg] "
+        f"https://download.docker.com/linux/ubuntu {codename} stable"
+    )
+    write_file("/etc/apt/sources.list.d/docker.list", repo_line + "\n")
+    run(["apt-get", "update", "-qq"])
+    run(["apt-get", "install", "-y",
+         "docker-ce", "docker-ce-cli", "containerd.io",
+         "docker-buildx-plugin", "docker-compose-plugin"])
+    run(["systemctl", "enable", "--now", "docker"])
+    ok(f"Docker installed: {run(['docker', '--version'], capture=True).stdout.strip()}")
+
+
+# ---------------------------------------------------------------------------
+# Monitoring stack
+# ---------------------------------------------------------------------------
+
+def _monitoring_prometheus_yml(entities):
+    """Generate prometheus.yml for a systemd-based multi/single entity install."""
+    jobs = [
+        "  - job_name: suitecrm-mcp-auth\n"
+        "    static_configs:\n"
+        "      - targets: ['host-gateway:9091']\n"
+        "        labels:\n"
+        "          service: auth\n"
+    ]
+    for code, data in entities.items():
+        metrics_port = data["port"] + 6000
+        jobs.append(
+            f"  - job_name: suitecrm-mcp-{code}\n"
+            f"    static_configs:\n"
+            f"      - targets: ['host-gateway:{metrics_port}']\n"
+            f"        labels:\n"
+            f"          entity: {code}\n"
+        )
+    jobs.append(
+        "  - job_name: redis\n"
+        "    static_configs:\n"
+        "      - targets: ['host-gateway:9121']\n"
+        "        labels:\n"
+        "          service: redis\n"
+    )
+    return (
+        "global:\n"
+        "  scrape_interval: 15s\n"
+        "  evaluation_interval: 15s\n\n"
+        "alerting:\n"
+        "  alertmanagers:\n"
+        "    - static_configs:\n"
+        "        - targets: ['alertmanager:9093']\n\n"
+        "rule_files:\n"
+        "  - \"rules.yml\"\n\n"
+        "scrape_configs:\n"
+        + "".join(f"\n{j}" for j in jobs)
+    )
+
+
+def _write_monitoring_env(domain, redis_pass):
+    """Write/update the .env file for the monitoring stack."""
+    env_file = Path(MONITORING_DIR) / ".env"
+    gateway_url = f"https://{domain}" if domain else "http://localhost"
+    redis_addr  = f"redis://:{redis_pass}@127.0.0.1:6379" if redis_pass else "redis://127.0.0.1:6379"
+    redis_hosts = f"local:127.0.0.1:6379:0:{redis_pass}" if redis_pass else "local:127.0.0.1:6379"
+
+    if env_file.exists():
+        # Preserve existing passwords; only update connection/URL vars
+        content = env_file.read_text()
+        def _set(text, key, val):
+            import re as _re
+            pattern = rf'^{key}=.*'
+            line = f"{key}={val}"
+            return _re.sub(pattern, line, text, flags=_re.MULTILINE) if _re.search(pattern, text, _re.MULTILINE) else text + f"\n{line}"
+        content = _set(content, "GATEWAY_URL",  gateway_url)
+        content = _set(content, "REDIS_ADDR",   redis_addr)
+        content = _set(content, "REDIS_HOSTS",  redis_hosts)
+        env_file.write_text(content)
+        run(["chmod", "600", str(env_file)])
+        ok("  Monitoring .env: updated")
+    else:
+        grafana_pw   = secrets.token_urlsafe(24)
+        commander_pw = secrets.token_urlsafe(24)
+        content = (
+            f"GATEWAY_URL={gateway_url}\n"
+            f"GRAFANA_PASSWORD={grafana_pw}\n"
+            f"REDIS_COMMANDER_USER=admin\n"
+            f"REDIS_COMMANDER_PASSWORD={commander_pw}\n"
+            f"REDIS_ADDR={redis_addr}\n"
+            f"REDIS_HOSTS={redis_hosts}\n"
+        )
+        write_file(str(env_file), content, mode="600")
+        ok(f"  Monitoring .env: {env_file} (credentials generated)")
+
+
+def _sync_monitoring_files(entities):
+    """Copy repo monitoring/ files to MONITORING_DIR and generate dynamic configs."""
+    sd = script_dir() / "monitoring"
+    dst = Path(MONITORING_DIR)
+
+    # Copy the whole monitoring/ tree (docker-compose, loki, alertmanager, grafana, rules)
+    for src_file, dst_name in [
+        (sd / "docker-compose.yml",            "docker-compose.yml"),
+        (sd / "loki" / "loki.yml",             "loki.yml"),
+        (sd / "alertmanager" / "alertmanager.yml", "alertmanager.yml"),
+        (sd / "prometheus" / "rules.yml",      "prometheus-rules.yml"),
+        (sd / "promtail" / "promtail-systemd.yml", "promtail.yml"),
+    ]:
+        shutil.copy(src_file, dst / dst_name)
+
+    # Grafana provisioning + dashboards
+    grafana_src = sd / "grafana"
+    grafana_dst = dst / "grafana"
+    if grafana_src.is_dir():
+        if grafana_dst.exists():
+            shutil.rmtree(grafana_dst)
+        shutil.copytree(grafana_src, grafana_dst)
+
+    # prometheus.yml is generated dynamically (entity targets are site-specific)
+    write_file(str(dst / "prometheus.yml"), _monitoring_prometheus_yml(entities))
+
+    ok(f"  Monitoring configs synced to {MONITORING_DIR}")
+
+
+def install_monitoring(entities, domain=None):
+    """Install the Prometheus/Grafana/Loki monitoring stack via Docker Compose."""
+    info(f"Installing monitoring stack to {MONITORING_DIR} ...")
+
+    # Docker is required
+    info("Checking Docker ..."); install_docker(); print()
+
+    os.makedirs(MONITORING_DIR, exist_ok=True)
+
+    # Read Redis password
+    pass_file = Path(ENV_DIR) / "redis_pass"
+    redis_pass = pass_file.read_text().strip() if pass_file.exists() else ""
+
+    # .env — credentials + dynamic URLs (safe to re-run; preserves existing passwords)
+    _write_monitoring_env(domain, redis_pass)
+
+    # Sync configs from repo (docker-compose.yml, loki, alertmanager, grafana, etc.)
+    _sync_monitoring_files(entities)
+
+    # Start the stack
+    info("Starting monitoring stack ...")
+    run(["docker", "compose", "up", "-d", "--pull", "missing"], cwd=MONITORING_DIR)
+    ok("Monitoring stack started")
+
+    # Systemd unit to start monitoring on boot
+    unit = (
+        "[Unit]\n"
+        "Description=SuiteCRM MCP Monitoring Stack\n"
+        "Requires=docker.service\n"
+        "After=docker.service\n\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "RemainAfterExit=yes\n"
+        f"WorkingDirectory={MONITORING_DIR}\n"
+        "ExecStart=/usr/bin/docker compose up -d\n"
+        "ExecStop=/usr/bin/docker compose down\n"
+        "TimeoutStartSec=120\n\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+    unit_path = f"/etc/systemd/system/{MONITORING_SVC_NAME}.service"
+    write_file(unit_path, unit)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", MONITORING_SVC_NAME])
+    ok(f"  Monitoring service: {unit_path} (enabled on boot)")
+
+    if domain:
+        print()
+        info(f"Monitoring UIs (via nginx proxy after install):")
+        print(f"  Grafana       : https://{domain}/grafana/")
+        print(f"  Prometheus    : https://{domain}/prometheus/")
+        print(f"  Alertmanager  : https://{domain}/alertmanager/")
+        print(f"  Redis UI      : https://{domain}/redis/")
+    else:
+        print()
+        info("Monitoring UIs (accessible via SSH tunnel or local nginx):")
+        print("  Grafana       : http://127.0.0.1:3001/")
+        print("  Prometheus    : http://127.0.0.1:9090/")
+        print("  Alertmanager  : http://127.0.0.1:9093/")
+        print("  Redis UI      : http://127.0.0.1:8081/")
+    print(f"  Credentials   : cat {MONITORING_DIR}/.env")
+    print()
+
+
+def _monitoring_nginx_block():
+    """Return nginx location blocks for the monitoring UIs."""
+    return (
+        "\n    # Monitoring UIs (installed by --monitoring)\n"
+        "    location /grafana/ {\n"
+        "        proxy_pass http://127.0.0.1:3001/;\n"
+        "        proxy_http_version 1.1;\n"
+        "        proxy_set_header Host $host;\n"
+        "        proxy_set_header X-Real-IP $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "        proxy_set_header X-Forwarded-Proto $scheme;\n"
+        "        proxy_set_header Upgrade $http_upgrade;\n"
+        "        proxy_set_header Connection 'upgrade';\n"
+        "    }\n"
+        "    location /prometheus/ {\n"
+        "        proxy_pass http://127.0.0.1:9090/;\n"
+        "        proxy_http_version 1.1;\n"
+        "        proxy_set_header Host $host;\n"
+        "        proxy_set_header X-Real-IP $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "    }\n"
+        "    location /alertmanager/ {\n"
+        "        proxy_pass http://127.0.0.1:9093/;\n"
+        "        proxy_http_version 1.1;\n"
+        "        proxy_set_header Host $host;\n"
+        "        proxy_set_header X-Real-IP $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "    }\n"
+        "    location /redis/ {\n"
+        "        proxy_pass http://127.0.0.1:8081/;\n"
+        "        proxy_http_version 1.1;\n"
+        "        proxy_set_header Host $host;\n"
+        "        proxy_set_header X-Real-IP $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "        proxy_buffering off;\n"
+        "    }\n"
+    )
+
+
 def install_server():
     info(f"Installing server to {SERVER_DIR} ...")
     os.makedirs(SERVER_DIR, exist_ok=True)
@@ -735,8 +992,8 @@ def install_server():
         if bridges_dst.exists():
             shutil.rmtree(bridges_dst)
         shutil.copytree(bridges_src, bridges_dst)
-    # Copy admin scripts (add_user, migrate_profiles)
-    scripts_src = script_dir() / "server" / "scripts"
+    # Copy admin scripts (migrate_profiles, etc.)
+    scripts_src = script_dir() / "scripts"
     scripts_dst = Path(SERVER_DIR) / "scripts"
     if scripts_src.is_dir():
         if scripts_dst.exists():
@@ -782,7 +1039,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             f"PORT={port}",
             "BIND_HOST=127.0.0.1",
             f"METRICS_PORT={metrics_port}",
-            "METRICS_BIND=127.0.0.1",
+            "METRICS_BIND=0.0.0.0",
             f"REDIS_URL={redis_url}",
             "NODE_NO_WARNINGS=1",
         ]
@@ -799,7 +1056,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             f"PORT={port}",
             "BIND_HOST=127.0.0.1",
             f"METRICS_PORT={metrics_port}",
-            "METRICS_BIND=127.0.0.1",
+            "METRICS_BIND=0.0.0.0",
             f"REDIS_URL={redis_url}",
             "NODE_NO_WARNINGS=1",
         ]
@@ -866,16 +1123,19 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
 # nginx config generation
 # ---------------------------------------------------------------------------
 
-def _rebuild_nginx_multi(entities, domain=None):
+def _rebuild_nginx_multi(entities, domain=None, monitoring=False):
     """
     Write /etc/nginx/sites-available/suitecrm-mcp for multi-entity.
     DOMAIN_FILE is read as fallback if domain is None.
     NOTE: If ENV_DIR is manually deleted between runs, domain falls back to
     None and nginx is rebuilt with plain HTTP. This is intentional - DOMAIN_FILE
     persists the domain separately from ENV_DIR so it survives env resets.
+    monitoring=True adds proxy locations for the monitoring UIs.
     """
     if domain is None and Path(DOMAIN_FILE).exists():
         domain = Path(DOMAIN_FILE).read_text().strip() or None
+    if not monitoring:
+        monitoring = Path(MONITORING_DIR).is_dir() and (Path(MONITORING_DIR) / "docker-compose.yml").exists()
 
     locations = ""
     for code, data in entities.items():
@@ -929,6 +1189,7 @@ def _rebuild_nginx_multi(entities, domain=None):
         if domain else
         f"listen {NGINX_PORT};\n    server_name _;"
     )
+    monitoring_block = _monitoring_nginx_block() if monitoring else ""
     conf = (
         f"# SuiteCRM MCP Gateway - generated by install.py\n"
         f"server {{\n"
@@ -942,14 +1203,18 @@ def _rebuild_nginx_multi(entities, domain=None):
         f"        return 200 '{{\"gateway\":\"ok\",\"entities\":{len(entities)}}}';\n"
         f"    }}\n"
         f"{auth_block}"
+        f"{monitoring_block}"
         f"{locations}}}\n"
     )
     write_file(NGINX_CONF, conf)
     _nginx_enable_and_reload()
     ok("nginx configured and reloaded")
 
-def _nginx_single_tls(domain, port):
+def _nginx_single_tls(domain, port, monitoring=False):
     """Write HTTP-only nginx config for single-entity + certbot TLS."""
+    if not monitoring:
+        monitoring = Path(MONITORING_DIR).is_dir() and (Path(MONITORING_DIR) / "docker-compose.yml").exists()
+    monitoring_block = _monitoring_nginx_block() if monitoring else ""
     conf = (
         f"server {{\n"
         f"    listen 80;\n"
@@ -969,6 +1234,7 @@ def _nginx_single_tls(domain, port):
         f"        proxy_cache off;\n"
         f"        proxy_read_timeout 3600s;\n"
         f"    }}\n"
+        f"{monitoring_block}"
         f"    location / {{\n"
         f"        proxy_pass http://127.0.0.1:{port};\n"
         f"        proxy_http_version 1.1;\n"
@@ -1253,11 +1519,13 @@ def main():
     parser.add_argument("--skip-oauth",         dest="skip_oauth", action="store_true",
                         help="Skip OAuth setup (for upgrades where OAuth is already configured)")
     # Operations
-    parser.add_argument("--add",      action="store_true", help="Add new entities only (multi)")
-    parser.add_argument("--remove",   nargs="+", metavar="CODE", help="Remove entity codes (multi)")
-    parser.add_argument("--status",   action="store_true", help="Show status")
-    parser.add_argument("--update",   action="store_true", help="Update server code and restart")
-    parser.add_argument("--uninstall",action="store_true", help="Remove single-entity install")
+    parser.add_argument("--add",        action="store_true", help="Add new entities only (multi)")
+    parser.add_argument("--remove",     nargs="+", metavar="CODE", help="Remove entity codes (multi)")
+    parser.add_argument("--status",     action="store_true", help="Show status")
+    parser.add_argument("--update",     action="store_true", help="Update server code and restart")
+    parser.add_argument("--uninstall",  action="store_true", help="Remove single-entity install")
+    parser.add_argument("--monitoring", action="store_true",
+                        help="Install Prometheus/Grafana/Loki monitoring stack via Docker")
     parser.add_argument("--setup-crm-host", dest="setup_crm_host", metavar="CODE",
                         help="Deploy provision script to CRM VM for entity CODE")
     args = parser.parse_args()
@@ -1368,6 +1636,16 @@ def main():
             run(["systemctl", "restart", SVC_NAME])
             ok(f"Restarted: {SVC_NAME}")
             show_status_single(args.port)
+        # Refresh monitoring configs if monitoring is installed
+        if (Path(MONITORING_DIR) / "docker-compose.yml").exists():
+            print(); info("Refreshing monitoring configs ...")
+            saved_domain = Path(DOMAIN_FILE).read_text().strip() if Path(DOMAIN_FILE).exists() else None
+            pass_file = Path(ENV_DIR) / "redis_pass"
+            redis_pass = pass_file.read_text().strip() if pass_file.exists() else ""
+            _write_monitoring_env(saved_domain, redis_pass)
+            _sync_monitoring_files(entities)
+            run(["docker", "compose", "up", "-d", "--pull", "missing"], cwd=MONITORING_DIR)
+            ok("Monitoring stack updated and restarted")
         sys.exit(0)
 
     # -----------------------------------------------------------------------
@@ -1487,14 +1765,21 @@ def main():
         ok(f"  Started: {svc_name}")
     print()
 
+    # Offer monitoring interactively if not already decided by flag
+    do_monitoring = getattr(args, "monitoring", False)
+    if not do_monitoring and not getattr(args, "add", False):
+        print()
+        m_ans = input("  Install monitoring stack (Prometheus/Grafana/Loki)? [y/N]: ").strip().lower()
+        do_monitoring = m_ans in ("y", "yes")
+
     # nginx config
     if is_multi:
         info("Configuring nginx ...")
-        _rebuild_nginx_multi(entities, domain=args.domain); print()
+        _rebuild_nginx_multi(entities, domain=args.domain, monitoring=do_monitoring); print()
     elif args.domain:
         port = list(to_install.values())[0]["port"]
         info("Configuring nginx (TLS terminator) ...")
-        _nginx_single_tls(args.domain, port); print()
+        _nginx_single_tls(args.domain, port, monitoring=do_monitoring); print()
 
     # certbot
     if args.domain:
@@ -1503,6 +1788,18 @@ def main():
         info("Setting up HTTPS ...")
         install_certbot()
         _run_certbot(args.domain, args.email); print()
+
+    # Monitoring stack
+    if do_monitoring:
+        print(); info("=" * 60); info("MONITORING STACK"); info("=" * 60); print()
+        install_monitoring(entities, domain=args.domain)
+        # Rebuild nginx to include monitoring locations if nginx is already configured
+        if is_multi:
+            info("Updating nginx with monitoring locations ...")
+            _rebuild_nginx_multi(entities, domain=args.domain, monitoring=True); print()
+        elif args.domain:
+            port = list(to_install.values())[0]["port"]
+            _nginx_single_tls(args.domain, port, monitoring=True); print()
 
     # Status + connect info
     if is_multi:

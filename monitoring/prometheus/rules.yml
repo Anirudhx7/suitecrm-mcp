@@ -1,4 +1,20 @@
 groups:
+  - name: suitecrm_mcp_precompute
+    interval: 1m
+    rules:
+      # Pre-aggregate histogram buckets so 24h+ queries are fast
+      - record: suitecrm_mcp:tool_duration_seconds_bucket:rate1m
+        expr: sum by (entity, le) (rate(suitecrm_mcp_tool_duration_seconds_bucket[1m]))
+
+      - record: suitecrm_mcp:tool_duration_by_tool_seconds_bucket:rate1m
+        expr: sum by (entity, tool, le) (rate(suitecrm_mcp_tool_duration_seconds_bucket[1m]))
+
+      - record: suitecrm_mcp:crm_api_duration_seconds_bucket:rate1m
+        expr: sum by (entity, method, le) (rate(suitecrm_mcp_crm_api_duration_seconds_bucket[1m]))
+
+      - record: suitecrm_mcp:gc_duration_seconds_bucket:rate1m
+        expr: sum by (entity, le) (rate(nodejs_gc_duration_seconds_bucket[1m]))
+
   - name: suitecrm_mcp
     rules:
 
