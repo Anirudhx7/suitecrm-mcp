@@ -9,8 +9,9 @@ import { Command } from 'commander';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
 import { readFileSync, writeFileSync } from 'fs';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
+import { createInterface } from 'readline';
 
 const execFileAsync = promisify(execFile);
 
@@ -430,16 +431,80 @@ async function cmdTest(opts) {
 
 // ── set-crm-host ─────────────────────────────────────────────────────────────
 
-function cmdSetCrmHost(opts) {
-  const hosts = loadJson(HOSTS_FILE);
-  const entry = hosts[opts.entity] ||= {};
-  if (opts.sshHost)  entry.ssh_host = opts.sshHost;
-  if (opts.sshUser)  entry.ssh_user = opts.sshUser;
-  if (opts.command)  entry.command  = opts.command;
-  if (opts.sshKey)   entry.ssh_key  = opts.sshKey;
-  saveJson(HOSTS_FILE, hosts);
-  console.log(c(`Updated crm-hosts entry for ${opts.entity}:`, GREEN));
-  console.log(JSON.stringify(entry, null, 2));
+function _rlPrompt(rl, question, defaultVal = '') {
+  return new Promise(resolve => {
+    const hint = defaultVal ? ` [${defaultVal}]` : '';
+    rl.question(`  ${question}${hint}: `, ans => resolve(ans.trim() || defaultVal));
+  });
+}
+
+async function cmdSetCrmHost(opts) {
+  const hosts   = loadJson(HOSTS_FILE);
+  const existing = hosts[opts.entity];
+  const hasFlags = opts.sshHost || opts.sshUser || opts.command || opts.sshKey;
+
+  if (existing) {
+    console.log(c(`\nCurrent crm-hosts entry for ${opts.entity}:`, CYAN));
+    console.log(JSON.stringify(existing, null, 2));
+  }
+
+  if (hasFlags) {
+    // Flags supplied — confirm before applying if entry already exists
+    if (existing) {
+      const rl  = createInterface({ input: process.stdin, output: process.stdout });
+      const ans = await new Promise(resolve => rl.question('\n  Apply these updates? [y/N]: ', resolve));
+      rl.close();
+      if (!ans.trim().toLowerCase().startsWith('y')) {
+        console.log(c('No changes made.', DIM));
+        return;
+      }
+    }
+    const entry = existing ? { ...existing } : {};
+    if (opts.sshHost)  entry.ssh_host = opts.sshHost;
+    if (opts.sshUser)  entry.ssh_user = opts.sshUser;
+    if (opts.command)  entry.command  = opts.command;
+    if (opts.sshKey)   entry.ssh_key  = opts.sshKey;
+    hosts[opts.entity] = entry;
+    saveJson(HOSTS_FILE, hosts);
+    console.log(c(`\nUpdated crm-hosts entry for ${opts.entity}:`, GREEN));
+    console.log(JSON.stringify(entry, null, 2));
+    return;
+  }
+
+  // No flags — go interactive
+  if (existing) {
+    const rl  = createInterface({ input: process.stdin, output: process.stdout });
+    const ans = await new Promise(resolve => rl.question('\n  Update these values? [y/N]: ', resolve));
+    if (!ans.trim().toLowerCase().startsWith('y')) {
+      rl.close();
+      console.log(c('No changes made.', DIM));
+      return;
+    }
+    const entry = { ...existing };
+    entry.ssh_host = await _rlPrompt(rl, 'SSH host', existing.ssh_host || '');
+    entry.ssh_user = await _rlPrompt(rl, 'SSH user', existing.ssh_user || 'ubuntu');
+    entry.ssh_key  = await _rlPrompt(rl, 'SSH key path', existing.ssh_key  || '/etc/suitecrm-mcp/crm-ssh-key');
+    if (existing.command !== undefined || entry.command)
+      entry.command = await _rlPrompt(rl, 'Provisioning command', existing.command || '');
+    rl.close();
+    hosts[opts.entity] = entry;
+    saveJson(HOSTS_FILE, hosts);
+    console.log(c(`\nUpdated crm-hosts entry for ${opts.entity}:`, GREEN));
+    console.log(JSON.stringify(entry, null, 2));
+  } else {
+    console.log(c(`\nNo existing entry for ${opts.entity}. Enter values (blank = skip):`, YELLOW));
+    const rl  = createInterface({ input: process.stdin, output: process.stdout });
+    const entry = {};
+    entry.ssh_host = await _rlPrompt(rl, 'SSH host (IP or hostname)');
+    if (!entry.ssh_host) { rl.close(); console.log(c('No SSH host provided — aborted.', RED)); process.exit(1); }
+    entry.ssh_user = await _rlPrompt(rl, 'SSH user', 'ubuntu');
+    entry.ssh_key  = await _rlPrompt(rl, 'SSH key path', '/etc/suitecrm-mcp/crm-ssh-key');
+    rl.close();
+    hosts[opts.entity] = entry;
+    saveJson(HOSTS_FILE, hosts);
+    console.log(c(`\nCreated crm-hosts entry for ${opts.entity}:`, GREEN));
+    console.log(JSON.stringify(entry, null, 2));
+  }
 }
 
 // ── revoke ───────────────────────────────────────────────────────────────────
@@ -749,6 +814,92 @@ async function cmdStats() {
   await disconnect();
 }
 
+// ── logs ──────────────────────────────────────────────────────────────────────
+
+const PINO_LEVELS = { 10:'TRACE', 20:'DEBUG', 30:'INFO ', 40:'WARN ', 50:'ERROR', 60:'FATAL' };
+const PINO_COLORS = { 10:DIM, 20:DIM, 30:GREEN, 40:YELLOW, 50:RED, 60:RED+BOLD };
+const LEVEL_NAMES = { trace:10, debug:20, info:30, warn:40, error:50, fatal:60 };
+const JOURNAL_RE  = /^\S+\s+\S+\s+([\w-]+)\[\d+\]:\s*(.*)$/;
+
+function formatLogLine(raw, minLevel, multiUnit) {
+  const m        = raw.match(JOURNAL_RE);
+  const unitFull = m ? m[1] : '';
+  const msgStr   = m ? m[2] : raw;
+  const entity   = unitFull.replace(/^suitecrm-mcp-/, '');
+
+  let parsed = null;
+  try { parsed = JSON.parse(msgStr); } catch {}
+
+  if (!parsed) {
+    if (minLevel > 0) return;
+    const prefix = (multiUnit && entity) ? c(entity.padEnd(6), CYAN) + '  ' : '';
+    process.stdout.write(prefix + raw + '\n');
+    return;
+  }
+
+  const level    = parsed.level || 30;
+  if (level < minLevel) return;
+
+  const timeStr  = parsed.time ? new Date(parsed.time).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '';
+  const levelStr = PINO_LEVELS[level] || String(level).padEnd(5);
+  const levelCol = PINO_COLORS[level] || '';
+  const reqId    = parsed.reqId ? c(parsed.reqId.slice(0, 8), DIM) + '  ' : '';
+  const tool     = parsed.tool  ? c(parsed.tool, BOLD) + '  '            : '';
+  const logMsg   = parsed.msg   || '';
+  const errMsg   = parsed.err
+    ? '  ' + c(typeof parsed.err === 'object' ? (parsed.err.message || JSON.stringify(parsed.err)) : parsed.err, RED)
+    : '';
+  const entityPart = (multiUnit && entity) ? c(entity.padEnd(6), CYAN) + '  ' : '';
+
+  process.stdout.write(
+    `${c(timeStr, DIM)}  ${c(levelStr, levelCol)}  ${entityPart}${reqId}${tool}${logMsg}${errMsg}\n`
+  );
+}
+
+async function cmdLogs(entityArg, opts) {
+  const entities = loadJson(ENTITIES_FILE);
+
+  let units = [];
+  if (entityArg) {
+    const code = entityArg.toLowerCase();
+    if (code === 'auth') {
+      units = ['suitecrm-mcp-auth.service'];
+    } else {
+      if (!(code in entities)) {
+        console.error(c(`Unknown entity: ${entityArg}. Valid: ${Object.keys(entities).sort().join(', ')}, auth`, RED));
+        process.exit(1);
+      }
+      units = [`suitecrm-mcp-${code}.service`];
+    }
+  } else {
+    units = Object.keys(entities).sort().map(code => `suitecrm-mcp-${code}.service`);
+    if (opts.auth) units.unshift('suitecrm-mcp-auth.service');
+  }
+
+  const minLevel = LEVEL_NAMES[opts.level?.toLowerCase()] ?? 0;
+
+  const jArgs = ['--no-pager', '-o', 'short-iso'];
+  for (const u of units) jArgs.push('-u', u);
+  jArgs.push('-n', String(opts.lines ?? 50));
+  if (opts.follow) jArgs.push('-f');
+  if (opts.since)  jArgs.push('--since', opts.since);
+
+  const multiUnit = units.length > 1;
+  const proc = spawn('journalctl', jArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  let buf = '';
+  proc.stdout.on('data', chunk => {
+    buf += chunk.toString();
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) { if (line.trim()) formatLogLine(line, minLevel, multiUnit); }
+  });
+  proc.stdout.on('end', () => { if (buf.trim()) formatLogLine(buf, minLevel, multiUnit); });
+  proc.stderr.on('data', chunk => process.stderr.write(chunk));
+
+  await new Promise(resolve => proc.on('exit', resolve));
+}
+
 // ── flush ─────────────────────────────────────────────────────────────────────
 
 async function cmdFlush(opts) {
@@ -874,5 +1025,16 @@ program
   .description('EMERGENCY: Invalidate ALL active sessions')
   .option('--yes-i-am-sure', 'Confirm you want to kill ALL sessions')
   .action(cmdFlush);
+
+program
+  .command('logs')
+  .description('Show logs from MCP gateway services')
+  .argument('[entity]',      'Entity code (e.g. aesg, pcau) or "auth" — omit for all gateways')
+  .option('-f, --follow',    'Stream logs in real time (like tail -f)')
+  .option('-n, --lines <n>', 'Number of recent lines to show (default: 50)', v => parseInt(v) || 50, 50)
+  .option('--since <time>',  'Show logs since time, e.g. "1h ago", "2026-05-18 10:00"')
+  .option('--level <level>', 'Minimum log level: trace|debug|info|warn|error')
+  .option('--auth',          'Include auth service when showing all gateways')
+  .action(cmdLogs);
 
 program.parseAsync(process.argv);

@@ -28,7 +28,7 @@ services:
   grafana:
     image: grafana/grafana:11.6.1
     ports:
-      - "127.0.0.1:3001:3000"
+      - "0.0.0.0:3001:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -51,7 +51,7 @@ services:
   loki:
     image: grafana/loki:3.4.2
     ports:
-      - "127.0.0.1:3200:3100"
+      - "0.0.0.0:3200:3100"
     volumes:
       - ./loki.yml:/etc/loki/loki.yml:ro
       - loki_data:/loki

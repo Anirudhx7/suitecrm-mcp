@@ -118,6 +118,17 @@ def ok(m):    print(f"{GREEN}[OK]{NC} {m}")
 def warn(m):  print(f"{YELLOW}[WARN]{NC} {m}")
 def error(m): print(f"{RED}[ERROR]{NC} {m}"); sys.exit(1)
 
+def _server_ip():
+    """Return the primary non-loopback IP of this machine, or 'YOUR_SERVER_IP'."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "YOUR_SERVER_IP"
+
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
@@ -512,6 +523,9 @@ def install_auth_service(auth_cfg):
         f"ExecStart={nb} {SERVER_DIR}/auth.mjs\n"
         f"Restart=always\n"
         f"RestartSec=5\n"
+        f"KillMode=control-group\n"
+        f"StartLimitIntervalSec=120\n"
+        f"StartLimitBurst=10\n"
         f"StandardOutput=journal\n"
         f"StandardError=journal\n"
         f"SyslogIdentifier={AUTH_SVC_NAME}\n"
@@ -803,7 +817,7 @@ def _monitoring_prometheus_yml(entities):
 def _write_monitoring_env(domain, redis_pass):
     """Write/update the .env file for the monitoring stack."""
     env_file = Path(MONITORING_DIR) / ".env"
-    gateway_url = f"https://{domain}" if domain else "http://localhost"
+    gateway_url = f"https://{domain}" if domain else f"http://{_server_ip()}:{NGINX_PORT}"
     redis_addr  = f"redis://:{redis_pass}@127.0.0.1:6379" if redis_pass else "redis://127.0.0.1:6379"
     redis_hosts = f"local:127.0.0.1:6379:0:{redis_pass}" if redis_pass else "local:127.0.0.1:6379"
 
@@ -818,22 +832,54 @@ def _write_monitoring_env(domain, redis_pass):
         content = _set(content, "GATEWAY_URL",  gateway_url)
         content = _set(content, "REDIS_ADDR",   redis_addr)
         content = _set(content, "REDIS_HOSTS",  redis_hosts)
+        # Add monitoring admin credentials if not already present (added in later installer version)
+        if "MONITORING_ADMIN_PASSWORD" not in content:
+            monitor_pw = secrets.token_urlsafe(24)
+            content += f"\nMONITORING_ADMIN_USER=admin\nMONITORING_ADMIN_PASSWORD={monitor_pw}\n"
         env_file.write_text(content)
         run(["chmod", "600", str(env_file)])
         ok("  Monitoring .env: updated")
     else:
         grafana_pw   = secrets.token_urlsafe(24)
         commander_pw = secrets.token_urlsafe(24)
+        monitor_pw   = secrets.token_urlsafe(24)
         content = (
             f"GATEWAY_URL={gateway_url}\n"
             f"GRAFANA_PASSWORD={grafana_pw}\n"
             f"REDIS_COMMANDER_USER=admin\n"
             f"REDIS_COMMANDER_PASSWORD={commander_pw}\n"
+            f"MONITORING_ADMIN_USER=admin\n"
+            f"MONITORING_ADMIN_PASSWORD={monitor_pw}\n"
             f"REDIS_ADDR={redis_addr}\n"
             f"REDIS_HOSTS={redis_hosts}\n"
         )
         write_file(str(env_file), content, mode="600")
         ok(f"  Monitoring .env: {env_file} (credentials generated)")
+
+
+MONITORING_HTPASSWD = "/etc/nginx/monitoring.htpasswd"
+
+def _write_monitoring_htpasswd():
+    """Create/update the nginx htpasswd file for Prometheus and Alertmanager."""
+    env_file = Path(MONITORING_DIR) / ".env"
+    user, pw = "admin", ""
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if line.startswith("MONITORING_ADMIN_USER="):
+                user = line.split("=", 1)[1].strip()
+            elif line.startswith("MONITORING_ADMIN_PASSWORD="):
+                pw = line.split("=", 1)[1].strip()
+    if not pw:
+        warn("  MONITORING_ADMIN_PASSWORD not set in .env — skipping htpasswd")
+        return
+    r = run(["openssl", "passwd", "-apr1", pw], capture=True, check=False)
+    if r.returncode != 0:
+        warn("  openssl not available — skipping htpasswd (Prometheus/Alertmanager will be unprotected)")
+        return
+    hashed = r.stdout.strip()
+    write_file(MONITORING_HTPASSWD, f"{user}:{hashed}\n", mode="640")
+    run(["chown", "root:www-data", MONITORING_HTPASSWD])
+    ok(f"  Monitoring htpasswd: {MONITORING_HTPASSWD} (user: {user})")
 
 
 def _sync_monitoring_files(entities):
@@ -865,7 +911,7 @@ def _sync_monitoring_files(entities):
     ok(f"  Monitoring configs synced to {MONITORING_DIR}")
 
 
-def install_monitoring(entities, domain=None):
+def install_monitoring(entities, domain=None, nginx_port=None):
     """Install the Prometheus/Grafana/Loki monitoring stack via Docker Compose."""
     info(f"Installing monitoring stack to {MONITORING_DIR} ...")
 
@@ -881,6 +927,9 @@ def install_monitoring(entities, domain=None):
     # .env — credentials + dynamic URLs (safe to re-run; preserves existing passwords)
     _write_monitoring_env(domain, redis_pass)
 
+    # htpasswd for nginx basic auth on Prometheus and Alertmanager
+    _write_monitoring_htpasswd()
+
     # Sync configs from repo (docker-compose.yml, loki, alertmanager, grafana, etc.)
     _sync_monitoring_files(entities)
 
@@ -888,6 +937,25 @@ def install_monitoring(entities, domain=None):
     info("Starting monitoring stack ...")
     run(["docker", "compose", "up", "-d", "--pull", "missing"], cwd=MONITORING_DIR)
     ok("Monitoring stack started")
+
+    # Force-sync Grafana admin password to .env value (GF_SECURITY_ADMIN_PASSWORD only
+    # takes effect on first DB init; re-runs would leave the old password in the DB)
+    env_file = Path(MONITORING_DIR) / ".env"
+    grafana_pw = ""
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if line.startswith("GRAFANA_PASSWORD="):
+                grafana_pw = line.split("=", 1)[1].strip()
+    if grafana_pw:
+        import time as _time
+        _time.sleep(3)  # give Grafana a moment to finish starting
+        r = run(["docker", "compose", "exec", "-T", "grafana",
+                 "grafana", "cli", "admin", "reset-admin-password", grafana_pw],
+                cwd=MONITORING_DIR, check=False, capture=True)
+        if r.returncode == 0:
+            ok("  Grafana admin password synced")
+        else:
+            warn("  Could not sync Grafana password — run manually if needed: mcp-admin monitoring reset-grafana-password")
 
     # Systemd unit to start monitoring on boot
     unit = (
@@ -911,21 +979,31 @@ def install_monitoring(entities, domain=None):
     run(["systemctl", "enable", MONITORING_SVC_NAME])
     ok(f"  Monitoring service: {unit_path} (enabled on boot)")
 
+    _ip = _server_ip()
+    print()
     if domain:
-        print()
-        info(f"Monitoring UIs (via nginx proxy after install):")
-        print(f"  Grafana       : https://{domain}/grafana/")
-        print(f"  Prometheus    : https://{domain}/prometheus/")
-        print(f"  Alertmanager  : https://{domain}/alertmanager/")
-        print(f"  Redis UI      : https://{domain}/redis/")
+        base = f"https://{domain}"
+        info("Monitoring UIs (via nginx):")
+    elif nginx_port:
+        base = f"http://{_ip}:{nginx_port}"
+        info("Monitoring UIs (via nginx — accessible from any browser on the network):")
     else:
-        print()
-        info("Monitoring UIs (accessible via SSH tunnel or local nginx):")
-        print("  Grafana       : http://127.0.0.1:3001/")
-        print("  Prometheus    : http://127.0.0.1:9090/")
-        print("  Alertmanager  : http://127.0.0.1:9093/")
-        print("  Redis UI      : http://127.0.0.1:8081/")
+        base = None
+        info("Monitoring UIs (direct ports — accessible from any browser on the network):")
+
+    if base:
+        print(f"  Grafana       : {base}/grafana/")
+        print(f"  Prometheus    : {base}/prometheus/")
+        print(f"  Alertmanager  : {base}/alertmanager/")
+        print(f"  Redis UI      : {base}/redis/")
+    else:
+        print(f"  Grafana       : http://{_ip}:3001/")
+        print(f"  Prometheus    : http://{_ip}:9090/")
+        print(f"  Alertmanager  : http://{_ip}:9093/")
+        print(f"  Redis UI      : http://{_ip}:8081/")
     print(f"  Credentials   : cat {MONITORING_DIR}/.env")
+    print(f"                  Grafana/Redis: GRAFANA_PASSWORD, REDIS_COMMANDER_PASSWORD")
+    print(f"                  Prometheus/Alertmanager: MONITORING_ADMIN_USER / MONITORING_ADMIN_PASSWORD")
     print()
 
 
@@ -933,37 +1011,66 @@ def _monitoring_nginx_block():
     """Return nginx location blocks for the monitoring UIs."""
     return (
         "\n    # Monitoring UIs (installed by --monitoring)\n"
-        "    location /grafana/ {\n"
-        "        proxy_pass http://127.0.0.1:3001/;\n"
+        # Grafana WebSocket (live streaming) — must come before the general /grafana/ block
+        "    location /grafana/api/live/ {\n"
+        "        proxy_pass http://127.0.0.1:3001/grafana/api/live/;\n"
         "        proxy_http_version 1.1;\n"
-        "        proxy_set_header Host $host;\n"
-        "        proxy_set_header X-Real-IP $remote_addr;\n"
-        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
-        "        proxy_set_header X-Forwarded-Proto $scheme;\n"
-        "        proxy_set_header Upgrade $http_upgrade;\n"
-        "        proxy_set_header Connection 'upgrade';\n"
+        "        proxy_set_header Upgrade    $http_upgrade;\n"
+        "        proxy_set_header Connection \"upgrade\";\n"
+        "        proxy_set_header Host       $host;\n"
+        "        proxy_read_timeout 3600s;\n"
         "    }\n"
+        # Grafana serves under /grafana/ (GF_SERVER_SERVE_FROM_SUB_PATH=true)
+        # so proxy_pass must preserve the /grafana/ prefix
+        "    location /grafana/ {\n"
+        "        proxy_pass http://127.0.0.1:3001/grafana/;\n"
+        "        proxy_http_version 1.1;\n"
+        "        proxy_set_header Host              $host;\n"
+        "        proxy_set_header X-Real-IP         $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;\n"
+        "        proxy_set_header X-Forwarded-Proto https;\n"
+        "        proxy_set_header Connection        \"\";\n"
+        "        proxy_read_timeout 300s;\n"
+        "        proxy_send_timeout 300s;\n"
+        "        proxy_buffers      16 32k;\n"
+        "        proxy_buffer_size  64k;\n"
+        "    }\n"
+        # Prometheus serves at / (--web.route-prefix=/) so strip /prometheus/ prefix
         "    location /prometheus/ {\n"
+        f"        auth_basic \"SuiteCRM MCP Monitoring\";\n"
+        f"        auth_basic_user_file {MONITORING_HTPASSWD};\n"
         "        proxy_pass http://127.0.0.1:9090/;\n"
         "        proxy_http_version 1.1;\n"
-        "        proxy_set_header Host $host;\n"
-        "        proxy_set_header X-Real-IP $remote_addr;\n"
-        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "        proxy_set_header Host              $host;\n"
+        "        proxy_set_header X-Real-IP         $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;\n"
+        "        proxy_set_header X-Forwarded-Proto https;\n"
+        "        proxy_set_header Connection        \"\";\n"
+        "        proxy_read_timeout 60s;\n"
         "    }\n"
+        # Alertmanager serves at / (--web.route-prefix=/) so strip /alertmanager/ prefix
         "    location /alertmanager/ {\n"
+        f"        auth_basic \"SuiteCRM MCP Monitoring\";\n"
+        f"        auth_basic_user_file {MONITORING_HTPASSWD};\n"
         "        proxy_pass http://127.0.0.1:9093/;\n"
         "        proxy_http_version 1.1;\n"
-        "        proxy_set_header Host $host;\n"
-        "        proxy_set_header X-Real-IP $remote_addr;\n"
-        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "        proxy_set_header Host              $host;\n"
+        "        proxy_set_header X-Real-IP         $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;\n"
+        "        proxy_set_header X-Forwarded-Proto https;\n"
+        "        proxy_set_header Connection        \"\";\n"
+        "        proxy_read_timeout 60s;\n"
         "    }\n"
+        # Redis Commander serves under /redis/ (URL_PREFIX=/redis)
+        # so proxy_pass must preserve the /redis/ prefix
         "    location /redis/ {\n"
-        "        proxy_pass http://127.0.0.1:8081/;\n"
+        "        proxy_pass http://127.0.0.1:8081/redis/;\n"
         "        proxy_http_version 1.1;\n"
-        "        proxy_set_header Host $host;\n"
-        "        proxy_set_header X-Real-IP $remote_addr;\n"
-        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
-        "        proxy_buffering off;\n"
+        "        proxy_set_header Host              $host;\n"
+        "        proxy_set_header X-Real-IP         $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;\n"
+        "        proxy_set_header X-Forwarded-Proto https;\n"
+        "        proxy_read_timeout 30s;\n"
         "    }\n"
     )
 
@@ -1104,6 +1211,9 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
         f"ExecStart={nb} {SERVER_DIR}/index.mjs\n"
         f"Restart=always\n"
         f"RestartSec=5\n"
+        f"KillMode=control-group\n"
+        f"StartLimitIntervalSec=120\n"
+        f"StartLimitBurst=10\n"
         f"StandardOutput=journal\n"
         f"StandardError=journal\n"
         f"SyslogIdentifier={svc_name}\n"
@@ -1436,7 +1546,7 @@ def show_status_multi(entities=None):
             if saved_domain:
                 print(f"  external: https://{saved_domain}/{code}/sse")
             else:
-                print(f"  external: http://YOUR_SERVER:{NGINX_PORT}/{code}/sse")
+                print(f"  external: http://{_server_ip()}:{NGINX_PORT}/{code}/sse")
             if active:
                 try:
                     with _ur.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
@@ -1526,6 +1636,8 @@ def main():
     parser.add_argument("--uninstall",  action="store_true", help="Remove single-entity install")
     parser.add_argument("--monitoring", action="store_true",
                         help="Install Prometheus/Grafana/Loki monitoring stack via Docker")
+    parser.add_argument("--monitoring-only", dest="monitoring_only", action="store_true",
+                        help="Reinstall/update monitoring stack only — skips all CRM service steps")
     parser.add_argument("--setup-crm-host", dest="setup_crm_host", metavar="CODE",
                         help="Deploy provision script to CRM VM for entity CODE")
     args = parser.parse_args()
@@ -1565,6 +1677,29 @@ def main():
 
     if args.uninstall:
         uninstall_single(); sys.exit(0)
+
+    if args.monitoring_only:
+        # Load entities from existing config so nginx and prometheus.yml stay correct
+        # Prefer the installed runtime path; fall back to the CLI-supplied config path
+        entities_file = Path(ENTITIES_JSON) if Path(ENTITIES_JSON).exists() else Path(config_path)
+        if not entities_file.exists():
+            error(f"No entities config found at {ENTITIES_JSON} or {config_path}.\n"
+                  "Run the full installer first, or pass --config <path>.")
+        with open(entities_file) as f:
+            entities = json.load(f)
+        saved_domain = Path(DOMAIN_FILE).read_text().strip() if Path(DOMAIN_FILE).exists() else None
+        print(); info("=" * 60); info("MONITORING STACK"); info("=" * 60); print()
+        install_monitoring(entities, domain=saved_domain, nginx_port=NGINX_PORT if not saved_domain else None)
+        if saved_domain:
+            info("Updating nginx with monitoring locations ...")
+            _rebuild_nginx_multi(entities, domain=saved_domain, monitoring=True); print()
+        elif Path("/etc/nginx/sites-available/suitecrm-mcp").exists():
+            info("Updating nginx with monitoring locations ...")
+            _rebuild_nginx_multi(entities, domain=None, monitoring=True); print()
+        print()
+        info("=" * 60); ok("MONITORING REINSTALL COMPLETE"); info("=" * 60)
+        print()
+        sys.exit(0)
 
     if args.setup_crm_host:
         validate_code(args.setup_crm_host)
@@ -1792,7 +1927,7 @@ def main():
     # Monitoring stack
     if do_monitoring:
         print(); info("=" * 60); info("MONITORING STACK"); info("=" * 60); print()
-        install_monitoring(entities, domain=args.domain)
+        install_monitoring(entities, domain=args.domain, nginx_port=NGINX_PORT if is_multi else None)
         # Rebuild nginx to include monitoring locations if nginx is already configured
         if is_multi:
             info("Updating nginx with monitoring locations ...")
@@ -1807,14 +1942,14 @@ def main():
         if args.domain:
             print(f"  Connect at: https://{args.domain}/<code>/sse")
         else:
-            print(f"  Connect at: http://YOUR_SERVER_IP:{NGINX_PORT}/<code>/sse")
+            print(f"  Connect at: http://{_server_ip()}:{NGINX_PORT}/<code>/sse")
     else:
         port = list(to_install.values())[0]["port"]
         show_status_single(port)
         if args.domain:
             print(f"  SSE endpoint: https://{args.domain}/sse")
         else:
-            print(f"  SSE endpoint: http://YOUR_SERVER_IP:{port}/sse")
+            print(f"  SSE endpoint: http://{_server_ip()}:{port}/sse")
 
     print()
     if oauth_cfg:
@@ -1826,6 +1961,11 @@ def main():
         info("Claude Code, or OpenClaw. See README.md for connection examples.")
     else:
         info("See README.md for connection and authentication instructions.")
+
+    print()
+    print(f"{GREEN}{'=' * 60}{NC}")
+    ok("INSTALLATION COMPLETE")
+    print(f"{GREEN}{'=' * 60}{NC}")
     print()
 
 
