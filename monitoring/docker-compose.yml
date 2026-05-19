@@ -7,7 +7,7 @@
 services:
 
   prometheus:
-    image: prom/prometheus:v3.3.1
+    image: prom/prometheus:v3.11.3
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:11.6.1
+    image: grafana/grafana:13.0.1
     ports:
       - "0.0.0.0:3001:3000"
     environment:
@@ -49,7 +49,7 @@ services:
     restart: unless-stopped
 
   loki:
-    image: grafana/loki:3.4.2
+    image: grafana/loki:3.7.2
     ports:
       - "0.0.0.0:3200:3100"
     volumes:
@@ -59,7 +59,7 @@ services:
     restart: unless-stopped
 
   alertmanager:
-    image: prom/alertmanager:v0.27.0
+    image: prom/alertmanager:v0.32.1
     ports:
       - "127.0.0.1:9093:9093"
     volumes:
@@ -72,7 +72,7 @@ services:
     restart: unless-stopped
 
   promtail:
-    image: grafana/promtail:3.4.2
+    image: grafana/promtail:3.7.2
     volumes:
       - /var/log/journal:/var/log/journal:ro
       - /run/log/journal:/run/log/journal:ro
@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
 
   redis-exporter:
-    image: oliver006/redis_exporter:v1.67.0
+    image: oliver006/redis_exporter:v1.83.0
     # host network so it can reach Redis on 127.0.0.1:6379
     network_mode: host
     environment:
