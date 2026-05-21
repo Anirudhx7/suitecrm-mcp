@@ -147,14 +147,16 @@ Expected: `status = Active`, `is_admin = 0`.
 SuiteCRM's v4_1 REST API only authenticates against **local database passwords**.
 LDAP and SSO users have no local password and will fail to log in via the gateway.
 
-Use `tools/create-api-user.sh` from the gateway server to set a local API password:
+Use `crm-provision-user` on the CRM VM (deployed by `install.py --setup-crm-host`) to set a local API password:
 
 ```bash
+# SSH into the CRM VM, then:
+
 # Single user
-sudo bash tools/create-api-user.sh john.doe
+sudo crm-provision-user john.doe secretpassword
 
 # Bulk from CSV (user_name,password)
-sudo bash tools/create-api-user.sh --csv users.csv
+sudo crm-provision-user --csv /path/to/users.csv
 ```
 
 This sets a local DB password without affecting the user's LDAP/SSO login. Run it

@@ -53,7 +53,7 @@ SSH provisioning (LDAP/SSO deployments):
   The interactive setup wizard will ask about this during a fresh install.
 """
 
-import os, sys, subprocess, json, argparse, shutil, re, socket, time, secrets, getpass
+import os, sys, subprocess, json, argparse, shutil, re, socket, time, secrets, getpass, ssl, shlex
 from pathlib import Path
 from urllib.parse import urlparse
 import urllib.request
@@ -64,7 +64,7 @@ import urllib.parse
 # Constants
 # ---------------------------------------------------------------------------
 
-SERVER_DIR         = "/opt/suitecrm-mcp"
+SERVER_DIR         = "/opt/suitecrm-mcp-server"
 ENV_DIR            = "/etc/suitecrm-mcp"
 ENV_FILE           = "/etc/suitecrm-mcp/gateway.env"   # single-entity env
 ENTITIES_JSON      = "/etc/suitecrm-mcp/entities.json"  # runtime entity config for the server
@@ -224,6 +224,38 @@ def auto_detect_endpoint(base_url, verbose=False):
 
     return None, None
 
+GRAPHQL_PATHS = ["/api/graphql", "/graphql"]
+
+def _test_graphql_api(base_url):
+    """
+    Check if a SuiteCRM v8 GraphQL endpoint exists at base_url.
+    A 200/400/401/403 response all mean the endpoint is present (auth required or query error).
+    Returns (True, endpoint_url) or (False, None).
+    """
+    parsed = urlparse(base_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    for path in GRAPHQL_PATHS:
+        endpoint = base + path
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps({"query": "{__typename}"}).encode("utf-8"),
+                method="POST",
+            )
+            req.add_header("Content-Type", "application/json")
+            req.add_header("User-Agent", "SuiteCRM-MCP-Installer/1.5")
+            with urllib.request.urlopen(req, timeout=API_DETECT_TIMEOUT, context=ctx):
+                return True, endpoint  # 200 — endpoint live
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 401, 403):  # endpoint exists, auth/query error expected
+                return True, endpoint
+        except Exception:
+            pass
+    return False, None
+
 # ---------------------------------------------------------------------------
 # Interactive setup
 # ---------------------------------------------------------------------------
@@ -233,77 +265,126 @@ def _prompt(label, default=None):
     val = input(f"  {label}{suffix}: ").strip()
     return val or default
 
-def prompt_entity_config(entity_code=None, default_port=3101):
-    """Interactively gather one entity's config. Returns entities.json-style dict plus 'code' key."""
+def _collect_v4_endpoint(base_url, code):
+    """Detect or prompt for a v4 REST endpoint. Returns endpoint string."""
+    if "rest.php" in base_url:
+        ok(f"  [{code}] Using provided v4 endpoint: {base_url}")
+        return base_url
+    info(f"  [{code}] Auto-detecting v4 REST endpoint ...")
+    endpoint, version = auto_detect_endpoint(base_url, verbose=True)
+    if endpoint:
+        ok(f"  [{code}] Detected v4: {endpoint}" + (f" (SuiteCRM {version})" if version else ""))
+        return endpoint
+    warn(f"  [{code}] v4 auto-detection failed.")
+    print("  Common patterns:")
+    for p in API_PATH_PATTERNS[:4]:
+        print(f"    {base_url}{p}")
+    endpoint = _prompt(f"  [{code}] Full v4 REST endpoint")
+    if not endpoint:
+        error("v4 endpoint is required")
+    return endpoint
+
+
+def _collect_v8_endpoint(base_url, code):
+    """Detect or prompt for a v8 GraphQL endpoint + OAuth2 creds. Returns (endpoint, client_id, client_secret, auth_endpoint)."""
+    if "/graphql" in base_url:
+        endpoint = base_url
+        ok(f"  [{code}] Using provided v8 endpoint: {endpoint}")
+    else:
+        info(f"  [{code}] Auto-detecting v8 GraphQL endpoint ...")
+        gql_found, endpoint = _test_graphql_api(base_url)
+        if gql_found:
+            ok(f"  [{code}] Detected v8 GraphQL: {endpoint}")
+        else:
+            warn(f"  [{code}] v8 auto-detection failed.")
+            parsed = urlparse(base_url)
+            base = f"{parsed.scheme}://{parsed.netloc}"
+            print(f"  Expected: {base}/api/graphql")
+            endpoint = _prompt(f"  [{code}] Full v8 GraphQL endpoint", f"{base}/api/graphql")
+            if not endpoint:
+                error("v8 endpoint is required")
+
+    print()
+    info(f"  [{code}] OAuth2 client credentials (from SuiteCRM Admin > OAuth2 Clients)")
+    client_id     = _prompt(f"  [{code}] Client ID")
+    client_secret = getpass.getpass(f"  [{code}] Client Secret: ").strip()
+    parsed = urlparse(endpoint)
+    default_auth  = f"{parsed.scheme}://{parsed.netloc}/Api/access_token"
+    auth_endpoint = _prompt(f"  [{code}] Token URL", default_auth)
+    return endpoint, client_id, client_secret, auth_endpoint
+
+
+def prompt_entity_config(entity_code=None, default_port=3101, api_mode=None):
+    """
+    Interactively gather one entity's config.
+    api_mode: "v4" | "v8" | "both" — if None, prompted interactively.
+    Returns entities.json-style dict plus 'code' key.
+    """
     print()
     code = entity_code or _prompt("Entity code (letters, digits, hyphens, underscores)", "main")
     validate_code(code)
 
     default_label = code.replace("_", " ").replace("-", " ").title()
-    label = _prompt("Entity label", default_label)
+    label = _prompt(f"  [{code}] Label", default_label)
 
-    base_url = _prompt("CRM base URL (e.g. https://crm.example.com)")
+    base_url = _prompt(f"  [{code}] CRM base URL (e.g. https://crm.example.com)")
     if not base_url:
         error("CRM URL is required")
     if not base_url.startswith(("http://", "https://")):
         base_url = "https://" + base_url
 
-    # Check if user already provided a full rest.php path
-    if "rest.php" in base_url:
-        endpoint = base_url
-        ok(f"Using provided endpoint: {endpoint}")
-        version = None
-    else:
+    if api_mode is None:
         print()
-        info("Auto-detecting REST API endpoint ...")
-        endpoint, version = auto_detect_endpoint(base_url, verbose=True)
+        print(f"  [{code}] Which SuiteCRM API version are you connecting to?")
+        print("    [1] v4 only  — legacy REST  (SuiteCRM 7.x / older)")
+        print("    [2] v8 only  — GraphQL      (SuiteCRM 8.x)")
+        print("    [3] Both     — v4 REST + v8 GraphQL on the same CRM")
+        api_choice = input(f"  [{code}] API version [1/2/3, default=1]: ").strip()
+        if api_choice == "2":
+            api_mode = "v8"
+        elif api_choice == "3":
+            api_mode = "both"
+        else:
+            api_mode = "v4"
 
-        if endpoint:
-            print()
-            ok(f"Detected: {endpoint}")
-            use_it = input("  Use this endpoint? [Y/n]: ").strip().lower()
-            if use_it not in ("", "y", "yes"):
-                endpoint = None
+    # Collect endpoints based on chosen API mode
+    v4_ep = v8_ep = client_id = client_secret = auth_endpoint = ""
 
-        if not endpoint:
-            warn("Auto-detection failed or declined.")
-            print()
-            print("  Common patterns to try manually:")
-            for p in API_PATH_PATTERNS[:4]:
-                print(f"    {base_url}{p}")
-            print()
-            endpoint = _prompt("Full REST API endpoint (e.g. https://crm.example.com/service/v4_1/rest.php)")
-            if not endpoint:
-                error("Endpoint is required")
-            print("  Testing ...", end=" ", flush=True)
-            valid, version = _test_rest_api(endpoint)
-            if valid:
-                print(f"{GREEN}OK (SuiteCRM {version}){NC}")
-            else:
-                print(f"{YELLOW}could not verify{NC}")
-                if input("  Use anyway? [y/N]: ").strip().lower() not in ("y", "yes"):
-                    error("Endpoint verification failed")
+    if api_mode in ("v4", "both"):
+        print()
+        v4_ep = _collect_v4_endpoint(base_url, code)
 
-    port_str = _prompt("Listen port", str(default_port))
+    if api_mode in ("v8", "both"):
+        print()
+        v8_ep, client_id, client_secret, auth_endpoint = _collect_v8_endpoint(base_url, code)
+
+    # Primary endpoint: v8 takes precedence when both are set
+    endpoint = v8_ep if v8_ep else v4_ep
+
+    port_str = _prompt(f"  [{code}] Listen port", str(default_port))
     try:
         port = int(port_str)
     except (TypeError, ValueError):
         error(f"Invalid port: {port_str!r}")
 
-    tls_skip_str = input("  Disable TLS verification for self-signed certs? [y/N]: ").strip().lower()
-    tls_skip = tls_skip_str in ("y", "yes")
-
-    group = _prompt("Required AD/OAuth group (leave blank to allow any authenticated user)", "")
+    tls_skip = input(f"  [{code}] Disable TLS verification for self-signed certs? [y/N]: ").strip().lower() in ("y", "yes")
+    group    = _prompt(f"  [{code}] Required AD/OAuth group (blank = any authenticated user)", "")
 
     result = {
-        "code": code,
-        "label": label,
+        "code":     code,
+        "label":    label,
         "endpoint": endpoint,
-        "port": port,
+        "port":     port,
         "tls_skip": tls_skip,
     }
     if group:
         result["group"] = group
+    if v4_ep and v8_ep:
+        result["v4_endpoint"] = v4_ep   # stored for reference; primary endpoint is v8
+    if client_id:
+        result["client_id"]     = client_id
+        result["client_secret"] = client_secret
+        result["auth_endpoint"] = auth_endpoint
     return result
 
 def interactive_setup():
@@ -414,13 +495,11 @@ def prompt_oauth_config(args, domain=None):
     if not client_secret:
         error("Auth0 client secret is required")
 
-    audience = getattr(args, "oauth_audience", None) or ""
-    while not audience:
-        audience = _prompt(
-            "Auth0 audience (your API identifier - required)", ""
-        )
-        if not audience:
-            error("Auth0 audience is required")
+    audience = getattr(args, "oauth_audience", None) or _prompt(
+        "Auth0 audience (your API identifier - required)", ""
+    )
+    if not audience:
+        error("Auth0 audience is required")
 
     # Derive gateway URL
     if domain:
@@ -533,7 +612,7 @@ def install_auth_service(auth_cfg):
         f"PrivateTmp=yes\n"
         f"ProtectSystem=strict\n"
         f"ProtectHome=yes\n"
-        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp\n\n"
+        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server\n\n"
         f"[Install]\n"
         f"WantedBy=multi-user.target\n"
     )
@@ -609,11 +688,17 @@ def prompt_ssh_provisioning(entities):
             warn(f"  Invalid SSH user '{ssh_user}' - skipping '{code}'")
             continue
         ssh_key = _prompt("  Path to SSH private key", "/etc/suitecrm-mcp/crm-ssh-key")
-        crm_hosts[code] = {
+        api_path = _prompt("  API_PATH override (blank = auto-detect, only needed for v4 REST legacy)", "")
+        # SUITECRM_CONFIG is auto-detected on the CRM VM via find-suitecrm-config.sh;
+        # 'command' is built by setup_crm_host after detection.
+        entry = {
             "ssh_host": ssh_host,
             "ssh_user": ssh_user,
             "ssh_key":  ssh_key,
         }
+        if api_path:
+            entry["api_path"] = api_path
+        crm_hosts[code] = entry
         ok(f"  SSH provisioning enabled for '{code}'")
 
     return crm_hosts
@@ -621,13 +706,14 @@ def prompt_ssh_provisioning(entities):
 
 def setup_crm_host(code, host_cfg):
     """
-    Deploy tools/create-api-user.sh to the CRM VM as /usr/local/bin/crm-provision-user.
+    Deploy tools/crm-provision-user.sh to the CRM VM as /usr/local/bin/crm-provision-user,
+    then auto-detect SUITECRM_CONFIG via find-suitecrm-config.sh and build the command
+    string. Updates host_cfg in place with the detected 'command' field.
     Returns True on success, False on failure (non-fatal when called during install).
     """
     ssh_host = host_cfg.get("ssh_host", "")
     ssh_user = host_cfg.get("ssh_user", "ubuntu")
     ssh_key  = host_cfg.get("ssh_key", "/etc/suitecrm-mcp/crm-ssh-key")
-    dest_cmd = host_cfg.get("command", "/usr/local/bin/crm-provision-user")
 
     if not SAFE_HOST_RE.match(ssh_host):
         warn(f"  [{code}] Invalid ssh_host '{ssh_host}' in crm-hosts.json - skipping")
@@ -636,16 +722,26 @@ def setup_crm_host(code, host_cfg):
         warn(f"  [{code}] Invalid ssh_user '{ssh_user}' in crm-hosts.json - skipping")
         return False
 
-    src = script_dir() / "tools" / "create-api-user.sh"
+    src = script_dir() / "tools" / "crm-provision-user.sh"
     if not src.exists():
-        warn(f"  [{code}] tools/create-api-user.sh not found - run from the repo root")
+        warn(f"  [{code}] tools/crm-provision-user.sh not found - run from the repo root")
+        return False
+
+    find_script = script_dir() / "scripts" / "find-suitecrm-config.sh"
+    if not find_script.exists():
+        warn(f"  [{code}] scripts/find-suitecrm-config.sh not found - run from the repo root")
         return False
 
     ssh_opts = ["-i", ssh_key, "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "UserKnownHostsFile=/dev/null",
                 "-o", "ConnectTimeout=15", "-o", "BatchMode=yes"]
     target = f"{ssh_user}@{ssh_host}"
+    provision_bin = "/usr/local/bin/crm-provision-user"
 
     info(f"  [{code}] Copying provision script to {target} ...")
+    # Remove stale copy first — a previous failed run can leave it owned by root
+    run(["ssh"] + ssh_opts + [target, "sudo rm -f /tmp/crm-provision-user"],
+        check=False, capture=True)
     r = run(["scp"] + ssh_opts + [str(src), f"{target}:/tmp/crm-provision-user"],
             check=False, capture=True)
     if r.returncode != 0:
@@ -653,13 +749,82 @@ def setup_crm_host(code, host_cfg):
         return False
 
     r = run(["ssh"] + ssh_opts + [target,
-             f"sudo mv /tmp/crm-provision-user {dest_cmd} && sudo chmod 755 {dest_cmd}"],
+             f"sudo mv /tmp/crm-provision-user {provision_bin} && sudo chmod 755 {provision_bin}"],
             check=False, capture=True)
     if r.returncode != 0:
         warn(f"  [{code}] Remote install failed: {r.stderr.strip()[:200]}")
         return False
 
-    ok(f"  [{code}] Provision script deployed to {ssh_host}:{dest_cmd}")
+    ok(f"  [{code}] Provision script deployed to {ssh_host}:{provision_bin}")
+
+    # Resolve SUITECRM_CONFIG — mirrors ansible/deploy.yml logic:
+    # 1. Read from /etc/environment if already set (persisted by previous run)
+    # 2. Otherwise run find-suitecrm-config.sh as root and persist the result
+    # 3. Fall back to manual prompt if discovery fails
+    info(f"  [{code}] Resolving SUITECRM_CONFIG on {ssh_host} ...")
+    config_path = ""
+
+    # Step 1: check /etc/environment
+    r = subprocess.run(
+        ["ssh"] + ssh_opts + [target,
+         "grep '^SUITECRM_CONFIG=' /etc/environment 2>/dev/null | cut -d= -f2 | head -1"],
+        capture_output=True, text=True,
+    )
+    candidate = r.stdout.strip()
+    if candidate.startswith("/"):
+        config_path = candidate
+        ok(f"  [{code}] SUITECRM_CONFIG already set: {config_path}")
+
+    # Step 2: discover — same find command used inside crm-provision-user.sh
+    if not config_path:
+        info(f"  [{code}] Not set — running discovery (may take a minute) ...")
+        find_cmd = (
+            "sudo bash -c '"
+            "find / \\( -path /proc -o -path /sys -o -path /dev \\) -prune -o"
+            " -name config.php -readable -print 2>/dev/null"
+            " | xargs -r grep -l dbconfig 2>/dev/null | head -1'"
+        )
+        r = subprocess.run(
+            ["ssh"] + ssh_opts + [target, find_cmd],
+            capture_output=True, text=True,
+        )
+        candidate = r.stdout.strip()
+        if not candidate and r.stderr.strip():
+            warn(f"  [{code}] Discovery stderr: {r.stderr.strip()[:300]}")
+        if candidate.startswith("/"):
+            config_path = candidate
+            if not re.match(r'^/[a-zA-Z0-9/_.\-]+$', config_path):
+                warn(f"  [{code}] Suspicious config path rejected: {config_path}")
+                config_path = ""
+            else:
+                # Persist to /etc/environment so future runs skip discovery
+                quoted = shlex.quote(config_path)
+                subprocess.run(
+                    ["ssh"] + ssh_opts + [target,
+                     f"sudo grep -q '^SUITECRM_CONFIG=' /etc/environment 2>/dev/null || "
+                     f"echo SUITECRM_CONFIG={quoted} | sudo tee -a /etc/environment"],
+                    capture_output=True, text=True,
+                )
+                ok(f"  [{code}] SUITECRM_CONFIG={config_path}")
+
+    # Step 3: manual prompt
+    if not config_path:
+        warn(f"  [{code}] Could not auto-detect config.php on {ssh_host}")
+        config_path = _prompt(f"  [{code}] Enter SUITECRM_CONFIG path on the CRM VM").strip()
+        if not config_path or not config_path.startswith("/"):
+            warn(f"  [{code}] No valid path provided — skipping")
+            return False
+        ok(f"  [{code}] SUITECRM_CONFIG={config_path}")
+
+    # Build runtime command stored in crm-hosts.json
+    cmd_parts = [f"SUITECRM_CONFIG={shlex.quote(config_path)}"]
+    api_path = host_cfg.get("api_path", "")
+    if api_path:
+        cmd_parts.append(f"API_PATH={shlex.quote(api_path)}")
+    cmd_parts.append(provision_bin)
+    host_cfg["command"] = " ".join(cmd_parts)
+    host_cfg.pop("api_path", None)  # api_path is now embedded in command
+
     return True
 
 
@@ -723,8 +888,9 @@ def install_redis():
         else:
             redis_pass = secrets.token_urlsafe(16)
             os.makedirs(ENV_DIR, exist_ok=True)
-            pass_file.write_text(redis_pass)
-            run(["chmod", "600", str(pass_file)])
+            fd = os.open(str(pass_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
+                f.write(redis_pass)
             
         if "requirepass " not in content:
             content += f"\nrequirepass {redis_pass}\n"
@@ -738,7 +904,10 @@ def install_redis():
             changed = True
             
         if changed:
-            Path(redis_conf).write_text(content)
+            orig_mode = Path(redis_conf).stat().st_mode & 0o777
+            fd = os.open(redis_conf, os.O_WRONLY | os.O_TRUNC, orig_mode)
+            with os.fdopen(fd, 'w') as f:
+                f.write(content)
             run(["systemctl", "restart", "redis-server"])
             ok("Redis configured with persistence, maxmemory, and authentication")
 
@@ -1106,6 +1275,9 @@ def install_server():
         if scripts_dst.exists():
             shutil.rmtree(scripts_dst)
         shutil.copytree(scripts_src, scripts_dst)
+    lock_file = Path(SERVER_DIR) / "package-lock.json"
+    if not lock_file.exists():
+        error(f"package-lock.json not found in {SERVER_DIR}. Run 'npm install' in the repo first to generate it.")
     run(["npm", "ci", "--omit=dev", "--silent"], cwd=SERVER_DIR)
     ok("Server installed")
 
@@ -1134,6 +1306,22 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
     if metrics_port > 65535:
         error(f"Entity port {port} too high: derived metrics port {metrics_port} exceeds 65535 (max entity port: 59535)")
 
+    # GraphQL (v8) endpoints need OAuth2 client credentials
+    is_graphql = "/graphql" in endpoint or "/api/graphql" in endpoint
+    client_id     = data.get("client_id", "")
+    client_secret = data.get("client_secret", "")
+    auth_endpoint = data.get("auth_endpoint", "")
+    if is_graphql:
+        if not client_id:
+            print()
+            info(f"  [{code}] GraphQL API requires OAuth2 client credentials")
+            client_id     = _prompt(f"  [{code}] SUITECRM_CLIENT_ID")
+            client_secret = getpass.getpass(f"  [{code}] SUITECRM_CLIENT_SECRET: ").strip()
+        if not auth_endpoint:
+            # Derive: strip /api/graphql suffix, append /Api/access_token
+            auth_endpoint = re.sub(r'/api/graphql.*$', '', endpoint, flags=re.IGNORECASE) + "/Api/access_token"
+            info(f"  [{code}] Auth endpoint: {auth_endpoint}")
+
     if is_multi:
         env_path = f"{ENV_DIR}/{code}.env"
         svc_name = f"suitecrm-mcp-{code}"
@@ -1160,6 +1348,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
             f"# SuiteCRM MCP Gateway - {label}",
             f"SUITECRM_ENDPOINT={endpoint}",
             f"SUITECRM_PREFIX={prefix}",
+            f"SUITECRM_CODE={code}",
             f"PORT={port}",
             "BIND_HOST=127.0.0.1",
             f"METRICS_PORT={metrics_port}",
@@ -1175,6 +1364,19 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
         lines.append("NODE_TLS_REJECT_UNAUTHORIZED=0")
     if behind_proxy:
         lines.append("TRUST_PROXY=1")
+
+    # v4 fallback endpoint when both v4 and v8 are configured
+    if data.get("v4_endpoint"):
+        lines.append(f"SUITECRM_V4_ENDPOINT={data['v4_endpoint']}")
+
+    # GraphQL / SuiteCRM v8 API credentials
+    if is_graphql and client_id:
+        lines.append("")
+        lines.append("# SuiteCRM v8 GraphQL OAuth2 credentials")
+        lines.append(f"SUITECRM_API_VERSION=8")
+        lines.append(f"SUITECRM_CLIENT_ID={client_id}")
+        lines.append(f"SUITECRM_CLIENT_SECRET={client_secret}")
+        lines.append(f"SUITECRM_AUTH_ENDPOINT={auth_endpoint}")
 
     # Auth0 vars needed by the entity gateway to validate session tokens
     if oauth_cfg:
@@ -1221,7 +1423,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
         f"PrivateTmp=yes\n"
         f"ProtectSystem=strict\n"
         f"ProtectHome=yes\n"
-        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp\n\n"
+        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server\n\n"
         f"[Install]\n"
         f"WantedBy=multi-user.target\n"
     )
@@ -1441,7 +1643,7 @@ def apply_update_hardening(codes, is_multi):
                 unit = unit.replace(
                     "SyslogIdentifier=",
                     "NoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\n"
-                    "ProtectHome=yes\nReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp\n"
+                    "ProtectHome=yes\nReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server\n"
                     "SyslogIdentifier=",
                 )
                 changed = True
@@ -1716,6 +1918,8 @@ def main():
         info(f"Deploying provision script for entity '{code}' ...")
         if not setup_crm_host(code, crm_hosts[code]):
             error("Deployment failed - check SSH access and key path above")
+        # Persist command built by setup_crm_host (SUITECRM_CONFIG auto-detected)
+        write_crm_hosts(crm_hosts)
         sys.exit(0)
 
     # --url: pure single-entity CLI mode
@@ -1863,6 +2067,14 @@ def main():
     # SSH provisioning config
     crm_hosts = prompt_ssh_provisioning(to_install)
     if crm_hosts:
+        # Merge with any existing entries so --add mode doesn't drop other entities
+        if Path(CRM_HOSTS_FILE).exists():
+            try:
+                existing_hosts = json.loads(Path(CRM_HOSTS_FILE).read_text())
+                existing_hosts.update(crm_hosts)
+                crm_hosts = existing_hosts
+            except Exception:
+                pass
         info("Writing SSH provisioning config ...")
         write_crm_hosts(crm_hosts)
         print()
@@ -1873,6 +2085,13 @@ def main():
                 ok_deploy = setup_crm_host(code, host_cfg)
                 if not ok_deploy:
                     warn(f"  Re-run later: sudo python3 install.py --setup-crm-host {code}")
+            # Persist commands built by setup_crm_host (SUITECRM_CONFIG auto-detected)
+            write_crm_hosts(crm_hosts)
+        else:
+            warn("  SSH provisioning config saved but provision script NOT yet deployed.")
+            warn("  Auto-provisioning will fail until you run:")
+            for code in crm_hosts:
+                warn(f"    sudo python3 install.py --setup-crm-host {code}")
         print()
 
     # Auth service

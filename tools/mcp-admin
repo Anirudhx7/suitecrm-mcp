@@ -1,4 +1,4 @@
 #!/bin/sh
 # SuiteCRM MCP Gateway admin CLI wrapper
 # mcp-admin.mjs lives in SERVER_DIR so Node resolves imports from node_modules there.
-exec node /opt/suitecrm-mcp/mcp-admin.mjs "$@"
+exec node /opt/suitecrm-mcp-server/mcp-admin.mjs "$@"

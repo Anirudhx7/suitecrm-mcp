@@ -704,14 +704,16 @@ curl -s -X POST "https://YOUR-PATH/service/v4_1/rest.php" \
 
 SuiteCRM's v4_1 REST API only authenticates against local database passwords. If your organisation uses LDAP, Active Directory, or SSO, users who log into the CRM web UI via those providers will not have a local password set - and the gateway will return `Invalid Login` for them even with correct credentials.
 
-**Workaround:** Use [`tools/create-api-user.sh`](tools/create-api-user.sh) to set a local API password for any existing LDAP/SSO user without touching their web login. Supports single user (interactive) and bulk mode via CSV.
+**Workaround:** Use `crm-provision-user` on the CRM VM (deployed by `--setup-crm-host`) to set a local API password for any existing LDAP/SSO user without touching their web login. Supports single user and bulk mode via CSV.
 
 ```bash
+# SSH into the CRM VM, then:
+
 # Single user
-bash tools/create-api-user.sh
+sudo crm-provision-user john.doe secretpassword
 
 # Bulk - CSV format: username,password
-bash tools/create-api-user.sh --csv users.csv
+sudo crm-provision-user --csv /path/to/users.csv
 ```
 
 This is a SuiteCRM REST API limitation, not specific to this gateway.

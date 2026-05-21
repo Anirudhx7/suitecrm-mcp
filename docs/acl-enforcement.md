@@ -8,7 +8,7 @@ The MCP gateway allows AI agents to call SuiteCRM tools (create, update, delete 
 on behalf of authenticated users. SuiteCRM's own ACL system restricts what each user can
 do in the Web UI — but those restrictions are not checked at the CRM REST API level by
 default. A user blocked from editing Tasks in the browser could still call
-`suitecrm_aesg_update` with `module=Tasks` and the write would go through.
+`suitecrm_crm1_update` with `module=Tasks` and the write would go through.
 
 This feature closes that gap by checking SuiteCRM's live permission tables **before**
 forwarding any write to the CRM API.
@@ -73,7 +73,7 @@ if your install uses different values (see `.env.example` and Section 5).
 Authenticated SSE connection (CRM username resolved from user profile)
        │
        ▼
-  Tool call arrives (e.g. suitecrm_aesg_update)
+  Tool call arrives (e.g. suitecrm_crm1_update)
        │
        ├─ Read operation (search, get, …)? ──► forward to CRM directly
        │

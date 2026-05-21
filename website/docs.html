@@ -964,14 +964,16 @@ done</pre>
 
       <h2 id="crm-prep-ldap">LDAP / SSO Users</h2>
       <p>SuiteCRM's v4_1 REST API only authenticates against local database passwords. LDAP and SSO users have no local password and will fail to log in via the gateway.</p>
-      <p>Use <code>tools/create-api-user.sh</code> to set a local API password without affecting the user's LDAP/SSO login:</p>
+      <p>Use <code>crm-provision-user</code> on the CRM VM (deployed by <code>install.py --setup-crm-host</code>) to set a local API password without affecting the user's LDAP/SSO login:</p>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-        <pre><span class="cm"># Single user</span>
-sudo bash tools/create-api-user.sh john.doe
+        <pre><span class="cm"># SSH into the CRM VM, then:</span>
+
+<span class="cm"># Single user</span>
+sudo crm-provision-user john.doe secretpassword
 
 <span class="cm"># Bulk from CSV (user_name,password)</span>
-sudo bash tools/create-api-user.sh --csv users.csv</pre>
+sudo crm-provision-user --csv /path/to/users.csv</pre>
       </div>
 
       <h2 id="crm-prep-oauth">Fix OAuth2 Token Lifetime</h2>

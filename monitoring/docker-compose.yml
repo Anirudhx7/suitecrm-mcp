@@ -72,7 +72,7 @@ services:
     restart: unless-stopped
 
   promtail:
-    image: grafana/promtail:3.7.2
+    image: grafana/promtail:3.6.11
     volumes:
       - /var/log/journal:/var/log/journal:ro
       - /run/log/journal:/run/log/journal:ro

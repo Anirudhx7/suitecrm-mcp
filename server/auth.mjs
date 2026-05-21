@@ -116,12 +116,15 @@ async function deleteSession(apiKey) {
 async function getAllSessionsForUser(sub) {
   const keys = await scanSessionKeys();
   if (!keys.length) return [];
-  const values = await redis.mget(...keys);
   const results = [];
-  for (let i = 0; i < keys.length; i++) {
-    if (!values[i]) continue;
-    const s = JSON.parse(values[i]);
-    if (s.sub === sub) results.push([keys[i].slice('auth:session:'.length), s]);
+  for (let i = 0; i < keys.length; i += 500) {
+    const batch = keys.slice(i, i + 500);
+    const values = await redis.mget(...batch);
+    for (let j = 0; j < batch.length; j++) {
+      if (!values[j]) continue;
+      const s = JSON.parse(values[j]);
+      if (s.sub === sub) results.push([batch[j].slice('auth:session:'.length), s]);
+    }
   }
   return results;
 }
@@ -225,19 +228,21 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
     const results = await Promise.allSettled(toProvision.map(async ([code]) => {
       const crmPass = randomBytes(16).toString('hex');
       const host    = crmHosts[code];
-      if (host?.ssh_host && host?.ssh_user && host?.command) {
-        await execFileAsync('ssh', [
-          '-i',  host.ssh_key || '/etc/suitecrm-mcp/ssh-key.pem',
-          '-o',  'StrictHostKeyChecking=accept-new',
-          '-o',  'ConnectTimeout=10',
-          '-o',  'BatchMode=yes',
-          `${host.ssh_user}@${host.ssh_host}`,
-          host.command,
-          crmUser,
-          crmPass,
-        ], { timeout: 20000 }); // hard cap — kills SSH if remote command hangs past 20s
-        logger.info({ crmUser, entity: code }, 'crm_user_provisioned');
+      if (!host?.ssh_host || !host?.ssh_user || !host?.command) {
+        throw new Error(`Incomplete SSH config for entity ${code} in crm-hosts.json — ssh_host, ssh_user, and command are all required`);
       }
+      await execFileAsync('ssh', [
+        '-i',  host.ssh_key || '/etc/suitecrm-mcp/crm-ssh-key',
+        '-o',  'StrictHostKeyChecking=accept-new',
+        '-o',  'UserKnownHostsFile=/dev/null',
+        '-o',  'ConnectTimeout=10',
+        '-o',  'BatchMode=yes',
+        `${host.ssh_user}@${host.ssh_host}`,
+        host.command,
+        crmUser,
+        crmPass,
+      ], { timeout: 20000 }); // hard cap — kills SSH if remote command hangs past 20s
+      logger.info({ crmUser, entity: code }, 'crm_user_provisioned');
       return { code, crmPass };
     }));
 
@@ -253,9 +258,29 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
     }
   }
 
-  await redis.hset('crm:profiles', sub, JSON.stringify(profile));
-  logger.info({ sub: sub.slice(-8), entities: Object.keys(profile.entities) }, 'profile_saved_to_redis');
-  return profile;
+  const lockKey = `crm:provision-lock:${sub}`;
+  const locked = await redis.set(lockKey, '1', 'NX', 'EX', 30);
+  if (!locked) {
+    logger.info({ sub: sub.slice(-8) }, 'provision_skipped_locked');
+    const existing2 = await redis.hget('crm:profiles', sub).catch(() => null);
+    return existing2 ? JSON.parse(existing2) : profile;
+  }
+  try {
+    // Re-read under lock to avoid overwriting concurrent writes
+    const latest = await redis.hget('crm:profiles', sub).catch(() => null);
+    const merged = latest ? JSON.parse(latest) : profile;
+    merged.email = profile.email || merged.email;
+    merged.name  = profile.name  || merged.name;
+    if (!merged.entities) merged.entities = {};
+    for (const [code, creds] of Object.entries(profile.entities)) {
+      merged.entities[code] = creds;
+    }
+    await redis.hset('crm:profiles', sub, JSON.stringify(merged));
+    logger.info({ sub: sub.slice(-8), entities: Object.keys(merged.entities) }, 'profile_saved_to_redis');
+    return merged;
+  } finally {
+    await redis.del(lockKey);
+  }
 }
 
 const app = express();

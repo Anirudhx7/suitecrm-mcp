@@ -30,13 +30,13 @@ if [ -z "${SUITECRM_CONFIG:-}" ]; then
     warn "SUITECRM_CONFIG not set — searching filesystem..."
     SUITECRM_CONFIG=$(find /         \( -path /proc -o -path /sys -o -path /dev \) -prune -o         -name "config.php" -readable -print 2>/dev/null         | xargs grep -l "dbconfig" 2>/dev/null         | head -1)
 
-    [ -z "$SUITECRM_CONFIG" ] && fail "Could not find SuiteCRM config.php.
+    [ -z "$SUITECRM_CONFIG" ] && fail 'Could not find SuiteCRM config.php.
 Run this to find and persist it:
-  export SUITECRM_CONFIG=\$(find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o -name config.php -readable -print 2>/dev/null | xargs grep -l dbconfig 2>/dev/null | head -1)
-  echo "SUITECRM_CONFIG=\$SUITECRM_CONFIG" | sudo tee -a /etc/environment"
+  export SUITECRM_CONFIG=$(find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o -name config.php -readable -print 2>/dev/null | xargs grep -l dbconfig 2>/dev/null | head -1)
+  echo "SUITECRM_CONFIG=$SUITECRM_CONFIG" | sudo tee -a /etc/environment'
 
     warn "Found: $SUITECRM_CONFIG"
-    warn "Persist it: echo "SUITECRM_CONFIG=$SUITECRM_CONFIG" | sudo tee -a /etc/environment"
+    warn "Persist it: echo \"SUITECRM_CONFIG=\$SUITECRM_CONFIG\" | sudo tee -a /etc/environment"
 fi
 
 [ ! -f "$SUITECRM_CONFIG" ] && fail "SUITECRM_CONFIG file not found: $SUITECRM_CONFIG"
@@ -44,7 +44,8 @@ info "Using config: $SUITECRM_CONFIG"
 
 # ── Read DB credentials from config.php ──────────────────────
 read_cfg() {
-    php -r "include('$SUITECRM_CONFIG'); echo \$sugar_config['dbconfig']['$1'] ?? '';" 2>/dev/null
+    local key="$1"
+    CFGFILE="$SUITECRM_CONFIG" CFGKEY="$key" php -r 'include(getenv("CFGFILE")); echo $sugar_config["dbconfig"][getenv("CFGKEY")] ?? "";' 2>/dev/null
 }
 
 DB_HOST=$(read_cfg db_host_name)
@@ -60,7 +61,7 @@ done
 
 # CRM URL from config site_url
 if [ -z "${CRM_URL:-}" ]; then
-    CRM_URL=$(php -r "include('$SUITECRM_CONFIG'); echo \$sugar_config['site_url'] ?? 'https://localhost';" 2>/dev/null)
+    CRM_URL=$(CFGFILE="$SUITECRM_CONFIG" php -r 'include(getenv("CFGFILE")); echo $sugar_config["site_url"] ?? "https://localhost";' 2>/dev/null)
 fi
 
 CRM_URL="${CRM_URL/http:\/\//https://}"
@@ -100,8 +101,8 @@ try {
     $check = $pdo->prepare("SELECT COUNT(*) FROM users WHERE user_name = ?");
     $check->execute([$crm_user]);
     if ($check->fetchColumn() == 0) { echo 0; exit; }
-    $stmt = $pdo->prepare("UPDATE users SET user_hash = ?, external_auth_only = 0, system_generated_password = 0, authenticate_id = 'SugarAuthenticate' WHERE user_name = ?");
-    $stmt->execute([$hash, $crm_user]);
+    $stmt = $pdo->prepare("UPDATE users SET user_hash = ?, external_auth_only = 0, system_generated_password = 0, authenticate_id = ? WHERE user_name = ?");
+    $stmt->execute([$hash, "SugarAuthenticate", $crm_user]);
     echo 1;
 } catch (Exception $e) {
     echo "ERROR: " . $e->getMessage();

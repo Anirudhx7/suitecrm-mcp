@@ -8,16 +8,19 @@
 import { Command } from 'commander';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createInterface } from 'readline';
 
 const execFileAsync = promisify(execFile);
 
-const REDIS_URL     = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-const ENTITIES_FILE = process.env.ENTITIES_FILE || '/etc/suitecrm-mcp/entities.json';
-const HOSTS_FILE    = process.env.CRM_HOSTS_FILE || '/etc/suitecrm-mcp/crm-hosts.json';
+const REDIS_URL      = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const ENTITIES_FILE  = process.env.ENTITIES_FILE || '/etc/suitecrm-mcp/entities.json';
+const HOSTS_FILE     = process.env.CRM_HOSTS_FILE || '/etc/suitecrm-mcp/crm-hosts.json';
+const REPO_DIR       = '/opt/suitecrm-mcp';
+const PROVISION_SH   = `${REPO_DIR}/tools/crm-provision-user.sh`;
+const FIND_CONFIG_SH = `${REPO_DIR}/scripts/find-suitecrm-config.sh`;
 
 // ── colour helpers ────────────────────────────────────────────────────────────
 
@@ -282,6 +285,9 @@ async function cmdRemove(opts) {
 
   const email = profiles[sub]?.email || sub;
 
+  const entities = loadJson(ENTITIES_FILE);
+  const allCodes = opts.entity ? [opts.entity] : Object.keys(entities || {});
+
   if (opts.entity) {
     if (!(opts.entity in (profiles[sub].entities || {}))) {
       console.log(c(`${opts.entity} not found in profile for ${email}`, YELLOW));
@@ -289,11 +295,40 @@ async function cmdRemove(opts) {
     }
     delete profiles[sub].entities[opts.entity];
     await saveProfile(sub, profiles[sub]);
-    console.log(c(`Removed ${opts.entity} access for ${email}`, GREEN));
   } else {
     await deleteProfile(sub);
-    console.log(c(`Removed profile for ${email}`, GREEN));
   }
+
+  // Clear stale CRM sessions so the new profile gets fresh credentials on reconnect
+  const sessionKeys = allCodes.map(code => `crm:session:${sub}:${code}`);
+  if (sessionKeys.length) {
+    const deleted = await redis.del(...sessionKeys);
+    if (deleted > 0) console.log(c(`  Cleared ${deleted} cached CRM session(s)`, DIM));
+  }
+
+  // When removing a full profile, also revoke all active gateway auth sessions
+  if (!opts.entity) {
+    const authPattern = 'auth:session:*';
+    let revokedAuth = 0;
+    for await (const batch of scanKeys(authPattern)) {
+      if (!batch.length) continue;
+      const vals = await redis.mget(...batch);
+      const toDelete = [];
+      for (let i = 0; i < batch.length; i++) {
+        try {
+          const s = JSON.parse(vals[i] || 'null');
+          if (s?.sub === sub) toDelete.push(batch[i]);
+        } catch { /* ignore */ }
+      }
+      if (toDelete.length) {
+        await redis.del(...toDelete);
+        revokedAuth += toDelete.length;
+      }
+    }
+    if (revokedAuth > 0) console.log(c(`  Revoked ${revokedAuth} active auth session(s)`, DIM));
+  }
+
+  console.log(c(opts.entity ? `Removed ${opts.entity} access for ${email}` : `Removed profile for ${email}`, GREEN));
   await disconnect();
 }
 
@@ -851,8 +886,16 @@ function formatLogLine(raw, minLevel, multiUnit) {
     : '';
   const entityPart = (multiUnit && entity) ? c(entity.padEnd(6), CYAN) + '  ' : '';
 
+  // Show who triggered this event: gateway email + CRM username
+  const email    = parsed.email    || '';
+  const crmUser  = parsed.crm_user || parsed.user || '';
+  let userPart   = '';
+  if (email && crmUser)  userPart = c(email, BOLD) + c(` → ${crmUser}`, DIM) + '  ';
+  else if (email)        userPart = c(email, BOLD) + '  ';
+  else if (crmUser)      userPart = c(`crm:${crmUser}`, DIM) + '  ';
+
   process.stdout.write(
-    `${c(timeStr, DIM)}  ${c(levelStr, levelCol)}  ${entityPart}${reqId}${tool}${logMsg}${errMsg}\n`
+    `${c(timeStr, DIM)}  ${c(levelStr, levelCol)}  ${entityPart}${userPart}${reqId}${tool}${logMsg}${errMsg}\n`
   );
 }
 
@@ -898,6 +941,138 @@ async function cmdLogs(entityArg, opts) {
   proc.stderr.on('data', chunk => process.stderr.write(chunk));
 
   await new Promise(resolve => proc.on('exit', resolve));
+}
+
+// ── setup-crm-host ────────────────────────────────────────────────────────────
+
+function sshExec(sshArgs, { input } = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = execFile('ssh', sshArgs, { maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(Object.assign(err, { stderr: stderr.trim() }));
+      else resolve(stdout);
+    });
+    if (input != null) { proc.stdin.write(input); proc.stdin.end(); }
+  });
+}
+
+async function cmdSetupCrmHost(entityArg) {
+  const hosts = loadJson(HOSTS_FILE);
+  const code  = entityArg.toLowerCase();
+
+  const hostCfg = hosts[code];
+  if (!hostCfg) {
+    const avail = Object.keys(hosts).join(', ') || 'none';
+    console.error(c(`Entity '${code}' not in ${HOSTS_FILE}. Available: ${avail}`, RED));
+    process.exit(1);
+  }
+
+  const { ssh_host, ssh_user = 'ubuntu', ssh_key = '/etc/suitecrm-mcp/crm-ssh-key' } = hostCfg;
+  if (!ssh_host) {
+    console.error(c(`No ssh_host configured for '${code}' in ${HOSTS_FILE}`, RED));
+    process.exit(1);
+  }
+
+  for (const [label, path] of [['crm-provision-user.sh', PROVISION_SH], ['find-suitecrm-config.sh', FIND_CONFIG_SH]]) {
+    if (!existsSync(path)) {
+      console.error(c(`${label} not found at ${path} — clone repo to /opt/suitecrm-mcp`, RED));
+      process.exit(1);
+    }
+  }
+
+  const sshOpts = ['-i', ssh_key, '-o', 'StrictHostKeyChecking=accept-new',
+                   '-o', 'UserKnownHostsFile=/dev/null',
+                   '-o', 'ConnectTimeout=15', '-o', 'BatchMode=yes'];
+  const target       = `${ssh_user}@${ssh_host}`;
+  const provisionBin = '/usr/local/bin/crm-provision-user';
+
+  // 1. SCP provision script
+  console.log(c(`  [${code}] Copying provision script to ${target} ...`, CYAN));
+  await new Promise((resolve, reject) => {
+    execFile('scp', [...sshOpts, PROVISION_SH, `${target}:/tmp/crm-provision-user`],
+      (err, _out, stderr) => err ? reject(Object.assign(err, { stderr })) : resolve());
+  }).catch(e => {
+    console.error(c(`  [${code}] scp failed: ${(e.stderr || e.message).trim().slice(0, 200)}`, RED));
+    process.exit(1);
+  });
+
+  // 2. Install on remote
+  await sshExec([...sshOpts, target,
+    `sudo mv /tmp/crm-provision-user ${provisionBin} && sudo chmod 755 ${provisionBin}`])
+  .catch(e => {
+    console.error(c(`  [${code}] Remote install failed: ${(e.stderr || e.message).trim().slice(0, 200)}`, RED));
+    process.exit(1);
+  });
+
+  console.log(c(`  [${code}] Provision script deployed to ${ssh_host}:${provisionBin}`, GREEN));
+
+  // 3. Resolve SUITECRM_CONFIG — mirrors ansible/deploy.yml:
+  //    1. Read from /etc/environment if already set
+  //    2. Run find-suitecrm-config.sh as root and persist
+  //    3. Manual prompt fallback
+  console.log(c(`  [${code}] Resolving SUITECRM_CONFIG on ${ssh_host} ...`, CYAN));
+  let configPath = '';
+
+  // Step 1: check /etc/environment
+  const envOut = await sshExec([...sshOpts, target,
+    "grep '^SUITECRM_CONFIG=' /etc/environment 2>/dev/null | cut -d= -f2 | head -1"])
+    .catch(() => '');
+  const envCandidate = envOut.trim();
+  if (envCandidate.startsWith('/')) {
+    configPath = envCandidate;
+    console.log(c(`  [${code}] SUITECRM_CONFIG already set: ${configPath}`, GREEN));
+  }
+
+  // Step 2: discover — same find command used inside crm-provision-user.sh
+  if (!configPath) {
+    console.log(c(`  [${code}] Not set — running discovery (may take a minute) ...`, CYAN));
+    const findCmd = "sudo bash -c 'find / \\( -path /proc -o -path /sys -o -path /dev \\) -prune -o" +
+      " -name config.php -readable -print 2>/dev/null" +
+      " | xargs -r grep -l dbconfig 2>/dev/null | head -1'";
+    const out = await sshExec([...sshOpts, target, findCmd]).catch(() => '');
+    const candidate = out.trim();
+    if (candidate.startsWith('/')) {
+      if (!/^\/[a-zA-Z0-9/_.\-]+$/.test(candidate)) {
+        console.error(c(`  [${code}] Suspicious config path rejected: ${candidate}`, RED));
+      } else {
+        configPath = candidate;
+        const shellQuoted = configPath.replace(/'/g, "'\\''");
+        await sshExec([...sshOpts, target,
+          `sudo grep -q '^SUITECRM_CONFIG=' /etc/environment 2>/dev/null || ` +
+          `echo SUITECRM_CONFIG='${shellQuoted}' | sudo tee -a /etc/environment`])
+          .catch(() => {});
+        console.log(c(`  [${code}] SUITECRM_CONFIG=${configPath}`, GREEN));
+      }
+    }
+  }
+
+  // Step 3: manual prompt
+  if (!configPath) {
+    console.log(c(`  [${code}] Could not auto-detect — enter manually`, YELLOW));
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    configPath = await new Promise(resolve => rl.question(`  [${code}] SUITECRM_CONFIG path on CRM VM: `, resolve));
+    rl.close();
+    configPath = configPath.trim();
+    if (!configPath || !configPath.startsWith('/')) {
+      console.error(c(`  [${code}] No valid path provided — aborted`, RED));
+      process.exit(1);
+    }
+  }
+
+  console.log(c(`  [${code}] SUITECRM_CONFIG=${configPath}`, GREEN));
+
+  // 4. Build command and persist
+  const shellQuote = s => `'${s.replace(/'/g, "'\\''")}'`;
+  const apiPath  = hostCfg.api_path || '';
+  const cmdParts = [`SUITECRM_CONFIG=${shellQuote(configPath)}`];
+  if (apiPath) cmdParts.push(`API_PATH=${shellQuote(apiPath)}`);
+  cmdParts.push(provisionBin);
+
+  hostCfg.command = cmdParts.join(' ');
+  delete hostCfg.api_path;
+  saveJson(HOSTS_FILE, hosts);
+
+  console.log(c(`\n  [${code}] crm-hosts.json updated:`, GREEN));
+  console.log(JSON.stringify(hostCfg, null, 2));
 }
 
 // ── flush ─────────────────────────────────────────────────────────────────────
@@ -978,6 +1153,12 @@ program
   .action(cmdSetCrmHost);
 
 program
+  .command('setup-crm-host')
+  .description('Deploy provision script to CRM VM and auto-detect SUITECRM_CONFIG')
+  .argument('<entity>', 'Entity code (e.g. crm1, crm2)')
+  .action(cmdSetupCrmHost);
+
+program
   .command('revoke')
   .description("Revoke a user's active sessions (forces re-authentication)")
   .option('--sub <sub>',     'Auth sub identifier')
@@ -1029,7 +1210,7 @@ program
 program
   .command('logs')
   .description('Show logs from MCP gateway services')
-  .argument('[entity]',      'Entity code (e.g. aesg, pcau) or "auth" — omit for all gateways')
+  .argument('[entity]',      'Entity code (e.g. crm1, crm2) or "auth" — omit for all gateways')
   .option('-f, --follow',    'Stream logs in real time (like tail -f)')
   .option('-n, --lines <n>', 'Number of recent lines to show (default: 50)', v => parseInt(v) || 50, 50)
   .option('--since <time>',  'Show logs since time, e.g. "1h ago", "2026-05-18 10:00"')

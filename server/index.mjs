@@ -5,9 +5,12 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 import { readFileSync } from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import express from 'express';
+const execFileAsync = promisify(execFile);
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import https from 'https';
@@ -53,6 +56,7 @@ const CB_RESET_MS    = parseInt(process.env.CIRCUIT_BREAKER_RESET_MS || '60000',
 const CRM_SESSION_TTL_SEC = 30 * 24 * 3600; // 30 days — matches SuiteCRM OAuth token and gateway session lifetime
 
 const NETWORK_ERRS = new Set(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','ECONNABORTED']);
+const CRM_HOSTS_FILE = '/etc/suitecrm-mcp/crm-hosts.json';
 initAclDb(); // no-op if SUITECRM_DB_HOST not set
 
 // ---------------------------------------------------------------------------
@@ -335,6 +339,56 @@ const v8g = new GraphQLBridge(ENDPOINT, { ...bridgeOptions, authEndpoint: _v8Aut
 const crm = new HybridBridge(v8g, v4, { logger, priority: API_STRATEGY === '8' ? 'v8' : 'v4' });
 
 // ---------------------------------------------------------------------------
+// Auto-Provisioning
+// ---------------------------------------------------------------------------
+function loadCrmHosts() {
+  try { return JSON.parse(readFileSync(CRM_HOSTS_FILE, 'utf8')); } catch { return null; }
+}
+
+function deriveUsername(email) {
+  return (email || '').split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 60);
+}
+
+async function autoProvisionUser(sub, email) {
+  const hosts = loadCrmHosts();
+  if (!hosts?.[CODE]) throw new Error(`No SSH config for entity ${CODE} in crm-hosts.json`);
+  const host = hosts[CODE];
+  const username = deriveUsername(email);
+  if (!username) throw new Error('Cannot derive CRM username from email');
+  const password = randomBytes(16).toString('hex');
+  const sshArgs = [
+    '-i', host.ssh_key || '/etc/suitecrm-mcp/crm-ssh-key',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'UserKnownHostsFile=/dev/null',
+    '-o', 'BatchMode=yes',
+    '-o', 'ConnectTimeout=15',
+    `${host.ssh_user}@${host.ssh_host}`,
+    host.command,
+    username,
+    password,
+  ];
+  logger.info({ entity: CODE, ssh_host: host.ssh_host, crm_user: username, email }, 'auto_provision_start');
+  const { stderr } = await execFileAsync('ssh', sshArgs, { timeout: 30000 }).catch(err => {
+    throw new Error(`SSH provision failed: ${err.message}${err.stderr ? ` — ${err.stderr.trim().slice(0, 200)}` : ''}`);
+  });
+  if (stderr) logger.warn({ entity: CODE, crm_user: username, stderr: stderr.slice(0, 200) }, 'auto_provision_stderr');
+  logger.info({ entity: CODE, crm_user: username }, 'auto_provision_success');
+  const lockKey = `crm:provision-lock:${sub}`;
+  const locked = await redis.set(lockKey, '1', 'NX', 'EX', 30);
+  if (!locked) throw new Error('Provision already in progress for this user');
+  try {
+    const raw = await redis.hget('crm:profiles', sub);
+    const profile = raw ? JSON.parse(raw) : { email, entities: {} };
+    if (!profile.entities) profile.entities = {};
+    profile.entities[CODE] = { user: username, pass: password };
+    await redis.hset('crm:profiles', sub, JSON.stringify(profile));
+  } finally {
+    await redis.del(lockKey);
+  }
+  return { user: username, pass: password };
+}
+
+// ---------------------------------------------------------------------------
 // Middlewares (all async — Redis I/O)
 // ---------------------------------------------------------------------------
 async function jwtMiddleware(req, res, next) {
@@ -360,30 +414,45 @@ async function jwtMiddleware(req, res, next) {
 
 async function profileMiddleware(req, res, next) {
   try {
-    const profile = await getProfile(req.auth.sub);
+    let profile = await getProfile(req.auth.sub);
     if (!profile) {
-      return res.status(403).json({
-        error: 'No CRM profile',
-        sub: req.auth.sub,
-        fix: `Run: mcp-admin add --sub "${req.auth.sub}" --entity ${CODE} --user <crmUser> --pass <crmPass>`,
-      });
+      // Auto-create bare profile; entity credentials are provisioned by groupAccessMiddleware
+      profile = { email: req.auth.email, entities: {} };
+      await redis.hset('crm:profiles', req.auth.sub, JSON.stringify(profile));
+      logger.info({ sub: req.auth.sub, email: req.auth.email }, 'profile_auto_created');
     }
     req.crmProfile = profile;
     return next();
   } catch (err) { return next(err); }
 }
 
-function groupAccessMiddleware(req, res, next) {
-  if (REQUIRED_GROUP) {
-    const groups = req.auth[GROUPS_CLAIM] || [];
-    if (!groups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase()))
-      return res.status(403).json({ error: `Not in group "${REQUIRED_GROUP}"`, your_groups: groups });
+async function groupAccessMiddleware(req, res, next) {
+  try {
+    if (REQUIRED_GROUP) {
+      const groups = req.auth[GROUPS_CLAIM] || [];
+      if (!groups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase()))
+        return res.status(403).json({ error: `Not in group "${REQUIRED_GROUP}"`, your_groups: groups });
+    }
+    const creds = req.crmProfile?.entities?.[CODE];
+    if (!creds?.user || !creds?.pass) {
+      logger.info({ entity: CODE, email: req.auth.email, sub: req.auth.sub }, 'auto_provision_triggered');
+      const newCreds = await autoProvisionUser(req.auth.sub, req.auth.email);
+      req.crmProfile.entities[CODE] = newCreds;
+      req.crmCreds = newCreds;
+      return next();
+    }
+    req.crmCreds = creds;
+    return next();
+  } catch (err) {
+    if (err.message?.startsWith('SSH provision failed') || err.message?.startsWith('No SSH config')) {
+      logger.error({ entity: CODE, email: req.auth.email, err: err.message }, 'auto_provision_failed');
+      return res.status(403).json({
+        error: `Auto-provisioning failed for ${CODE}: ${err.message}`,
+        fix: `Run: mcp-admin add --sub "${req.auth.sub}" --entity ${CODE} --user <crmUser> --pass <crmPass>`,
+      });
+    }
+    return next(err);
   }
-  const creds = req.crmProfile?.entities?.[CODE];
-  if (!creds?.user || !creds?.pass)
-    return res.status(403).json({ error: `No CRM credentials for ${CODE}`, fix: `Run: mcp-admin add --sub "${req.auth.sub}" --entity ${CODE} --user <crmUser> --pass <crmPass>` });
-  req.crmCreds = creds;
-  next();
 }
 
 // ---------------------------------------------------------------------------
@@ -819,7 +888,7 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   connLogger.info('sse_connected');
   metricActiveConnections.set({entity:PREFIX},transports.size);
   metricConnections.inc({entity:PREFIX});
-  ensureCrmSession(sid).catch(err=>connLogger.error({err:err.message},'crm_login_failed'));
+  ensureCrmSession(sid).catch(err=>connLogger.error({crm_user:connCreds.get(sid)?.user, err:err.message},'crm_login_failed'));
   await srv.connect(transport);
 });
 

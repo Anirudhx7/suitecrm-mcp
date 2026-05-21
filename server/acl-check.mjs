@@ -73,10 +73,10 @@ const WRITE_ACTIONS = new Set(['create', 'edit', 'delete']);
 // ACL permission level constants — configurable per entity via env vars.
 // Defaults match standard SuiteCRM. Override if your install uses different values
 // (check modules/ACLActions/actiondefs.php or actiondefs.override.php).
-let ACL_ALLOW_ALL;
-let ACL_ALLOW_GROUP;
-let ACL_ALLOW_OWNER;
-let ACL_ALLOW_DISABLED;
+let ACL_ALLOW_ALL      = 89;
+let ACL_ALLOW_GROUP    = 79;
+let ACL_ALLOW_OWNER    = 69;
+let ACL_ALLOW_DISABLED = -98;
 const ACL_DENY_ALL = -99;
 
 // MySQL pool — null when SUITECRM_DB_HOST is not set (ACL disabled for this entity).

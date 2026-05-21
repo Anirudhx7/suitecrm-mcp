@@ -78,7 +78,7 @@ services:
   # ── Prometheus ───────────────────────────────────────────────────────────────
   # Optional monitoring stack. Remove this and grafana if you don't need metrics.
   prometheus:
-    image: prom/prometheus:v3.3.1
+    image: prom/prometheus:v3.11.3
     ports:
       - "127.0.0.1:9090:9090"   # localhost only - do not expose publicly
     volumes:
@@ -93,7 +93,7 @@ services:
 
   # ── Grafana ──────────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:11.6.1
+    image: grafana/grafana:13.0.1
     ports:
       - "127.0.0.1:3000:3000"   # localhost only - do not expose publicly
     environment:
@@ -111,7 +111,7 @@ services:
 
   # ── Loki ─────────────────────────────────────────────────────────────────────
   loki:
-    image: grafana/loki:3.4.2
+    image: grafana/loki:3.7.2
     ports:
       - "127.0.0.1:3200:3100"   # host 3200 (3100 is taken by auth service)
     volumes:
@@ -122,7 +122,7 @@ services:
 
   # ── Alertmanager ─────────────────────────────────────────────────────────────
   alertmanager:
-    image: prom/alertmanager:v0.27.0
+    image: prom/alertmanager:v0.32.1
     volumes:
       - ./monitoring/alertmanager:/etc/alertmanager:ro
     command: --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager
@@ -132,7 +132,7 @@ services:
 
   # ── Promtail ─────────────────────────────────────────────────────────────────
   promtail:
-    image: grafana/promtail:3.4.2
+    image: grafana/promtail:3.6.11
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
