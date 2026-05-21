@@ -1098,7 +1098,7 @@ const program = new Command();
 program
   .name('mcp-admin')
   .description('SuiteCRM MCP Gateway admin tool')
-  .version('5.1.1');
+  .version('5.2.0');
 
 program
   .command('list')
