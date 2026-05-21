@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -943,7 +943,7 @@ curl https://YOUR_DOMAIN/.well-known/openid-configuration</pre>
 
 <section class="doc-section" id="crm-prep">
       <h1>CRM-side Setup</h1>
-      <p class="section-desc">One-time configuration on your SuiteCRM instance before connecting the gateway. Run these steps once per CRM — regardless of how many gateway entities you configure.</p>
+      <p class="section-desc">One-time configuration on your SuiteCRM instance before connecting the gateway. Run these steps once per CRM - regardless of how many gateway entities you configure.</p>
 
       <h2 id="crm-prep-api-access">Enable API Access per User</h2>
       <p>Before any user can authenticate via the gateway, their SuiteCRM account must have API access explicitly enabled. Without this, all login attempts return <code>Invalid Login</code> with no useful error message.</p>
@@ -1176,10 +1176,10 @@ WHERE deleted=0;"</pre>
 
       <p><em>The entire setup is just 3 steps:</em></p>
 
-      <h3>Step 1 — Install Node.js</h3>
+      <h3>Step 1 - Install Node.js</h3>
       <p>Download from <a href="https://nodejs.org/" target="_blank">nodejs.org</a> (if not already installed)</p>
 
-      <h3>Step 2 — Edit <code>claude_desktop_config.json</code></h3>
+      <h3>Step 2 - Edit <code>claude_desktop_config.json</code></h3>
       <p>Add the following to your config file, replacing <code>&lt;token&gt;</code> with your API key, and using your gateway URL:</p>
       
       <div class="code-block">
@@ -1219,7 +1219,7 @@ WHERE deleted=0;"</pre>
       </div>
       <div class="callout callout-info"><strong>Note for macOS users:</strong> Replace <code>"command": "cmd", "args": ["/C", "npx"...]</code> with <code>"command": "npx", "args": ["mcp-remote"...]</code></div>
 
-      <h3>Step 3 — Restart Claude Desktop</h3>
+      <h3>Step 3 - Restart Claude Desktop</h3>
       <p>Fully quit and relaunch Claude Desktop (menu bar &gt; Quit, then reopen). Done.</p>
 
       <h2>Verify</h2>
@@ -1780,13 +1780,13 @@ curl http://127.0.0.1:9091/metrics</pre>
     </section>
 
 <section class="doc-section" id="acl-enforcement">
-  <h1>ACL Enforcement — SuiteCRM MCP Gateway</h1>
+  <h1>ACL Enforcement - SuiteCRM MCP Gateway</h1>
   <p class="section-desc">Live permission checking to prevent unauthorized writes to SuiteCRM via the MCP gateway.</p>
 
   <h2 id="acl-overview">1. Overview</h2>
 
   <h3>What problem this solves</h3>
-  <p>The MCP gateway allows AI agents to call SuiteCRM tools (create, update, delete records) on behalf of authenticated users. SuiteCRM's own ACL system restricts what each user can do in the Web UI — but those restrictions are not checked at the CRM REST API level by default. A user blocked from editing Tasks in the browser could still call <code>suitecrm_crm1_update</code> with <code>module=Tasks</code> and the write would go through.</p>
+  <p>The MCP gateway allows AI agents to call SuiteCRM tools (create, update, delete records) on behalf of authenticated users. SuiteCRM's own ACL system restricts what each user can do in the Web UI - but those restrictions are not checked at the CRM REST API level by default. A user blocked from editing Tasks in the browser could still call <code>suitecrm_crm1_update</code> with <code>module=Tasks</code> and the write would go through.</p>
   <p>This feature closes that gap by checking SuiteCRM's live permission tables <strong>before</strong> forwarding any write to the CRM API.</p>
 
   <h3>How it works</h3>
@@ -1794,25 +1794,25 @@ curl http://127.0.0.1:9091/metrics</pre>
   <ol>
     <li>Opens a direct read-only MySQL connection to the CRM's own database.</li>
     <li>Looks up the CRM user's internal UUID and <code>is_admin</code> flag.</li>
-    <li>Computes the <strong>effective permission</strong> = <code>MAX(access_override)</code> across all roles assigned to the user — both directly and via security group membership.</li>
+    <li>Computes the <strong>effective permission</strong> = <code>MAX(access_override)</code> across all roles assigned to the user - both directly and via security group membership.</li>
     <li>Applies SuiteCRM's "most permissive role wins" semantics to decide allow/deny.</li>
   </ol>
-  <p>The lookup is live (no cache) so that Web UI permission changes take effect immediately — no restarts or cache flushes needed.</p>
+  <p>The lookup is live (no cache) so that Web UI permission changes take effect immediately - no restarts or cache flushes needed.</p>
 
   <h3>What is and isn't enforced</h3>
   <p><strong>Enforced (write path):</strong></p>
   <ul>
-    <li><code>*_create</code> — maps to SuiteCRM ACL action <code>create</code></li>
-    <li><code>*_update</code> — maps to SuiteCRM ACL action <code>edit</code></li>
-    <li><code>*_delete</code> — maps to SuiteCRM ACL action <code>delete</code></li>
-    <li><code>*_bulk_upsert</code> — maps to SuiteCRM ACL action <code>edit</code></li>
-    <li><code>*_log_call</code>, <code>*_create_task</code>, <code>*_create_note</code> etc. — mapped to <code>create</code> on their module</li>
-    <li><code>*_link_records</code>, <code>*_unlink_records</code> — mapped to <code>edit</code> on the primary module</li>
+    <li><code>*_create</code> - maps to SuiteCRM ACL action <code>create</code></li>
+    <li><code>*_update</code> - maps to SuiteCRM ACL action <code>edit</code></li>
+    <li><code>*_delete</code> - maps to SuiteCRM ACL action <code>delete</code></li>
+    <li><code>*_bulk_upsert</code> - maps to SuiteCRM ACL action <code>edit</code></li>
+    <li><code>*_log_call</code>, <code>*_create_task</code>, <code>*_create_note</code> etc. - mapped to <code>create</code> on their module</li>
+    <li><code>*_link_records</code>, <code>*_unlink_records</code> - mapped to <code>edit</code> on the primary module</li>
   </ul>
   <p><strong>Not enforced:</strong></p>
   <ul>
-    <li><code>*_search</code>, <code>*_get</code>, <code>*_get_many</code> etc. — read operations pass through; the CRM API enforces read-level visibility natively</li>
-    <li>Field-level ACL — only module-level action restrictions are checked</li>
+    <li><code>*_search</code>, <code>*_get</code>, <code>*_get_many</code> etc. - read operations pass through; the CRM API enforces read-level visibility natively</li>
+    <li>Field-level ACL - only module-level action restrictions are checked</li>
     <li>Record-level visibility rules beyond ownership (e.g. security group record assignment)</li>
   </ul>
 
@@ -1890,10 +1890,10 @@ curl http://127.0.0.1:9091/metrics</pre>
   </table>
 
   <h3>Why two queries?</h3>
-  <p>SuiteCRM has two ways to restrict a user's access: direct role assignment via <code>acl_roles_users</code> (Query A) and security group role assignment via <code>securitygroups_users</code> (Query B). Both must be checked independently — missing Query B silently skips all group-based restrictions.</p>
+  <p>SuiteCRM has two ways to restrict a user's access: direct role assignment via <code>acl_roles_users</code> (Query A) and security group role assignment via <code>securitygroups_users</code> (Query B). Both must be checked independently - missing Query B silently skips all group-based restrictions.</p>
 
   <h3>Why MAX() instead of COUNT(*)?</h3>
-  <p>SuiteCRM's "most permissive role wins" rule means if a user has one role that denies a module and another that allows it, the allow wins. <code>MAX(access_override)</code> across all roles returns the highest (most permissive) value — deny constants only apply if that maximum is still a deny value.</p>
+  <p>SuiteCRM's "most permissive role wins" rule means if a user has one role that denies a module and another that allows it, the allow wins. <code>MAX(access_override)</code> across all roles returns the highest (most permissive) value - deny constants only apply if that maximum is still a deny value.</p>
 
   <div class="subsection-divider"></div>
 
@@ -1904,8 +1904,8 @@ curl http://127.0.0.1:9091/metrics</pre>
       <tr><td><code>SUITECRM_DB_HOST</code> not set</td><td>allow</td><td>ACL disabled for this entity</td></tr>
       <tr><td>DB unreachable</td><td><strong>DENY</strong></td><td>Fail-closed: cannot confirm permission</td></tr>
       <tr><td>User not found in <code>users</code> table</td><td>allow</td><td>Let CRM enforce; unknown user will fail anyway</td></tr>
-      <tr><td>Owner check — record not found</td><td>allow</td><td>Record may be in a related table; let CRM handle</td></tr>
-      <tr><td>Owner check — no <code>recordId</code> passed</td><td>allow</td><td>Gateway can't determine ownership without an ID</td></tr>
+      <tr><td>Owner check - record not found</td><td>allow</td><td>Record may be in a related table; let CRM handle</td></tr>
+      <tr><td>Owner check - no <code>recordId</code> passed</td><td>allow</td><td>Gateway can't determine ownership without an ID</td></tr>
     </tbody>
   </table>
 
@@ -1939,14 +1939,14 @@ ACL_ALLOW_DISABLED=-98 # module disabled for this role</code></pre>
   <h2 id="acl-db-setup">6. Setting Up the Read-Only DB User</h2>
   <p>The gateway connects as a <strong>read-only</strong> user with <code>SELECT</code> privileges only. It cannot modify CRM data.</p>
 
-  <h3>Step 1 — Find the correct DB host</h3>
+  <h3>Step 1 - Find the correct DB host</h3>
   <p><strong>Do not assume the DB is on the CRM app server.</strong> SuiteCRM stores the DB host in <code>config.php</code>. SSH into the CRM app server and check:</p>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
     <pre><code>grep 'db_host_name\|db_name' /path/to/suitecrm/public/legacy/config.php</code></pre>
   </div>
 
-  <h3>Step 2 — Find the correct grant IP</h3>
+  <h3>Step 2 - Find the correct grant IP</h3>
   <p>The MySQL <code>GRANT</code> must list the IP that the gateway's connection <strong>appears as in MySQL</strong>. If there is a DB proxy between the gateway and MySQL, MySQL sees the proxy's IP. Probe it with:</p>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
@@ -1957,9 +1957,9 @@ node -e "
    .query('SELECT 1').catch(e => console.error(e.message));
 "</code></pre>
   </div>
-  <p>The error will read <code>Access denied for user 'x'@'&lt;IP&gt;'</code> — that <code>&lt;IP&gt;</code> is what to use in the <code>GRANT</code>.</p>
+  <p>The error will read <code>Access denied for user 'x'@'&lt;IP&gt;'</code> - that <code>&lt;IP&gt;</code> is what to use in the <code>GRANT</code>.</p>
 
-  <h3>Step 3 — Create the user on the DB server</h3>
+  <h3>Step 3 - Create the user on the DB server</h3>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
     <pre><code>openssl rand -base64 16   # generate a password
@@ -1983,11 +1983,11 @@ SHOW GRANTS FOR 'mcp_acl_reader'@'&lt;connecting_ip&gt;';   # verify</code></pre
 
   <h2 id="acl-new-entity">7. Adding a New Entity</h2>
   <ol>
-    <li>Find the DB host — grep <code>config.php</code> for <code>db_host_name</code> and <code>db_name</code>.</li>
+    <li>Find the DB host - grep <code>config.php</code> for <code>db_host_name</code> and <code>db_name</code>.</li>
     <li>Verify port reachability: <code>nc -zv &lt;db_host&gt; 3306</code>.</li>
     <li>Find the connecting IP via the Step 2 probe above.</li>
     <li>Create <code>mcp_acl_reader</code> on the DB server (or add a <code>GRANT</code> if the user already exists for another entity on the same cluster).</li>
-    <li>Check ACL constants in <code>actiondefs.override.php</code> — add <code>ACL_ALLOW_*</code> env vars if they differ from standard.</li>
+    <li>Check ACL constants in <code>actiondefs.override.php</code> - add <code>ACL_ALLOW_*</code> env vars if they differ from standard.</li>
     <li>Add <code>SUITECRM_DB_*</code> vars to <code>/etc/suitecrm-mcp/&lt;code&gt;.env</code> and set <code>chmod 640</code>.</li>
     <li>Restart the entity service and run the verification tests below.</li>
   </ol>
@@ -1995,16 +1995,16 @@ SHOW GRANTS FOR 'mcp_acl_reader'@'&lt;connecting_ip&gt;';   # verify</code></pre
   <div class="subsection-divider"></div>
 
   <h2 id="acl-verify">8. Verification Tests</h2>
-  <p><strong>Test A — restricted user write (expect: DENIED)</strong><br>Find a user with an explicit deny on a module action, call the corresponding write tool. Response must contain <code>"Permission denied"</code> and <code>"isError": true</code>.</p>
-  <p><strong>Test B — unrestricted user write (expect: SUCCESS or CRM error)</strong><br>Response must NOT contain <code>"Permission denied"</code>.</p>
-  <p><strong>Test C — any user read (expect: NOT BLOCKED)</strong><br>Call <code>*_search</code> for any module. Response must never contain <code>"Permission denied"</code>.</p>
-  <p><strong>Test D — live permission change</strong><br>Restrict a user in SuiteCRM Web UI — next write from that user must be blocked immediately without restarting the service.</p>
+  <p><strong>Test A - restricted user write (expect: DENIED)</strong><br>Find a user with an explicit deny on a module action, call the corresponding write tool. Response must contain <code>"Permission denied"</code> and <code>"isError": true</code>.</p>
+  <p><strong>Test B - unrestricted user write (expect: SUCCESS or CRM error)</strong><br>Response must NOT contain <code>"Permission denied"</code>.</p>
+  <p><strong>Test C - any user read (expect: NOT BLOCKED)</strong><br>Call <code>*_search</code> for any module. Response must never contain <code>"Permission denied"</code>.</p>
+  <p><strong>Test D - live permission change</strong><br>Restrict a user in SuiteCRM Web UI - next write from that user must be blocked immediately without restarting the service.</p>
 
   <div class="subsection-divider"></div>
 
   <h2 id="acl-checklist">9. Checklist</h2>
   <ul>
-    <li>DB host sourced from CRM's <code>config.php</code> — not assumed to be the app server IP</li>
+    <li>DB host sourced from CRM's <code>config.php</code> - not assumed to be the app server IP</li>
     <li><code>nc -zv &lt;db_host&gt; 3306</code> succeeds from the gateway</li>
     <li>Connecting IP confirmed via the Step 2 probe</li>
     <li><code>mcp_acl_reader</code> user exists with <code>SELECT ON &lt;db&gt;.*</code> from the correct IP</li>
