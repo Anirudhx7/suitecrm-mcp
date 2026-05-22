@@ -1934,21 +1934,21 @@ curl http://127.0.0.1:9091/metrics</pre>
   <h3>Required env vars (per entity <code>.env</code>)</h3>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-    <pre><code>SUITECRM_DB_HOST=&lt;db_server_ip&gt;      # LAN IP, not localhost
+    <pre>SUITECRM_DB_HOST=&lt;db_server_ip&gt;      # LAN IP, not localhost
 SUITECRM_DB_PORT=3306
 SUITECRM_DB_NAME=&lt;suitecrm_db_name&gt;
 SUITECRM_DB_USER=mcp_acl_reader      # read-only DB user (see Section 6)
-SUITECRM_DB_PASS=&lt;password&gt;</code></pre>
+SUITECRM_DB_PASS=&lt;password&gt;</pre>
   </div>
 
   <h3>Optional ACL constant overrides</h3>
   <p>Standard SuiteCRM uses 89/79/69/-98 for All/Group/Owner/Disabled. Check your install and set env vars if they differ:</p>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-    <pre><code>ACL_ALLOW_ALL=89       # explicit allow for all users
+    <pre>ACL_ALLOW_ALL=89       # explicit allow for all users
 ACL_ALLOW_GROUP=79     # allow for group members
 ACL_ALLOW_OWNER=69     # allow for record owner only
-ACL_ALLOW_DISABLED=-98 # module disabled for this role</code></pre>
+ACL_ALLOW_DISABLED=-98 # module disabled for this role</pre>
   </div>
   <p><code>ACL_DENY_ALL</code> = -99 is always fixed and not configurable.</p>
 
@@ -1961,39 +1961,39 @@ ACL_ALLOW_DISABLED=-98 # module disabled for this role</code></pre>
   <p><strong>Do not assume the DB is on the CRM app server.</strong> SuiteCRM stores the DB host in <code>config.php</code>. SSH into the CRM app server and check:</p>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-    <pre><code>grep 'db_host_name\|db_name' /path/to/suitecrm/public/legacy/config.php</code></pre>
+    <pre>grep 'db_host_name\|db_name' /path/to/suitecrm/public/legacy/config.php</pre>
   </div>
 
   <h3>Step 2 - Find the correct grant IP</h3>
   <p>The MySQL GRANT statement must list the IP that the gateway's connection <strong>appears as in MySQL</strong>. If there is a DB proxy between the gateway and MySQL, MySQL sees the proxy's IP. Probe it with:</p>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-    <pre><code># From the gateway server:
+    <pre># From the gateway server:
 node -e "
   const m = require('/opt/suitecrm-mcp/node_modules/mysql2/promise');
   m.createPool({host:'&lt;db_host&gt;',port:3306,database:'&lt;db&gt;',user:'x',password:'x',connectionLimit:1})
    .query('SELECT 1').catch(e => console.error(e.message));
-"</code></pre>
+"</pre>
   </div>
   <p>The error will read <code>Access denied for user 'x'@'&lt;IP&gt;'</code> - that IP is what to use in the GRANT statement.</p>
 
   <h3>Step 3 - Create the user on the DB server</h3>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-    <pre><code>openssl rand -base64 16   # generate a password
+    <pre>openssl rand -base64 16   # generate a password
 
 # In MySQL (as root or a privileged user):
 CREATE USER 'mcp_acl_reader'@'&lt;connecting_ip&gt;' IDENTIFIED BY '&lt;password&gt;';
 GRANT SELECT ON &lt;suitecrm_db_name&gt;.* TO 'mcp_acl_reader'@'&lt;connecting_ip&gt;';
 FLUSH PRIVILEGES;
 
-SHOW GRANTS FOR 'mcp_acl_reader'@'&lt;connecting_ip&gt;';   # verify</code></pre>
+SHOW GRANTS FOR 'mcp_acl_reader'@'&lt;connecting_ip&gt;';   # verify</pre>
   </div>
 
   <h3>Verify network access from the gateway</h3>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
-    <pre><code>nc -zv &lt;db_server_ip&gt; 3306</code></pre>
+    <pre>nc -zv &lt;db_server_ip&gt; 3306</pre>
   </div>
   <p>If this fails, MySQL is bound to <code>127.0.0.1</code>. Edit <code>/etc/mysql/mysql.conf.d/mysqld.cnf</code> and set <code>bind-address = 0.0.0.0</code>, then <code>sudo systemctl restart mysql</code>.</p>
 
