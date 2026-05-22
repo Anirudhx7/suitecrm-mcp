@@ -1816,7 +1816,7 @@ curl http://127.0.0.1:9091/metrics</pre>
     <li>Record-level visibility rules beyond ownership (e.g. security group record assignment)</li>
   </ul>
 
-  <div class="subsection-divider"></div>
+  <hr class="sub-divider" />
 
   <h2 id="acl-decision">2. Decision Table</h2>
   <div class="table-wrap">
@@ -1844,7 +1844,7 @@ curl http://127.0.0.1:9091/metrics</pre>
     </table>
   </div>
 
-  <div class="subsection-divider"></div>
+  <hr class="sub-divider" />
 
   <h2 id="acl-arch">3. Architecture</h2>
 
@@ -1906,7 +1906,7 @@ curl http://127.0.0.1:9091/metrics</pre>
   <h3>Why MAX() instead of COUNT(*)?</h3>
   <p>SuiteCRM's "most permissive role wins" rule means if a user has one role that denies a module and another that allows it, the allow wins. <code>MAX(access_override)</code> across all roles returns the highest (most permissive) value - deny constants only apply if that maximum is still a deny value.</p>
 
-  <div class="subsection-divider"></div>
+  <hr class="sub-divider" />
 
   <h2 id="acl-failure">4. Failure Behaviour</h2>
   <div class="table-wrap">
@@ -1927,7 +1927,7 @@ curl http://127.0.0.1:9091/metrics</pre>
     </table>
   </div>
 
-  <div class="subsection-divider"></div>
+  <hr class="sub-divider" />
 
   <h2 id="acl-config">5. Configuration</h2>
 
@@ -1952,10 +1952,10 @@ ACL_ALLOW_DISABLED=-98 # module disabled for this role</code></pre>
   </div>
   <p><code>ACL_DENY_ALL</code> = -99 is always fixed and not configurable.</p>
 
-  <div class="subsection-divider"></div>
+  <hr class="sub-divider" />
 
   <h2 id="acl-db-setup">6. Setting Up the Read-Only DB User</h2>
-  <p>The gateway connects as a <strong>read-only</strong> user with <code>SELECT</code> privileges only. It cannot modify CRM data.</p>
+  <p>The gateway connects as a <strong>read-only</strong> user with SELECT privileges only. It cannot modify CRM data.</p>
 
   <h3>Step 1 - Find the correct DB host</h3>
   <p><strong>Do not assume the DB is on the CRM app server.</strong> SuiteCRM stores the DB host in <code>config.php</code>. SSH into the CRM app server and check:</p>
@@ -1965,7 +1965,7 @@ ACL_ALLOW_DISABLED=-98 # module disabled for this role</code></pre>
   </div>
 
   <h3>Step 2 - Find the correct grant IP</h3>
-  <p>The MySQL <code>GRANT</code> must list the IP that the gateway's connection <strong>appears as in MySQL</strong>. If there is a DB proxy between the gateway and MySQL, MySQL sees the proxy's IP. Probe it with:</p>
+  <p>The MySQL GRANT statement must list the IP that the gateway's connection <strong>appears as in MySQL</strong>. If there is a DB proxy between the gateway and MySQL, MySQL sees the proxy's IP. Probe it with:</p>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
     <pre><code># From the gateway server:
@@ -1975,7 +1975,7 @@ node -e "
    .query('SELECT 1').catch(e => console.error(e.message));
 "</code></pre>
   </div>
-  <p>The error will read <code>Access denied for user 'x'@'&lt;IP&gt;'</code> - that <code>&lt;IP&gt;</code> is what to use in the <code>GRANT</code>.</p>
+  <p>The error will read <code>Access denied for user 'x'@'&lt;IP&gt;'</code> - that IP is what to use in the GRANT statement.</p>
 
   <h3>Step 3 - Create the user on the DB server</h3>
   <div class="code-block">
@@ -1997,20 +1997,20 @@ SHOW GRANTS FOR 'mcp_acl_reader'@'&lt;connecting_ip&gt;';   # verify</code></pre
   </div>
   <p>If this fails, MySQL is bound to <code>127.0.0.1</code>. Edit <code>/etc/mysql/mysql.conf.d/mysqld.cnf</code> and set <code>bind-address = 0.0.0.0</code>, then <code>sudo systemctl restart mysql</code>.</p>
 
-  <div class="subsection-divider"></div>
+  <hr class="sub-divider" />
 
   <h2 id="acl-new-entity">7. Adding a New Entity</h2>
   <ol>
     <li>Find the DB host - grep <code>config.php</code> for <code>db_host_name</code> and <code>db_name</code>.</li>
     <li>Verify port reachability: <code>nc -zv &lt;db_host&gt; 3306</code>.</li>
     <li>Find the connecting IP via the Step 2 probe above.</li>
-    <li>Create <code>mcp_acl_reader</code> on the DB server (or add a <code>GRANT</code> if the user already exists for another entity on the same cluster).</li>
+    <li>Create <code>mcp_acl_reader</code> on the DB server (or add a GRANT if the user already exists for another entity on the same cluster).</li>
     <li>Check ACL constants in <code>actiondefs.override.php</code> - add <code>ACL_ALLOW_*</code> env vars if they differ from standard.</li>
     <li>Add <code>SUITECRM_DB_*</code> vars to <code>/etc/suitecrm-mcp/&lt;code&gt;.env</code> and set <code>chmod 640</code>.</li>
     <li>Restart the entity service and run the verification tests below.</li>
   </ol>
 
-  <div class="subsection-divider"></div>
+  <hr class="sub-divider" />
 
   <h2 id="acl-verify">8. Verification Tests</h2>
   <p><strong>Test A - restricted user write (expect: DENIED)</strong><br>Find a user with an explicit deny on a module action, call the corresponding write tool. Response must contain <code>"Permission denied"</code> and <code>"isError": true</code>.</p>
@@ -2018,7 +2018,7 @@ SHOW GRANTS FOR 'mcp_acl_reader'@'&lt;connecting_ip&gt;';   # verify</code></pre
   <p><strong>Test C - any user read (expect: NOT BLOCKED)</strong><br>Call <code>*_search</code> for any module. Response must never contain <code>"Permission denied"</code>.</p>
   <p><strong>Test D - live permission change</strong><br>Restrict a user in SuiteCRM Web UI - next write from that user must be blocked immediately without restarting the service.</p>
 
-  <div class="subsection-divider"></div>
+  <hr class="sub-divider" />
 
   <h2 id="acl-checklist">9. Checklist</h2>
   <ul>
