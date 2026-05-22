@@ -173,7 +173,7 @@ export async function isAclDenied(crmUsername, module, aclAction, recordId = nul
 
   } catch (err) {
     const entity = (process.env.SUITECRM_CODE || '?').trim();
-    console.warn(`[acl] DB unavailable for ${entity} — ${crmUsername} ${module}:${aclAction} (${err.message})`);
+    console.warn(`[acl] DB unavailable for ${entity} ${module}:${aclAction} (${err.code || 'DB_ERROR'})`);
     return true; // write fail-closed: cannot confirm permission → deny
   }
 }

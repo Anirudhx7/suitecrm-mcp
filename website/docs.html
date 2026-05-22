@@ -1942,7 +1942,7 @@ SUITECRM_DB_PASS=&lt;password&gt;</code></pre>
   </div>
 
   <h3>Optional ACL constant overrides</h3>
-  <p>Standard SuiteCRM uses <code>89/79/69/−98</code> for <code>All/Group/Owner/Disabled</code>. Check your install and set env vars if they differ:</p>
+  <p>Standard SuiteCRM uses 89/79/69/-98 for All/Group/Owner/Disabled. Check your install and set env vars if they differ:</p>
   <div class="code-block">
     <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
     <pre><code>ACL_ALLOW_ALL=89       # explicit allow for all users
@@ -1950,7 +1950,7 @@ ACL_ALLOW_GROUP=79     # allow for group members
 ACL_ALLOW_OWNER=69     # allow for record owner only
 ACL_ALLOW_DISABLED=-98 # module disabled for this role</code></pre>
   </div>
-  <p><code>ACL_DENY_ALL = -99</code> is always fixed and not configurable.</p>
+  <p><code>ACL_DENY_ALL</code> = -99 is always fixed and not configurable.</p>
 
   <div class="subsection-divider"></div>
 

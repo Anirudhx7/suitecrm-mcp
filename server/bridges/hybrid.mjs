@@ -15,9 +15,9 @@ export class HybridBridge {
   async login(user, pass) {
     const sessions = { v8: null, v4: null };
     try { sessions.v8 = await this.v8.login(user, pass); }
-    catch (err) { this.logger.warn({ user, err: err.message }, 'v8_login_failed_will_try_v4'); }
+    catch (err) { this.logger.warn({ err: err.message }, 'v8_login_failed_will_try_v4'); }
     try { sessions.v4 = await this.v4.login(user, pass); }
-    catch (err) { this.logger.error({ user, err: err.message }, 'v4_login_failed_critical'); if (!sessions.v8) throw err; }
+    catch (err) { this.logger.error({ err: err.message }, 'v4_login_failed_critical'); if (!sessions.v8) throw err; }
     return sessions;
   }
 
