@@ -803,7 +803,7 @@
       <ul>
         <li>Auth0 domain</li>
         <li>Auth0 client ID and client secret</li>
-        <li>Redirect URI registered: <code>https://YOUR_GATEWAY_DOMAIN/auth/callback</code></li>
+        <li>Redirect URI registered: <code>https://mcp.yourcompany.com/auth/callback</code></li>
       </ul>
 
       <div class="step-badge" style="margin-top:24px;"><div class="step-num">2</div><span class="step-label">Prepare the Gateway VM</span></div>
@@ -1029,9 +1029,9 @@ WHERE deleted=0;"</pre>
         <table class="docs-table">
           <thead><tr><th>Field</th><th>Value</th></tr></thead>
           <tbody>
-            <tr><td>Allowed Callback URLs</td><td><code>https://YOUR_GATEWAY/auth/callback</code></td></tr>
-            <tr><td>Allowed Logout URLs</td><td><code>https://YOUR_GATEWAY</code></td></tr>
-            <tr><td>Allowed Web Origins</td><td><code>https://YOUR_GATEWAY</code></td></tr>
+            <tr><td>Allowed Callback URLs</td><td><code>https://mcp.yourcompany.com/auth/callback</code></td></tr>
+            <tr><td>Allowed Logout URLs</td><td><code>https://mcp.yourcompany.com</code></td></tr>
+            <tr><td>Allowed Web Origins</td><td><code>https://mcp.yourcompany.com</code></td></tr>
           </tbody>
         </table>
       </div>
@@ -1114,7 +1114,7 @@ WHERE deleted=0;"</pre>
         <li>Go to Azure Portal &gt; App registrations &gt; New registration</li>
         <li>Name: <code>SuiteCRM MCP Gateway</code></li>
         <li>Supported account types: <strong>Accounts in this organizational directory only</strong></li>
-        <li>Redirect URI: Web - <code>https://YOUR_GATEWAY/auth/callback</code></li>
+        <li>Redirect URI: Web - <code>https://mcp.yourcompany.com/auth/callback</code></li>
         <li>Click <strong>Register</strong></li>
       </ol>
 
@@ -1158,7 +1158,7 @@ WHERE deleted=0;"</pre>
       </div>
 
       <h2>Verification</h2>
-      <p>After installation, visit <code>https://YOUR_GATEWAY/auth/login</code>. You should be redirected to your identity provider's login page. After logging in, you should see the success page with your API key.</p>
+      <p>After installation, visit <code>https://mcp.yourcompany.com/auth/login</code>. You should be redirected to your identity provider's login page. After logging in, you should see the success page with your API key.</p>
       <p>If you see an error, check:</p>
       <ul>
         <li>The callback URL registered in your identity provider matches exactly</li>
@@ -1185,12 +1185,12 @@ WHERE deleted=0;"</pre>
       <ul>
         <li>Gateway v5.x installed and running</li>
         <li>Claude Desktop installed</li>
-        <li>Your API key from <code>https://YOUR_GATEWAY/auth/login</code></li>
+        <li>Your API key from <code>https://mcp.yourcompany.com/auth/login</code></li>
       </ul>
 
       <h2>Get your API key</h2>
       <ol>
-        <li>Visit <code>https://YOUR_GATEWAY/auth/login</code> (or just <code>https://YOUR_GATEWAY</code> - it redirects)</li>
+        <li>Visit <code>https://mcp.yourcompany.com/auth/login</code> (or just <code>https://mcp.yourcompany.com</code> - it redirects)</li>
         <li>Log in with your corporate account</li>
         <li>On the success page, expand <strong>Claude Desktop</strong> and copy the config block shown</li>
       </ol>
@@ -1261,7 +1261,7 @@ WHERE deleted=0;"</pre>
 
       <h2>Rotating your API key</h2>
       <ol>
-        <li>Visit <code>https://YOUR_GATEWAY/auth/login</code> again - a new key is issued automatically</li>
+        <li>Visit <code>https://mcp.yourcompany.com/auth/login</code> again - a new key is issued automatically</li>
         <li>Update <code>Authorization</code> in the config file</li>
         <li>Restart Claude Desktop</li>
       </ol>
@@ -1297,12 +1297,12 @@ WHERE deleted=0;"</pre>
       <ul>
         <li>Gateway v5.x installed and running</li>
         <li>Claude Code CLI installed: <code>npm install -g @anthropic-ai/claude-code</code></li>
-        <li>Your API key from <code>https://YOUR_GATEWAY/auth/login</code></li>
+        <li>Your API key from <code>https://mcp.yourcompany.com/auth/login</code></li>
       </ul>
 
       <h2>Get your API key</h2>
       <ol>
-        <li>Visit <code>https://YOUR_GATEWAY/auth/login</code></li>
+        <li>Visit <code>https://mcp.yourcompany.com/auth/login</code></li>
         <li>Log in with your corporate account</li>
         <li>On the success page, expand <strong>Claude Code</strong> and copy the ready-to-run command</li>
       </ol>
