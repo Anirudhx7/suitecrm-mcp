@@ -1073,17 +1073,27 @@ WHERE deleted=0;"</pre>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">javascript</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>exports.onExecutePostLogin = async (event, api) => {
-  const namespace = 'https://suitecrm-mcp/';
-  api.idToken.setCustomClaim(namespace + 'groups', event.authorization?.roles ?? []);
-  api.accessToken.setCustomClaim(namespace + 'groups', event.authorization?.roles ?? []);
+  const ns = 'https://mcp.yourcompany.com/';
+
+  const sam = event.user.upn
+    || event.user.preferred_username
+    || event.user.email;
+
+  const groups = event.user.groups || [];
+
+  api.accessToken.setCustomClaim(ns + 'samaccountname', sam || '');
+  api.accessToken.setCustomClaim(ns + 'groups', groups);
+  api.idToken.setCustomClaim(ns + 'samaccountname', sam || '');
+  api.idToken.setCustomClaim(ns + 'groups', groups);
 };</pre>
       </div>
+      <div class="callout callout-info">Replace <code>https://mcp.yourcompany.com/</code> with your actual gateway URL (the same value you used as the custom API identifier in Step 3). This string becomes the namespace prefix for all custom claims.</div>
       <ol start="5">
         <li>Go to <strong>Actions &gt; Triggers &gt; post-login</strong></li>
         <li>Drag your new action from the right panel into the flow and click <strong>Apply</strong></li>
       </ol>
-      <p>Then set <code>OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/groups</code> in the gateway env file.</p>
-      <p>In Auth0 &gt; <strong>User Management &gt; Roles</strong>, create roles matching the <code>group</code> field in your <code>entities.json</code> (e.g. <code>CRM-MyCompany</code>). Assign users to those roles.</p>
+      <p>Then set <code>OAUTH_GROUPS_CLAIM=https://mcp.yourcompany.com/groups</code> in the gateway env file (replace with your actual namespace).</p>
+      <p>This action reads <code>event.user.groups</code> (Azure AD groups passed through the enterprise connection) and the user's UPN/email. In Auth0 &gt; <strong>User Management &gt; Roles</strong>, ensure roles matching the <code>group</code> field in your <code>entities.json</code> are assigned to users, or map incoming Azure AD groups to those role names.</p>
 
       <h3>6. Connect Azure AD (optional - corporate SSO)</h3>
       <ol>
@@ -1142,7 +1152,7 @@ WHERE deleted=0;"</pre>
             <tr><td>Auth0 client secret</td><td>From your app registration (keep this secret)</td></tr>
             <tr><td>Auth0 audience</td><td>Auth0: your API identifier / Azure AD: your client ID</td></tr>
             <tr><td>Gateway public URL</td><td><code>https://mcp.yourcompany.com</code> - must match the registered callback origin</td></tr>
-            <tr><td>JWT groups claim</td><td>Auth0 with custom action: <code>https://suitecrm-mcp/groups</code> / Azure AD: <code>groups</code> / default: <code>AUTH0_AUDIENCE + '/groups'</code></td></tr>
+            <tr><td>JWT groups claim</td><td>Auth0 with custom action: <code>https://mcp.yourcompany.com/groups</code> (your gateway URL + <code>/groups</code>) / Azure AD direct: <code>groups</code></td></tr>
           </tbody>
         </table>
       </div>
