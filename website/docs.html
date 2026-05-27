@@ -2221,43 +2221,59 @@ server {
       <p class="section-desc">Where the installer places runtime code, protected environment files, Redis-backed state, systemd units, and nginx routing.</p>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">filesystem</span></div>
-        <pre>/opt/suitecrm-mcp/           gateway server code (owned by suitecrm-mcp)
-  index.mjs                  SSE gateway + tool handler
-  auth.mjs                   OAuth2/OIDC auth service
-  acl-check.mjs              MySQL ACL enforcement (optional)
-  redis.mjs                  ioredis singleton (shared connection)
+        <pre>/opt/suitecrm-mcp-server/        gateway server code (owned by suitecrm-mcp)
+  index.mjs                      SSE gateway + tool handler
+  auth.mjs                       OAuth2/OIDC auth service
+  acl-check.mjs                  MySQL ACL enforcement (optional)
+  redis.mjs                      ioredis singleton (shared connection)
+  mcp-admin.mjs                  admin CLI backend (called by mcp-admin wrapper)
   bridges/
-    hybrid.mjs               routing logic: v8 GraphQL with v4.1 fallback
-    graphql.mjs              SuiteCRM v8 GraphQL bridge
-    legacy.mjs               SuiteCRM v4.1 REST bridge
+    hybrid.mjs                   routing: v8 GraphQL with v4.1 fallback
+    graphql.mjs                  SuiteCRM v8 GraphQL bridge
+    legacy.mjs                   SuiteCRM v4.1 REST bridge
+  scripts/
+    migrate_profiles.mjs         one-shot migration from file store to Redis
+    update-crm-host.sh           update crm-hosts.json (flock-safe)
+    find-suitecrm-config.sh      locate config.php on CRM VM
   package.json
   node_modules/
 
-/etc/suitecrm-mcp/           protected config (mode 700, owned by suitecrm-mcp)
-  entities.json              entity list (written by installer)
-  auth.env                   env vars for auth service (mode 600)
-  crm1.env                   env vars for entity crm1 (mode 600)
-  crm-hosts.json             SSH host map for auto-provisioning (if configured)
-  crm-ssh-key                SSH private key for CRM VM access (mode 600)
-  domain                     saved domain for nginx rebuild
+/etc/suitecrm-mcp/               protected config (mode 700, owned by suitecrm-mcp)
+  auth.env                       env vars for auth service (mode 600)
+  gateway.env                    env vars for single-entity install (mode 600)
+  {code}.env                     env vars per entity for multi-entity install (mode 600)
+  entities.json                  entity list used by the server at runtime
+  crm-hosts.json                 SSH host map for auto-provisioning (if configured)
+  crm-ssh-key                    SSH private key for CRM VM access (mode 600)
+  domain                         saved domain for nginx rebuild
 
 /usr/local/bin/
-  mcp-admin                  admin CLI (sessions, profiles, revoke, health)
+  mcp-admin                      admin CLI shell wrapper
 
-Redis                        runtime state
-  crm:profiles               per-user CRM credentials and entity access
-  auth:session:*             gateway API sessions (30-day TTL)
-  crm:session:*              cached CRM sessions per user and entity
-  auth:bridge:*              short-lived OpenClaw bridge login handoffs
-  rl:*                       shared rate-limit counters
-  acl:uid:{code}:{user}      cached CRM user ID for ACL lookups
+/opt/suitecrm-mcp-monitoring/    observability stack (Docker Compose)
+  docker-compose.yml
+  .env                           Grafana password + dynamic URLs
+  prometheus.yml
+  promtail.yml
+  grafana/
+
+Redis                            runtime state
+  crm:profiles                   per-user CRM credentials and entity access
+  auth:session:*                 gateway API sessions (30-day TTL)
+  crm:session:*                  cached CRM sessions per user and entity
+  auth:bridge:*                  short-lived OpenClaw bridge login handoffs
+  rl:*                           shared rate-limit counters
+  acl:uid:{code}:{user}          cached CRM user ID for ACL lookups
 
 /etc/systemd/system/
   suitecrm-mcp-auth.service
-  suitecrm-mcp-crm1.service  (one per entity)
+  suitecrm-mcp.service           single-entity install
+  suitecrm-mcp-{code}.service    multi-entity: one per entity
 
 /etc/nginx/sites-available/
-  suitecrm-mcp               nginx config with entity and /auth/ routing
+  suitecrm-mcp                   nginx config with entity and /auth/ routing
+/etc/nginx/sites-enabled/
+  suitecrm-mcp -> ../sites-available/suitecrm-mcp
 
 /var/log/nginx/
   suitecrm-mcp.access.log
