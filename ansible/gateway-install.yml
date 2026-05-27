@@ -1,0 +1,183 @@
+---
+# ==============================================================
+# gateway-install.yml — Install suitecrm-mcp gateway from scratch
+# ==============================================================
+# Turns a bare Ubuntu 20.04+ VM into a fully working
+# suitecrm-mcp gateway. Idempotent — safe to re-run to update
+# an existing install (uses install.py --update on re-runs).
+#
+# Required inventory vars on the gateway host:
+#   gateway_domain        — public FQDN (e.g. mcp.yourcompany.com)
+#   gateway_email         — Let's Encrypt contact email
+#   oauth_issuer          — OIDC issuer URL (e.g. https://your-tenant.auth0.com)
+#   oauth_client_id       — Auth0 / Azure AD application client ID
+#   oauth_client_secret   — Auth0 / Azure AD application client secret
+#   oauth_audience        — custom API audience identifier
+#
+# Optional:
+#   repo_url              — override default GitHub URL
+#   repo_branch           — override branch (default: main)
+#   skip_certbot          — set to true to skip HTTPS/certbot
+#
+# Run (fresh install):
+#   ansible-playbook -i ansible/inventory.yml ansible/gateway-install.yml
+#
+# Update existing install (skips OAuth re-prompts):
+#   ansible-playbook -i ansible/inventory.yml ansible/gateway-install.yml \
+#     -e update_only=true
+# ==============================================================
+
+- name: gateway-install - install suitecrm-mcp gateway from scratch on a bare Ubuntu VM
+  hosts: gateway
+  become: yes
+
+  vars:
+    repo_url: "https://github.com/Anirudhx7/suitecrm-mcp.git"
+    repo_branch: "main"
+    repo_dest: "/opt/suitecrm-mcp-repo"
+    update_only: false
+    skip_certbot: false
+
+  tasks:
+
+    # ── Pre-flight ──────────────────────────────────────────────
+    - name: Check if gateway is already installed
+      stat:
+        path: /opt/suitecrm-mcp-server/index.mjs
+      register: gateway_installed
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install base dependencies
+      apt:
+        name:
+          - git
+          - python3
+          - python3-pip
+          - curl
+          - jq
+        state: present
+
+    # ── Repo ────────────────────────────────────────────────────
+    - name: Clone suitecrm-mcp repo
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_dest }}"
+        version: "{{ repo_branch }}"
+        force: yes
+        update: yes
+
+    # ── Build entities.json from inventory ──────────────────────
+    - name: Generate entities.json from inventory
+      shell: |
+        python3 - << 'PYEOF'
+        import json
+        from pathlib import Path
+
+        entities = {}
+        {% for host in groups['crm_vms'] %}
+        entities["{{ hostvars[host].entity_code }}"] = {
+            "label":    "{{ hostvars[host].label }}",
+            "endpoint": "{{ hostvars[host].endpoint | default('') }}",
+            "port":     {{ hostvars[host].port }},
+            "group":    "{{ hostvars[host].group }}"
+        }
+        {% endfor %}
+
+        path = Path("{{ repo_dest }}/entities.json")
+        path.write_text(json.dumps(entities, indent=2))
+        print("entities.json written with", len(entities), "entities")
+        PYEOF
+      register: entities_result
+      changed_when: true
+
+    - name: Show entities.json output
+      debug:
+        msg: "{{ entities_result.stdout }}"
+
+    # ── First install ────────────────────────────────────────────
+    - name: Run install.py (first install)
+      shell: |
+        python3 {{ repo_dest }}/install.py \
+          --config {{ repo_dest }}/entities.json \
+          {% if not skip_certbot | bool %}
+          --domain {{ gateway_domain }} \
+          --email {{ gateway_email }} \
+          {% endif %}
+          --oauth-issuer "{{ oauth_issuer }}" \
+          --oauth-client-id "{{ oauth_client_id }}" \
+          --oauth-client-secret "{{ oauth_client_secret }}" \
+          --oauth-audience "{{ oauth_audience }}" \
+          --gateway-url "https://{{ gateway_domain }}"
+      args:
+        chdir: "{{ repo_dest }}"
+      when:
+        - not gateway_installed.stat.exists
+        - not update_only | bool
+      register: install_result
+
+    - name: Show install output
+      debug:
+        msg: "{{ install_result.stdout_lines | default([]) }}"
+      when: install_result is defined and install_result.stdout_lines is defined
+
+    # ── Update existing install ──────────────────────────────────
+    - name: Run install.py --update (update existing install)
+      shell: |
+        python3 {{ repo_dest }}/install.py \
+          --update \
+          --config {{ repo_dest }}/entities.json \
+          --skip-oauth
+      args:
+        chdir: "{{ repo_dest }}"
+      when:
+        - gateway_installed.stat.exists or update_only | bool
+      register: update_result
+
+    - name: Show update output
+      debug:
+        msg: "{{ update_result.stdout_lines | default([]) }}"
+      when: update_result is defined and update_result.stdout_lines is defined
+
+    # ── Verify services are up ───────────────────────────────────
+    - name: Check auth service status
+      shell: systemctl is-active suitecrm-mcp-auth
+      register: auth_status
+      changed_when: false
+      failed_when: false
+
+    - name: Check entity service status
+      shell: |
+        {% for host in groups['crm_vms'] %}
+        systemctl is-active suitecrm-mcp-{{ hostvars[host].entity_code }} 2>/dev/null && \
+          echo "{{ hostvars[host].entity_code }}: active" || \
+          echo "{{ hostvars[host].entity_code }}: INACTIVE"
+        {% endfor %}
+      register: entity_status
+      changed_when: false
+      failed_when: false
+
+    - name: Report service status
+      debug:
+        msg:
+          - "suitecrm-mcp-auth: {{ auth_status.stdout }}"
+          - "{{ entity_status.stdout_lines }}"
+
+    # ── Health check ─────────────────────────────────────────────
+    - name: Gateway health check
+      uri:
+        url: "https://{{ gateway_domain }}/health"
+        validate_certs: "{{ not skip_certbot | bool }}"
+        status_code: 200
+      register: health_result
+      retries: 5
+      delay: 5
+      until: health_result.status == 200
+      ignore_errors: yes
+
+    - name: Report health check
+      debug:
+        msg: "Health: {{ health_result.json | default(health_result.msg) }}"
