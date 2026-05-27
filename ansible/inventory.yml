@@ -13,8 +13,7 @@
 #   oauth_audience           — custom API audience identifier
 #
 # Optional on gateway host:
-#   monitoring_enabled       — deploy Prometheus/Grafana/Loki stack (default: false)
-#   grafana_password         — Grafana admin password (auto-generated if unset)
+#   skip_certbot             — set to true to skip HTTPS/certbot (default: false)
 #
 # Required per CRM VM:
 #   ansible_host             — IP or hostname of the CRM VM
@@ -53,8 +52,7 @@ all:
       oauth_audience: https://mcp.yourcompany.com
 
       # --- Optional ---
-      monitoring_enabled: false
-      # grafana_password: "{{ vault_grafana_password }}"
+      # skip_certbot: true   # set if not using Let's Encrypt
 
   children:
     crm_vms:
