@@ -689,6 +689,9 @@
     <div class="sidebar-group">
       <div class="sidebar-group-label">Reference</div>
       <nav class="sidebar-nav">
+        <a href="#nginx-config">Nginx Config Reference</a>
+        <a href="#nginx-single" class="sub">Single-entity</a>
+        <a href="#nginx-multi" class="sub">Multi-entity</a>
         <a href="#setup-files">File Layout</a>
       </nav>
     </div>
@@ -1015,7 +1018,7 @@ WHERE deleted=0;"</pre>
       <ol>
         <li>Log in to the <a href="https://manage.auth0.com" target="_blank" rel="noopener">Auth0 Dashboard</a></li>
         <li>Go to <strong>Applications &gt; Applications &gt; Create Application</strong></li>
-        <li>Name it (e.g. <code>SuiteCRM MCP Gateway</code>)</li>
+        <li>Name it (e.g. <code>MCP Gateway Client</code>)</li>
         <li>Choose <strong>Regular Web Application</strong> - required for Authorization Code flow</li>
         <li>Click <strong>Create</strong></li>
       </ol>
@@ -1033,22 +1036,39 @@ WHERE deleted=0;"</pre>
         </table>
       </div>
       <p>Under <strong>Advanced Settings &gt; Grant Types</strong>, ensure <strong>Authorization Code</strong> and <strong>Refresh Token</strong> are checked. Under <strong>Advanced Settings &gt; OAuth</strong>, set JWT Signature Algorithm to <strong>RS256</strong>. Click <strong>Save Changes</strong>.</p>
+      <p>On the <strong>Connections</strong> tab, disable any connections you do not need (e.g. Username-Password, Google) and leave only the enterprise connection you will configure in Step 5 enabled.</p>
 
-      <h3>3. Note your credentials</h3>
-      <p>From the Settings tab, copy:</p>
+      <h3>3. Create a custom API</h3>
+      <p>Go to <strong>Applications &gt; APIs &gt; Create API</strong>. Fill in:</p>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Field</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Name</td><td><code>MCP Gateway</code> (or any descriptive name)</td></tr>
+            <tr><td>Identifier</td><td><code>https://mcp.yourcompany.com</code> - this becomes your <code>AUTH0_AUDIENCE</code></td></tr>
+            <tr><td>Signing Algorithm</td><td><strong>RS256</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Click <strong>Create</strong>. After creating the API, go back to your application, open the <strong>API Access</strong> tab, and confirm the new API appears with permissions granted.</p>
+      <div class="callout callout-info"><strong>Why a custom API?</strong> Using the Auth0 Management API as audience gives the gateway unnecessary admin permissions. A dedicated API scoped to your gateway is the correct pattern.</div>
+
+      <h3>4. Note your credentials</h3>
+      <p>From the application <strong>Settings</strong> tab, copy:</p>
       <ul>
         <li><strong>Domain</strong> (e.g. <code>your-tenant.auth0.com</code>) - this is your <code>AUTH0_DOMAIN</code></li>
         <li><strong>Client ID</strong> - this is your <code>AUTH0_CLIENT_ID</code></li>
         <li><strong>Client Secret</strong> - this is your <code>AUTH0_CLIENT_SECRET</code></li>
       </ul>
-      <p>For <code>AUTH0_AUDIENCE</code>, use the Auth0 Management API identifier (<code>https://your-tenant.auth0.com/api/v2/</code>) or create a custom API in Auth0 &gt; APIs.</p>
+      <p>For <code>AUTH0_AUDIENCE</code>, use the <strong>Identifier</strong> you set on your custom API in Step 3 (e.g. <code>https://mcp.yourcompany.com</code>).</p>
 
-      <h3>4. Configure groups claim</h3>
-      <p>The gateway reads group membership from the JWT to decide which CRM entities a user can access. Auth0 does not include custom claims by default - add an Action:</p>
+      <h3>5. Configure groups claim</h3>
+      <p>Auth0 does not include roles/group membership in JWTs by default. Add a custom Action to inject them:</p>
       <ol>
-        <li>Go to <strong>Actions &gt; Flows &gt; Login</strong></li>
-        <li>Click <strong>+</strong> to add a custom action</li>
-        <li>Paste this code:</li>
+        <li>Go to <strong>Actions &gt; Library</strong></li>
+        <li>Click <strong>Create Action &gt; Build from scratch</strong></li>
+        <li>Name it (e.g. <code>Add Custom Claims</code>), set trigger to <strong>Login / Post Login</strong>, runtime <strong>Node 18</strong></li>
+        <li>Paste this code and click <strong>Deploy</strong>:</li>
       </ol>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">javascript</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
@@ -1058,19 +1078,22 @@ WHERE deleted=0;"</pre>
   api.accessToken.setCustomClaim(namespace + 'groups', event.authorization?.roles ?? []);
 };</pre>
       </div>
-      <ol start="4">
-        <li>Deploy the action and add it to the Login flow</li>
+      <ol start="5">
+        <li>Go to <strong>Actions &gt; Triggers &gt; post-login</strong></li>
+        <li>Drag your new action from the right panel into the flow and click <strong>Apply</strong></li>
       </ol>
       <p>Then set <code>OAUTH_GROUPS_CLAIM=https://suitecrm-mcp/groups</code> in the gateway env file.</p>
-      <p>In Auth0 &gt; <strong>User Management &gt; Roles</strong>, create roles matching the <code>group</code> field in your <code>entities.json</code> (e.g. <code>CRM-MyCompany</code>). Assign users to roles.</p>
+      <p>In Auth0 &gt; <strong>User Management &gt; Roles</strong>, create roles matching the <code>group</code> field in your <code>entities.json</code> (e.g. <code>CRM-MyCompany</code>). Assign users to those roles.</p>
 
-      <h3>5. Connect Azure AD (optional - corporate SSO)</h3>
+      <h3>6. Connect Azure AD (optional - corporate SSO)</h3>
       <ol>
-        <li>In Auth0, go to <strong>Authentication &gt; Enterprise &gt; Microsoft Azure AD</strong></li>
-        <li>Create a new connection using your Azure AD tenant ID, client ID, and secret</li>
-        <li>Enable the connection on your SuiteCRM MCP Gateway application</li>
+        <li>Go to <strong>Authentication &gt; Enterprise &gt; Microsoft Azure AD</strong> and click <strong>Create Connection</strong></li>
+        <li>Fill in your Azure AD tenant domain, client ID, and client secret from the Azure Portal app registration</li>
+        <li>Save the connection, then open it and go to its <strong>Applications</strong> tab</li>
+        <li>Toggle your <strong>MCP Gateway Client</strong> application to <strong>enabled</strong></li>
         <li>Users will see "Log in with Microsoft" on the Auth0 login page</li>
       </ol>
+      <div class="callout callout-info">After enabling the connection, go to your application's <strong>Connections</strong> tab (Step 2) to confirm the Azure AD connection shows as active and any unused connections are disabled.</div>
 
       <hr class="sub-divider" />
       <h2 id="auth-azure">Azure AD (direct, without Auth0)</h2>
@@ -2035,6 +2058,153 @@ SHOW GRANTS FOR 'mcp_acl_reader'@'&lt;connecting_ip&gt;';   # verify</pre>
     <li>Test D: live Web UI change → immediate effect</li>
   </ul>
 </section>
+
+    <!-- ======================================================= -->
+    <!-- NGINX CONFIG REFERENCE                                   -->
+    <!-- ======================================================= -->
+<section class="doc-section" id="nginx-config">
+      <h1>Nginx Config Reference</h1>
+      <p class="section-desc">The installer generates and writes this config to <code>/etc/nginx/sites-available/suitecrm-mcp</code>. Copy and adapt it for manual or custom deployments.</p>
+
+      <h2 id="nginx-single">Single-entity</h2>
+      <p>Used when you have exactly one CRM instance and pass <code>--domain</code> to the installer. There are no path prefixes - the MCP endpoint is served at <code>/messages</code> directly. Certbot rewrites this to HTTPS after the install step.</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">nginx</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># /etc/nginx/sites-available/suitecrm-mcp</span>
+<span class="cm"># Single-entity config — certbot will add SSL directives automatically.</span>
+server {
+    listen 80;
+    server_name mcp.example.com;    <span class="cm"># replace with your domain</span>
+    large_client_header_buffers 4 32k;
+    client_max_body_size 10m;
+    access_log /var/log/nginx/suitecrm-mcp.access.log;
+    error_log  /var/log/nginx/suitecrm-mcp.error.log;
+
+    <span class="cm"># SSE endpoint — long-lived connection, access_log off reduces noise</span>
+    location = /messages {
+        access_log off;
+        proxy_pass http://127.0.0.1:3101/messages;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+    }
+
+    <span class="cm"># All other routes (tool calls, auth, health)</span>
+    location / {
+        proxy_pass http://127.0.0.1:3101;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+    }
+}</pre>
+      </div>
+      <p>After placing the file, enable it and reload nginx:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre>ln -s /etc/nginx/sites-available/suitecrm-mcp /etc/nginx/sites-enabled/
+nginx -t &amp;&amp; systemctl reload nginx</pre>
+      </div>
+      <div class="callout callout-info">The installer does this automatically.</div>
+
+      <hr class="sub-divider" />
+      <h2 id="nginx-multi">Multi-entity</h2>
+      <p>Used when you have two or more CRM instances. All entities share a single nginx server block on port 8080 (plain HTTP) or port 80 when a domain is configured. Each entity gets its own path prefix matching its code (e.g. <code>/crm1/</code>).</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">nginx</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># /etc/nginx/sites-available/suitecrm-mcp</span>
+<span class="cm"># Generated by install.py — edit to match your entity codes and ports.</span>
+server {
+    listen 8080;           <span class="cm"># change to: listen 80; server_name mcp.example.com; when using a domain</span>
+    server_name _;
+    large_client_header_buffers 4 32k;
+    client_max_body_size 10m;
+    access_log /var/log/nginx/suitecrm-mcp.access.log;
+    error_log  /var/log/nginx/suitecrm-mcp.error.log;
+
+    <span class="cm"># Health check — returns {"gateway":"ok","entities":N}</span>
+    location /health {
+        default_type application/json;
+        return 200 '{"gateway":"ok","entities":2}';
+    }
+
+    <span class="cm"># OAuth2 login and callback — handled by the auth service (port 3100)</span>
+    location /auth/ {
+        proxy_pass http://127.0.0.1:3100/auth/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 60s;
+    }
+    <span class="cm"># Redirect bare root to the login page</span>
+    location = / {
+        return 302 /auth/login;
+    }
+
+    <span class="cm"># Entity: crm1 — SSE endpoint (access_log off reduces noise from long-lived connections)</span>
+    location = /crm1/messages {
+        access_log off;
+        proxy_pass http://127.0.0.1:3101/messages;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+    }
+    <span class="cm"># Entity: crm1 — all other routes</span>
+    location /crm1/ {
+        proxy_pass http://127.0.0.1:3101/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+    }
+
+    <span class="cm"># Entity: crm2 — SSE endpoint</span>
+    location = /crm2/messages {
+        access_log off;
+        proxy_pass http://127.0.0.1:3102/messages;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+    }
+    <span class="cm"># Entity: crm2 — all other routes</span>
+    location /crm2/ {
+        proxy_pass http://127.0.0.1:3102/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+    }
+}</pre>
+      </div>
+      <div class="callout callout-info">
+        <strong>Adding more entities:</strong> duplicate the two <code>location</code> blocks for each entity, incrementing the code (e.g. <code>crm3</code>) and port (<code>3103</code>). The installer assigns ports starting at 3101 and increments by one per entity.
+      </div>
+
+    </section>
 
 <section class="doc-section" id="setup-files">
       <h1>File Layout After Install</h1>
