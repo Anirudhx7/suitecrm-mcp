@@ -363,12 +363,22 @@
 # ==============================================================
 # Play 3: ACL enforcement setup (optional — set acl_enabled: true)
 # ==============================================================
-# Creates a read-only MySQL user (mcp_acl_reader) on each CRM
-# database and adds SUITECRM_DB_* vars to each entity .env.
-# The gateway uses these to check SuiteCRM ACL tables before
-# forwarding write tool calls.
+# Two things happen here:
+#
+# A) mcp_acl_setup.sh (run-once via marker):
+#    - Deploys tools/mcp_acl_setup.sh to /usr/local/bin/ on each CRM VM
+#    - Creates mcp_acl_reader SuiteCRM application user (users table)
+#    - Fixes OAuth2 token lifetime to 30 days
+#    - Generates a random password, saves it to /etc/suitecrm-mcp/.acl-user-pass
+#    - Writes SUITECRM_ACL_USER / SUITECRM_ACL_PASS to the entity .env on gateway
+#    - Skipped on re-runs (marker: /etc/suitecrm-mcp/.acl-user-setup-done)
+#
+# B) MySQL read-only user (idempotent, every run):
+#    - Creates mcp_acl_reader MySQL user with SELECT-only on the CRM DB
+#    - Writes SUITECRM_DB_* vars to the entity .env on gateway
+#    - Used by acl-check.mjs for direct DB ACL queries
 # ==============================================================
-- name: setup-acl-db-users - create mcp_acl_reader MySQL user on each CRM DB
+- name: setup-acl-db-users - deploy mcp_acl_setup.sh and create ACL users on each CRM VM
   hosts: crm_vms
   become: yes
   tags: acl
@@ -382,14 +392,14 @@
       meta: end_play
       when: not acl_enabled | bool
 
-    - name: Install MySQL client on CRM VM
+    - name: Install required packages on CRM VM
       apt:
-        name: [mysql-client, python3-mysqldb]
+        name: [mysql-client, python3-mysqldb, php-cli]
         state: present
         update_cache: no
 
-    # ── Read DB credentials from CRM config.php ───────────────────
-    - name: Read existing SUITECRM_CONFIG
+    # ── Read config path set by Play 1 ───────────────────────────
+    - name: Read SUITECRM_CONFIG from /etc/environment
       shell: grep '^SUITECRM_CONFIG=' /etc/environment | cut -d= -f2 | head -1
       register: config_path_raw
       changed_when: false
@@ -398,18 +408,115 @@
       set_fact:
         crm_config_path: "{{ config_path_raw.stdout | trim }}"
 
-    - name: Fail if config.php not found (run Play 1 first)
+    - name: Fail if SUITECRM_CONFIG not set (run crm-fleet-sync.yml Play 1 first)
       fail:
-        msg: "SUITECRM_CONFIG not set on {{ inventory_hostname }} — run deploy.yml Play 1 first."
+        msg: "SUITECRM_CONFIG not set on {{ inventory_hostname }} — run crm-fleet-sync.yml Play 1 first."
       when: crm_config_path == ""
 
+    # ── Deploy mcp_acl_setup.sh (one-time tool, stays on VM) ─────
+    - name: Fetch mcp_acl_setup.sh from repo on gateway
+      slurp:
+        src: "{{ playbook_dir }}/../tools/mcp_acl_setup.sh"
+      register: acl_setup_script
+      delegate_to: gateway
+
+    - name: Deploy mcp_acl_setup.sh to /usr/local/bin/
+      copy:
+        content: "{{ acl_setup_script.content | b64decode }}"
+        dest: /usr/local/bin/mcp_acl_setup.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    # ── SuiteCRM user + token fix (run-once) ─────────────────────
+    - name: Check if SuiteCRM ACL user setup already done
+      stat:
+        path: /etc/suitecrm-mcp/.acl-user-setup-done
+      register: acl_marker
+
+    - name: Create /etc/suitecrm-mcp dir on CRM VM if missing
+      file:
+        path: /etc/suitecrm-mcp
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+      when: not acl_marker.stat.exists
+
+    - name: Generate random password for mcp_acl_reader SuiteCRM user
+      set_fact:
+        acl_suitecrm_pass: "{{ lookup('password', '/tmp/acl_suitecrm_pass_' ~ hostvars[inventory_hostname].entity_code ~ ' length=24 chars=ascii_letters,digits') }}"
+      when: not acl_marker.stat.exists
+      no_log: true
+
+    - name: Create mcp_acl_reader SuiteCRM user via mcp_acl_setup.sh
+      shell: >
+        mcp_acl_setup.sh --user-only
+        --config "{{ crm_config_path }}"
+        --password "{{ acl_suitecrm_pass }}"
+      register: acl_user_result
+      when: not acl_marker.stat.exists
+      no_log: true
+
+    - name: Fix OAuth2 token lifetime to 30 days via mcp_acl_setup.sh
+      shell: >
+        mcp_acl_setup.sh --token-only
+        --config "{{ crm_config_path }}"
+      register: acl_token_result
+      when: not acl_marker.stat.exists
+
+    - name: Show token fix output
+      debug:
+        msg: "{{ acl_token_result.stdout_lines | default([]) }}"
+      when: not acl_marker.stat.exists
+
+    - name: Save SuiteCRM ACL user password on CRM VM
+      copy:
+        content: "SUITECRM_ACL_USER=mcp_acl_reader\nSUITECRM_ACL_PASS={{ acl_suitecrm_pass }}\n"
+        dest: /etc/suitecrm-mcp/.acl-user-pass
+        owner: root
+        group: root
+        mode: '0600'
+      when: not acl_marker.stat.exists
+      no_log: true
+
+    - name: Write SUITECRM_ACL_* vars to entity .env on gateway
+      blockinfile:
+        path: /etc/suitecrm-mcp/{{ hostvars[inventory_hostname].entity_code }}.env
+        marker: "# {mark} ACL SUITECRM USER (managed by ansible/crm-fleet-sync.yml)"
+        block: |
+          SUITECRM_ACL_USER=mcp_acl_reader
+          SUITECRM_ACL_PASS={{ acl_suitecrm_pass }}
+        owner: suitecrm-mcp
+        group: suitecrm-mcp
+        mode: '0600'
+      delegate_to: gateway
+      become: yes
+      when: not acl_marker.stat.exists
+      no_log: true
+
+    - name: Set run-once marker for SuiteCRM ACL user setup
+      file:
+        path: /etc/suitecrm-mcp/.acl-user-setup-done
+        state: touch
+        owner: root
+        group: root
+        mode: '0600'
+      when: not acl_marker.stat.exists
+
+    - name: Report SuiteCRM ACL user setup
+      debug:
+        msg: "{{ inventory_hostname }} SuiteCRM ACL user: {{ 'created' if not acl_marker.stat.exists else 'already set up (marker exists)' }}"
+
+    # ── MySQL read-only user (idempotent) ─────────────────────────
     - name: Extract DB credentials from config.php
       shell: |
         php -r "
         include('{{ crm_config_path }}');
-        echo \$sugar_config['db_host_name'] . '\n';
-        echo \$sugar_config['db_name'] . '\n';
-        echo \$sugar_config['db_port'] ?? '3306';
+        \$h = \$sugar_config['dbconfig']['db_host_name'] ?? \$sugar_config['db_host_name'] ?? '';
+        \$n = \$sugar_config['dbconfig']['db_name']       ?? \$sugar_config['db_name']       ?? '';
+        \$p = \$sugar_config['dbconfig']['db_port']       ?? \$sugar_config['db_port']       ?? '3306';
+        echo implode('\n', [\$h, \$n, \$p]);
         " 2>/dev/null
       register: db_info_raw
       changed_when: false
@@ -425,7 +532,7 @@
         msg: "Could not read db_host_name from {{ crm_config_path }}"
       when: crm_db_host == ""
 
-    # ── Determine connecting IP (what MySQL sees) ─────────────────
+    # ── Determine connecting IP (what MySQL sees from gateway) ────
     - name: Probe connecting IP as seen by MySQL
       shell: |
         mysql -h "{{ crm_db_host }}" -P "{{ crm_db_port }}" \
@@ -440,23 +547,19 @@
         acl_connecting_ip: "{{ connecting_ip_result.stdout | trim }}"
       when: connecting_ip_result.stdout | trim != ""
 
-    - name: Warn if connecting IP could not be determined
-      debug:
-        msg: "Could not probe connecting IP — using gateway ansible_host as fallback."
-      when: connecting_ip_result.stdout | trim == ""
-
-    - name: Fallback connecting IP to gateway host
+    - name: Fallback connecting IP to gateway ansible_host
       set_fact:
         acl_connecting_ip: "{{ hostvars['gateway'].ansible_host }}"
       when: connecting_ip_result.stdout | trim == ""
 
-    # ── Generate ACL reader password ──────────────────────────────
-    - name: Generate mcp_acl_reader password (idempotent via lookup)
+    # ── Generate MySQL reader password ────────────────────────────
+    - name: Generate mcp_acl_reader MySQL password (idempotent via lookup)
       set_fact:
-        acl_db_pass: "{{ hostvars[inventory_hostname].acl_db_pass | default(lookup('password', '/tmp/acl_pass_' ~ hostvars[inventory_hostname].entity_code ~ ' length=24 chars=ascii_letters,digits')) }}"
+        acl_db_pass: "{{ hostvars[inventory_hostname].acl_db_pass | default(lookup('password', '/tmp/acl_mysql_pass_' ~ hostvars[inventory_hostname].entity_code ~ ' length=24 chars=ascii_letters,digits')) }}"
+      no_log: true
 
-    # ── Create MySQL user ─────────────────────────────────────────
-    - name: Create mcp_acl_reader MySQL user
+    # ── Create MySQL read-only user ───────────────────────────────
+    - name: Create mcp_acl_reader MySQL read-only user
       shell: |
         mysql -h "{{ crm_db_host }}" -P "{{ crm_db_port }}" \
           -u "{{ hostvars[inventory_hostname].acl_root_user | default('root') }}" \
@@ -474,7 +577,7 @@
     - name: Write SUITECRM_DB_* vars to entity .env on gateway
       blockinfile:
         path: /etc/suitecrm-mcp/{{ hostvars[inventory_hostname].entity_code }}.env
-        marker: "# {mark} ACL DB CONFIG (managed by ansible/deploy.yml)"
+        marker: "# {mark} ACL DB CONFIG (managed by ansible/crm-fleet-sync.yml)"
         block: |
           SUITECRM_DB_HOST={{ crm_db_host }}
           SUITECRM_DB_PORT={{ crm_db_port }}
@@ -497,7 +600,7 @@
       become: yes
       when: acl_env_updated.changed
 
-    - name: Verify MySQL connection from gateway
+    - name: Verify MySQL read-only connection from gateway
       shell: |
         mysql -h "{{ crm_db_host }}" -P "{{ crm_db_port }}" \
           -u mcp_acl_reader -p"{{ acl_db_pass }}" \
@@ -509,7 +612,7 @@
 
     - name: Report ACL setup result
       debug:
-        msg: "ACL DB for {{ hostvars[inventory_hostname].entity_code }}: {{ 'OK' if acl_verify.rc == 0 else 'FAILED — ' + acl_verify.stderr }}"
+        msg: "ACL for {{ hostvars[inventory_hostname].entity_code }}: MySQL user {{ 'OK' if acl_verify.rc == 0 else 'FAILED - ' + acl_verify.stderr }}"
 
 
 # ==============================================================
