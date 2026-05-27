@@ -2221,32 +2221,47 @@ server {
       <p class="section-desc">Where the installer places runtime code, protected environment files, Redis-backed state, systemd units, and nginx routing.</p>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">filesystem</span></div>
-        <pre>/opt/suitecrm-mcp/           gateway server code
-  index.mjs
-  auth.mjs
+        <pre>/opt/suitecrm-mcp/           gateway server code (owned by suitecrm-mcp)
+  index.mjs                  SSE gateway + tool handler
+  auth.mjs                   OAuth2/OIDC auth service
+  acl-check.mjs              MySQL ACL enforcement (optional)
+  redis.mjs                  ioredis singleton (shared connection)
+  bridges/
+    hybrid.mjs               routing logic: v8 GraphQL with v4.1 fallback
+    graphql.mjs              SuiteCRM v8 GraphQL bridge
+    legacy.mjs               SuiteCRM v4.1 REST bridge
   package.json
   node_modules/
 
-/etc/suitecrm-mcp/           config and runtime state (mode 700, owned by suitecrm-mcp)
+/etc/suitecrm-mcp/           protected config (mode 700, owned by suitecrm-mcp)
   entities.json              entity list (written by installer)
   auth.env                   env vars for auth service (mode 600)
   crm1.env                   env vars for entity crm1 (mode 600)
-  crm-hosts.json             SSH host map for provisioning (if configured)
+  crm-hosts.json             SSH host map for auto-provisioning (if configured)
+  crm-ssh-key                SSH private key for CRM VM access (mode 600)
   domain                     saved domain for nginx rebuild
 
-Redis                       runtime state
-  crm:profiles              per-user CRM credentials and entity access
-  auth:session:*            gateway API sessions
-  crm:session:*             cached CRM sessions per user and entity
-  auth:bridge:*             short-lived OpenClaw bridge login handoffs
-  rl:*                      shared rate-limit counters
+/usr/local/bin/
+  mcp-admin                  admin CLI (sessions, profiles, revoke, health)
+
+Redis                        runtime state
+  crm:profiles               per-user CRM credentials and entity access
+  auth:session:*             gateway API sessions (30-day TTL)
+  crm:session:*              cached CRM sessions per user and entity
+  auth:bridge:*              short-lived OpenClaw bridge login handoffs
+  rl:*                       shared rate-limit counters
+  acl:uid:{code}:{user}      cached CRM user ID for ACL lookups
 
 /etc/systemd/system/
   suitecrm-mcp-auth.service
-  suitecrm-mcp-crm1.service
+  suitecrm-mcp-crm1.service  (one per entity)
 
 /etc/nginx/sites-available/
-  suitecrm-mcp               nginx config with entity and /auth/ routing</pre>
+  suitecrm-mcp               nginx config with entity and /auth/ routing
+
+/var/log/nginx/
+  suitecrm-mcp.access.log
+  suitecrm-mcp.error.log</pre>
       </div>
     </section>
   </main>
