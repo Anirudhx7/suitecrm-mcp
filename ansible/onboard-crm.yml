@@ -270,6 +270,143 @@
         ('API endpoint unreachable' not in (test_result.stderr + test_result.stdout))
       changed_when: false
 
+    # ── OAuth2 RSA key generation (opt-in, run-once) ─────────────
+    # Set generate_oauth_keys: true in inventory to enable.
+    # Keys are generated as the web server user so ownership is
+    # correct from the start. Path is derived from config.php location.
+    - name: Check OAuth2 key generation flag
+      set_fact:
+        _do_oauth_keys: "{{ hostvars[inventory_hostname].generate_oauth_keys | default(false) | bool }}"
+
+    - name: Derive OAuth2 key directory from config.php path
+      set_fact:
+        oauth2_key_dir: "{{ final_config_path | dirname }}/Api/V8/OAuth2"
+      when: _do_oauth_keys
+
+    - name: Check if OAuth2 keys already exist
+      stat:
+        path: "{{ oauth2_key_dir }}/private.key"
+      register: oauth2_key_stat
+      when: _do_oauth_keys
+
+    - name: Detect web server user
+      shell: |
+        # 1. apachectl -S (most reliable on RHEL/Amazon Linux)
+        WS_USER=$(apachectl -S 2>/dev/null | grep -oP '(?<=User: name=")[^"]+' | head -1)
+
+        # 2. Running process (works when apachectl not in PATH)
+        if [ -z "$WS_USER" ]; then
+          WS_USER=$(ps aux 2>/dev/null \
+            | grep -E '\b(apache2|httpd|nginx)\b' \
+            | grep -v root | grep -v grep \
+            | head -1 | awk '{print $1}')
+        fi
+
+        # 3. Apache envvars (Debian/Ubuntu)
+        if [ -z "$WS_USER" ]; then
+          WS_USER=$(grep '^export APACHE_RUN_USER=' /etc/apache2/envvars 2>/dev/null \
+            | cut -d= -f2 | tr -d '"')
+        fi
+
+        # 4. httpd.conf User directive
+        if [ -z "$WS_USER" ]; then
+          WS_USER=$(grep -r '^User ' /etc/httpd/conf/ /etc/apache2/ 2>/dev/null \
+            | awk '{print $2}' | head -1)
+        fi
+
+        # 5. Common fallbacks
+        if [ -z "$WS_USER" ]; then
+          for u in apache www-data httpd nginx; do
+            id "$u" &>/dev/null && WS_USER="$u" && break
+          done
+        fi
+
+        echo "${WS_USER:-www-data}"
+      register: ws_user_result
+      changed_when: false
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Set web server user fact
+      set_fact:
+        ws_user: "{{ ws_user_result.stdout | trim }}"
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Stat existing OAuth2 directory to match permissions
+      stat:
+        path: "{{ oauth2_key_dir }}"
+      register: oauth2_dir_stat
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Create OAuth2 key directory if missing
+      file:
+        path: "{{ oauth2_key_dir }}"
+        state: directory
+        owner: "{{ ws_user }}"
+        group: "{{ ws_user }}"
+        mode: "{{ oauth2_dir_stat.stat.mode | default('0750') }}"
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Generate RSA private key as web server user
+      shell: sudo -u "{{ ws_user }}" openssl genrsa -out "{{ oauth2_key_dir }}/private.key" 2048
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Derive RSA public key as web server user
+      shell: >
+        sudo -u "{{ ws_user }}" openssl rsa
+        -in "{{ oauth2_key_dir }}/private.key"
+        -pubout -out "{{ oauth2_key_dir }}/public.key"
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Lock down key permissions
+      file:
+        path: "{{ oauth2_key_dir }}/{{ item }}"
+        owner: "{{ ws_user }}"
+        group: "{{ ws_user }}"
+        mode: '0600'
+      loop:
+        - private.key
+        - public.key
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Verify web server user can read private key
+      shell: sudo -u "{{ ws_user }}" head -1 "{{ oauth2_key_dir }}/private.key"
+      register: key_verify_priv
+      changed_when: false
+      failed_when: "'PRIVATE KEY' not in key_verify_priv.stdout"
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Verify web server user can read public key
+      shell: sudo -u "{{ ws_user }}" head -1 "{{ oauth2_key_dir }}/public.key"
+      register: key_verify_pub
+      changed_when: false
+      failed_when: "'PUBLIC KEY' not in key_verify_pub.stdout"
+      when:
+        - _do_oauth_keys
+        - not oauth2_key_stat.stat.exists | default(true)
+
+    - name: Report OAuth2 key status
+      debug:
+        msg: >
+          {{ oauth2_key_dir }}: {{ 'keys already exist — skipped' if oauth2_key_stat.stat.exists | default(false)
+          else 'generated as ' + (ws_user | default('unknown')) + ' — private.key + public.key OK' }}
+      when: _do_oauth_keys
+
     - name: Confirm CRM VM deployment
       debug:
         msg: >
