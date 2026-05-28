@@ -1073,6 +1073,7 @@ WHERE deleted=0;"</pre>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">javascript</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>exports.onExecutePostLogin = async (event, api) => {
+  // Must match AUTH0_AUDIENCE — the API identifier you set in Step 3
   const ns = 'https://mcp.yourcompany.com/';
 
   const sam = event.user.upn
@@ -1087,7 +1088,7 @@ WHERE deleted=0;"</pre>
   api.idToken.setCustomClaim(ns + 'groups', groups);
 };</pre>
       </div>
-      <div class="callout callout-info">Replace <code>https://mcp.yourcompany.com/</code> with your actual gateway URL (the same value you used as the custom API identifier in Step 3). This string becomes the namespace prefix for all custom claims.</div>
+      <div class="callout callout-info">Replace <code>https://mcp.yourcompany.com/</code> with the <strong>Auth0 API identifier</strong> you set in Step 3 — this is the same value as <code>AUTH0_AUDIENCE</code> in your gateway <code>.env</code>. The namespace must match exactly or the gateway will not find the claims.</div>
       <ol start="5">
         <li>Go to <strong>Actions &gt; Triggers &gt; post-login</strong></li>
         <li>Drag your new action from the right panel into the flow and click <strong>Apply</strong></li>
