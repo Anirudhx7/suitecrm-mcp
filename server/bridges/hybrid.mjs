@@ -10,6 +10,8 @@ export class HybridBridge {
     this.v4 = v4Bridge;
     this.logger = options.logger || console;
     this.priority = options.priority || 'v8';
+    this.v8Healthy = null; // null = no calls yet
+    this.v4Healthy = null;
   }
 
   async login(user, pass) {
@@ -23,14 +25,22 @@ export class HybridBridge {
 
   async execute(sessions, method, params) {
     if (this.priority === 'v8' && sessions.v8 && this.v8.supports(method)) {
-      try { return await this.v8[method](sessions.v8, params); }
-      catch (err) { this.logger.warn({ method, err: err.message }, 'v8_call_failed_falling_back'); }
+      try {
+        const result = await this.v8[method](sessions.v8, params);
+        this.v8Healthy = true;
+        return result;
+      } catch (err) {
+        this.v8Healthy = false;
+        this.logger.warn({ method, err: err.message }, 'v8_call_failed_falling_back');
+      }
     }
     if (sessions.v4) {
       const result = await this.v4[method](sessions.v4, params);
+      this.v4Healthy = true;
       if (this.priority === 'v8' && sessions.v8) this.logger.info({ method }, 'v4_fallback_succeeded');
       return result;
     }
+    this.v4Healthy = false;
     throw new Error(`Method ${method} failed on all available API bridges.`);
   }
 

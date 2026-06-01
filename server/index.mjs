@@ -51,8 +51,10 @@ const TLS_OK         = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
 const METRICS_PORT   = parseInt(process.env.METRICS_PORT || '9090', 10);
 const METRICS_BIND   = (process.env.METRICS_BIND || '127.0.0.1').trim();
 const CRM_TIMEOUT    = parseInt(process.env.CRM_TIMEOUT_MS || '30000', 10);
-const CB_THRESHOLD   = parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD || '5', 10);
-const CB_RESET_MS    = parseInt(process.env.CIRCUIT_BREAKER_RESET_MS || '60000', 10);
+const CB_THRESHOLD        = parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD || '5', 10);
+const CB_RESET_MS         = parseInt(process.env.CIRCUIT_BREAKER_RESET_MS || '60000', 10);
+const CB_INFRA_THRESHOLD  = parseInt(process.env.CB_INFRA_THRESHOLD || '10', 10);
+const CB_PROBE_INTERVAL_MS = parseInt(process.env.CB_PROBE_INTERVAL_MS || '30000', 10);
 const CRM_SESSION_TTL_SEC = 30 * 24 * 3600; // 30 days — matches SuiteCRM OAuth token and gateway session lifetime
 
 const NETWORK_ERRS = new Set(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','ECONNABORTED']);
@@ -289,20 +291,58 @@ function redactAuditArgs(args) {
 // ---------------------------------------------------------------------------
 // Circuit Breaker
 // ---------------------------------------------------------------------------
+let _probeTimer = null;
+function startProbe() {
+  if (_probeTimer) return;
+  _probeTimer = setInterval(async () => {
+    if (circuitBreaker.state === 'CLOSED') { stopProbe(); return; }
+    try {
+      const body = 'method=get_server_info&input_type=JSON&response_type=JSON&rest_data=%7B%7D';
+      await new Promise((resolve, reject) => {
+        const p = new URL(V4_ENDPOINT); const lib = p.protocol === 'https:' ? https : http;
+        const r = lib.request({ hostname: p.hostname, port: p.port || (p.protocol === 'https:' ? 443 : 80), path: p.pathname, method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }, rejectUnauthorized: TLS_OK }, (res) => {
+          let raw = ''; res.on('data', c => raw += c);
+          res.on('end', () => { try { JSON.parse(raw); resolve(); } catch { reject(new Error(`Non-JSON: ${raw.slice(0, 100)}`)); } });
+        });
+        r.setTimeout(5000, () => r.destroy(new Error('timeout')));
+        r.on('error', reject); r.write(body); r.end();
+      });
+      logger.info('cb_probe_succeeded');
+      crm.v4Healthy = true;
+      circuitBreaker.recordSuccess();
+    } catch (err) {
+      logger.warn({ err: err.message }, 'cb_probe_failed');
+    }
+  }, CB_PROBE_INTERVAL_MS);
+}
+function stopProbe() {
+  if (_probeTimer) { clearInterval(_probeTimer); _probeTimer = null; }
+}
+
 const circuitBreaker = {
-  state: 'CLOSED', failures: 0, lastFailure: 0,
+  state: 'CLOSED', failures: 0, infraFailures: 0, lastFailure: 0,
   isOpen() {
     if (this.state === 'CLOSED') return false;
     if (this.state === 'HALF_OPEN') return true;
     if (Date.now() - this.lastFailure > CB_RESET_MS) { this.state = 'HALF_OPEN'; metricCircuitBreakerState.set({ entity: PREFIX }, 1); logger.warn({ state: 'HALF_OPEN' }, 'circuit_breaker_state'); return false; }
     return true;
   },
-  recordSuccess() { if (this.state !== 'CLOSED') logger.info({ state: 'CLOSED' }, 'circuit_breaker_state'); this.state = 'CLOSED'; this.failures = 0; metricCircuitBreakerState.set({ entity: PREFIX }, 0); },
-  recordFailure() {
-    this.failures++; this.lastFailure = Date.now();
-    if (this.state === 'HALF_OPEN' || (this.failures >= CB_THRESHOLD && this.state !== 'OPEN')) {
+  recordSuccess() {
+    if (this.state !== 'CLOSED') { logger.info({ state: 'CLOSED' }, 'circuit_breaker_state'); stopProbe(); }
+    this.state = 'CLOSED'; this.failures = 0; this.infraFailures = 0; metricCircuitBreakerState.set({ entity: PREFIX }, 0);
+  },
+  recordFailure(err) {
+    const isInfra = err && (err.message?.startsWith('Non-JSON') || NETWORK_ERRS.has(err.code));
+    if (isInfra) {
+      this.infraFailures++; this.lastFailure = Date.now();
+      if (this.infraFailures < CB_INFRA_THRESHOLD && this.state !== 'OPEN') return;
+    } else {
+      this.failures++; this.lastFailure = Date.now();
+    }
+    if (this.state === 'HALF_OPEN' || ((this.failures >= CB_THRESHOLD || this.infraFailures >= CB_INFRA_THRESHOLD) && this.state !== 'OPEN')) {
       this.state = 'OPEN'; metricCircuitBreakerState.set({ entity: PREFIX }, 2); metricCircuitBreakerOpenings.inc({ entity: PREFIX });
-      logger.warn({ state: 'OPEN', failures: this.failures }, 'circuit_breaker_state');
+      logger.warn({ state: 'OPEN', failures: this.failures, infraFailures: this.infraFailures }, 'circuit_breaker_state');
+      startProbe();
     }
   },
 };
@@ -516,7 +556,7 @@ async function resilientCall(sid, method, params) {
   if (circuitBreaker.isOpen()) throw new Error(`Circuit breaker open (${circuitBreaker.failures} failures)`);
   let sessions;
   try { sessions = await ensureCrmSession(sid); }
-  catch (err) { circuitBreaker.recordFailure(); throw err; }
+  catch (err) { circuitBreaker.recordFailure(err); throw err; }
   try {
     const result = await crm[method](sessions, params);
     circuitBreaker.recordSuccess();
@@ -563,9 +603,9 @@ async function resilientCall(sid, method, params) {
         const result = await crm[method](sessions, params);
         circuitBreaker.recordSuccess();
         return result;
-      } catch (retryErr) { circuitBreaker.recordFailure(); throw retryErr; }
+      } catch (retryErr) { circuitBreaker.recordFailure(retryErr); throw retryErr; }
     }
-    circuitBreaker.recordFailure(); throw err;
+    circuitBreaker.recordFailure(err); throw err;
   }
 }
 // ---------------------------------------------------------------------------
@@ -809,9 +849,37 @@ app.get('/health/deep', deepHealthRL, async (_req,res) => {
       r.setTimeout(5000,()=>r.destroy(new Error('timeout')));
       r.on('error',reject); r.write(body); r.end();
     });
-    checks.crm={ status:'ok', latency_ms:Date.now()-crmStart, ...(crmData.suite_version?{version:crmData.suite_version}:{}) };
-  } catch(e) { checks.crm={status:'error',message:e.message}; if(status==='healthy') status='degraded'; }
+    checks.v4={ status:'ok', latency_ms:Date.now()-crmStart, ...(crmData.suite_version?{version:crmData.suite_version}:{}) };
+  } catch(e) { checks.v4={status:'error',message:e.message}; if(status==='healthy') status='degraded'; }
   checks.sessions={status:'ok',active:transports.size};
+  if (API_STRATEGY === '8') {
+    const v8Start = Date.now();
+    const anySid = connAuth.size > 0 ? connAuth.keys().next().value : null;
+    if (anySid) {
+      try {
+        const session = await ensureCrmSession(anySid);
+        const token = session?.v8?.token;
+        const expiresAt = session?.v8?.expiresAt;
+        if (!token) throw new Error('No v8 access token in session');
+        if (expiresAt && expiresAt < Date.now()) throw new Error('v8 access token expired');
+        // crm.v8Healthy is set by the hybrid bridge on real tool calls — more accurate than a
+        // raw GraphQL probe (some SuiteCRM versions enforce CSRF on the GraphQL endpoint).
+        if (crm.v8Healthy === false) {
+          checks.v8 = { status: 'error', message: 'v8 auth ok but API calls failing — CSRF or permission issue on CRM' };
+          if (checks.v4?.status !== 'ok' && status === 'healthy') status = 'degraded';
+        } else {
+          checks.v8 = { status: 'ok', latency_ms: Date.now() - v8Start, ...(crm.v8Healthy === null ? { note: 'auth_only — no tool calls yet' } : {}) };
+        }
+      } catch(e) {
+        checks.v8 = { status: 'error', message: e.message.slice(0, 300) };
+        if (checks.v4?.status !== 'ok' && status === 'healthy') status = 'degraded';
+      }
+    } else {
+      checks.v8 = { status: 'unknown' };
+    }
+  } else {
+    checks.v8 = { status: 'not_configured' };
+  }
   res.status(status==='unhealthy'?503:200).json({ status, entity:CODE, port:PORT, uptime:Math.floor(process.uptime()), connections:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), api_strategy:API_STRATEGY==='8'?'Modern (v8 + v4 Fallback)':'Legacy (v4.1)', persistence:'redis', checks, duration_ms:Date.now()-start });
 });
 
@@ -921,6 +989,7 @@ app.use((err,req,res,_next)=>{ logger.error({err:err.message},'middleware_error'
 
 function gracefulShutdown(signal) {
   logger.info({connections:transports.size,signal},'shutdown');
+  stopProbe();
   for (const [,t] of transports) t.close?.();
   const timeout = setTimeout(() => { logger.error('shutdown_timeout'); process.exit(1); }, 3000);
   redis.quit().finally(() => { clearTimeout(timeout); process.exit(0); });

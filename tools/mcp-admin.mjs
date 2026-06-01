@@ -644,14 +644,17 @@ async function printHealth(ports, deep) {
         `  duration=${data.duration_ms ?? '?'}ms`
       );
       for (const [name, chk] of Object.entries(data.checks || {})) {
-        const cstat = chk.status || '?';
-        const cok   = cstat === 'ok';
-        if (!cok) anyBad = true;
+        const cstat   = chk.status || '?';
+        const cok     = cstat === 'ok';
+        const cneutral = ['unknown', 'not_configured'].includes(cstat);
+        if (!cok && !cneutral) anyBad = true;
         let extra = '';
         if (chk.latency_ms != null) extra += `  latency=${chk.latency_ms}ms`;
         if (chk.url)                extra += `  url=${chk.url}`;
         if (chk.active != null)     extra += `  active=${chk.active}`;
-        console.log(`    ${name}: ${c(cstat, cok ? GREEN : RED)}${extra}`);
+        if (chk.message)            extra += `  msg=${chk.message}`;
+        if (chk.note)               extra += `  (${chk.note})`;
+        console.log(`    ${name}: ${c(cstat, cok ? GREEN : cneutral ? DIM : RED)}${extra}`);
       }
       console.log();
     }
@@ -745,8 +748,8 @@ async function cmdRestart(entityArg, opts) {
   const entities = loadJson(ENTITIES_FILE);
   let codes;
 
-  if (!opts.all && !entityArg && !opts.monitoring) {
-    console.error(c('Error: specify an entity code, --all, or --monitoring', RED));
+  if (!opts.all && !entityArg && !opts.monitoring && !opts.redis) {
+    console.error(c('Error: specify an entity code, --all, --monitoring, or --redis', RED));
     process.exit(1);
   }
 
@@ -766,12 +769,32 @@ async function cmdRestart(entityArg, opts) {
 
   // Restart monitoring stack if --monitoring (or --all --monitoring)
   if (opts.monitoring) {
+    const MONITORING_DIR = '/opt/suitecrm-mcp-monitoring';
     process.stdout.write(`  ${c('monitoring', BOLD)} (Monitoring Stack)  restarting ... `);
     try {
-      await execFileAsync('systemctl', ['restart', 'suitecrm-mcp-monitoring.service']);
+      await execFileAsync('docker', ['compose', 'restart'], { cwd: MONITORING_DIR });
+      // Hot-reload alertmanager config without a full container restart
+      try {
+        await execFileAsync('curl', ['-sf', '-X', 'POST', 'http://localhost:9093/-/reload']);
+      } catch { /* non-fatal — alertmanager may not be running */ }
       console.log(c('OK', GREEN));
     } catch (e) {
       console.log(c('FAILED', RED));
+      const msg = (e.stderr || e.message || '').trim();
+      if (msg) console.log(`    ${c(msg, RED)}`);
+      anyBad = true;
+    }
+  }
+
+  // Restart Redis if --redis (or --all --redis)
+  if (opts.redis) {
+    process.stdout.write(`  ${c('redis', BOLD)} (Redis)  restarting ... `);
+    console.log(c('WARNING: all active sessions will be lost', YELLOW));
+    try {
+      await execFileAsync('systemctl', ['restart', 'redis-server.service']);
+      console.log(`  ${c('redis', BOLD)} (Redis)  ${c('OK', GREEN)}`);
+    } catch (e) {
+      console.log(`  ${c('redis', BOLD)} (Redis)  ${c('FAILED', RED)}`);
       const msg = (e.stderr || e.message || '').trim();
       if (msg) console.log(`    ${c(msg, RED)}`);
       anyBad = true;
@@ -1194,6 +1217,7 @@ program
   .argument('[entity]', 'Entity code to restart')
   .option('--all', 'Restart all gateway instances')
   .option('--monitoring', 'Restart the monitoring stack (Prometheus/Grafana/Loki)')
+  .option('--redis', 'Restart Redis (WARNING: terminates all active sessions)')
   .action(cmdRestart);
 
 program
