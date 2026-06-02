@@ -398,7 +398,7 @@ app.get('/auth/callback', loginLimiter, async (req, res) => {
       daysLeft = SESSION_TTL_DAYS;
       await setSession(apiKey, newSession);
       logger.info({ email }, 'session_created');
-      metricLogins.inc({ result: 'new' });
+      metricLogins.inc({ result: 'success' });
     }
 
     if (nonce) {
@@ -707,7 +707,7 @@ function copyEl(id,btn){
 
   } catch (err) {
     logger.error({ err: err.message }, 'callback_error');
-    metricLogins.inc({ result: 'error' });
+    metricLogins.inc({ result: 'failure' });
     res.status(500).send(`
       <html><body style="font-family:sans-serif;padding:40px">
         <h2>Something went wrong</h2>
