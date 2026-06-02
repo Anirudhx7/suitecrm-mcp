@@ -442,15 +442,15 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"success\"}[24h]))",
+          "expr": "sum(increase(suitecrm_mcp_auth_logins_total{result=\"success\"}[24h]))",
           "legendFormat": "success"
         },
         {
-          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"failure\"}[24h]))",
+          "expr": "sum(increase(suitecrm_mcp_auth_logins_total{result=\"failure\"}[24h]))",
           "legendFormat": "failure"
         },
         {
-          "expr": "sum(increase(suitecrm_auth_logins_total{result=\"reused\"}[24h]))",
+          "expr": "sum(increase(suitecrm_mcp_auth_logins_total{result=\"reused\"}[24h]))",
           "legendFormat": "reused"
         }
       ],
@@ -776,7 +776,7 @@
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "expr": "sum(increase(suitecrm_auth_logins_total[$__range]))",
+          "expr": "sum(increase(suitecrm_mcp_auth_logins_total[$__range]))",
           "legendFormat": "logins"
         }
       ],
@@ -815,7 +815,7 @@
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "expr": "suitecrm_auth_sessions_active",
+          "expr": "suitecrm_mcp_auth_sessions_active",
           "legendFormat": "sessions"
         }
       ],
@@ -870,7 +870,7 @@
       },
       "targets": [
         {
-          "expr": "suitecrm_auth_sessions_active",
+          "expr": "suitecrm_mcp_auth_sessions_active",
           "legendFormat": "sessions"
         }
       ],

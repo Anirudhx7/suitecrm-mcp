@@ -895,14 +895,21 @@ def install_redis():
         if "requirepass " not in content:
             content += f"\nrequirepass {redis_pass}\n"
             changed = True
-            
+        else:
+            # Update existing requirepass line to match the stored password
+            import re as _re
+            new_content = _re.sub(r'(?m)^requirepass .*$', f'requirepass {redis_pass}', content)
+            if new_content != content:
+                content = new_content
+                changed = True
+
         if "maxmemory-policy volatile-lru" not in content:
             if "maxmemory-policy allkeys-lru" in content:
                 content = content.replace("maxmemory-policy allkeys-lru", "maxmemory-policy volatile-lru")
             else:
                 content += "\nmaxmemory 256mb\nmaxmemory-policy volatile-lru\n"
             changed = True
-            
+
         if changed:
             orig_mode = Path(redis_conf).stat().st_mode & 0o777
             fd = os.open(redis_conf, os.O_WRONLY | os.O_TRUNC, orig_mode)
@@ -910,6 +917,12 @@ def install_redis():
                 f.write(content)
             run(["systemctl", "restart", "redis-server"])
             ok("Redis configured with persistence, maxmemory, and authentication")
+
+        # Always enforce the password at runtime in case the config was out of sync
+        if redis_pass:
+            import subprocess as _sp
+            _sp.run(["redis-cli", "config", "set", "requirepass", redis_pass],
+                    capture_output=True)
 
 def install_docker():
     if shutil.which("docker"):
@@ -1647,11 +1660,41 @@ def apply_update_hardening(codes, is_multi):
                     "SyslogIdentifier=",
                 )
                 changed = True
+            # Migrate stale ExecStart paths from old install location
+            if "/opt/suitecrm-mcp/index.mjs" in unit:
+                unit = unit.replace("/opt/suitecrm-mcp/index.mjs", f"{SERVER_DIR}/index.mjs")
+                changed = True
+            if "/opt/suitecrm-mcp/auth.mjs" in unit:
+                unit = unit.replace("/opt/suitecrm-mcp/auth.mjs", f"{SERVER_DIR}/auth.mjs")
+                changed = True
             if changed:
                 svc_file.write_text(unit)
                 ok(f"  [{code}] Patched unit with hardening directives")
             else:
                 ok(f"  [{code}] Unit: no changes needed")
+
+    # Migrate auth service ExecStart path if stale
+    auth_svc = Path(f"/etc/systemd/system/{AUTH_SVC_NAME}.service")
+    if auth_svc.exists():
+        unit = auth_svc.read_text()
+        if "/opt/suitecrm-mcp/auth.mjs" in unit:
+            unit = unit.replace("/opt/suitecrm-mcp/auth.mjs", f"{SERVER_DIR}/auth.mjs")
+            auth_svc.write_text(unit)
+            ok(f"  [auth] Migrated ExecStart path to {SERVER_DIR}/auth.mjs")
+
+    # Sync REDIS_URL in all env files with the stored redis_pass
+    pass_file = Path(ENV_DIR) / "redis_pass"
+    if pass_file.exists():
+        redis_pass = pass_file.read_text().strip()
+        correct_url = f"redis://:{redis_pass}@127.0.0.1:6379" if redis_pass else "redis://127.0.0.1:6379"
+        import re as _re
+        env_files = list(Path(ENV_DIR).glob("*.env"))
+        for env_file in env_files:
+            content = env_file.read_text()
+            new_content = _re.sub(r'REDIS_URL=redis://[^\n]*', f'REDIS_URL={correct_url}', content)
+            if new_content != content:
+                env_file.write_text(new_content)
+                ok(f"  [{env_file.name}] Updated REDIS_URL with Redis password")
 
     # Fix Redis eviction policy from allkeys-lru to volatile-lru
     redis_conf = Path("/etc/redis/redis.conf")

@@ -15,6 +15,14 @@ import { createInterface } from 'readline';
 
 const execFileAsync = promisify(execFile);
 
+// Load REDIS_URL from auth.env if not set in the shell environment
+if (!process.env.REDIS_URL) {
+  try {
+    const envFile = readFileSync('/etc/suitecrm-mcp/auth.env', 'utf8');
+    const match = envFile.match(/^REDIS_URL=(.+)$/m);
+    if (match) process.env.REDIS_URL = match[1].trim();
+  } catch { /* file missing — fall back to default below */ }
+}
 const REDIS_URL      = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const ENTITIES_FILE  = process.env.ENTITIES_FILE || '/etc/suitecrm-mcp/entities.json';
 const HOSTS_FILE     = process.env.CRM_HOSTS_FILE || '/etc/suitecrm-mcp/crm-hosts.json';
@@ -135,7 +143,10 @@ function findSub(profiles, { sub, email } = {}) {
 
 function ts(ms) {
   try {
-    return new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    const date = new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    const daysLeft = Math.ceil((ms - Date.now()) / 86400000);
+    const tag = daysLeft > 0 ? `${daysLeft}d left` : 'expired';
+    return `${date}  (${tag})`;
   } catch { return String(ms); }
 }
 
@@ -1121,7 +1132,7 @@ const program = new Command();
 program
   .name('mcp-admin')
   .description('SuiteCRM MCP Gateway admin tool')
-  .version('5.2.1');
+  .version('5.2.2');
 
 program
   .command('list')

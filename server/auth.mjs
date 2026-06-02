@@ -64,21 +64,21 @@ const metricsRegistry = new Registry();
 collectDefaultMetrics({ register: metricsRegistry });
 
 const metricLogins = new Counter({
-  name: 'suitecrm_auth_logins_total',
+  name: 'suitecrm_mcp_auth_logins_total',
   help: 'OAuth2 login completions',
   labelNames: ['result'],
   registers: [metricsRegistry],
 });
 
 const metricBridgeSessions = new Counter({
-  name: 'suitecrm_auth_bridge_sessions_total',
+  name: 'suitecrm_mcp_auth_bridge_sessions_total',
   help: 'Bridge session events',
   labelNames: ['event'],
   registers: [metricsRegistry],
 });
 
 new Gauge({
-  name: 'suitecrm_auth_sessions_active',
+  name: 'suitecrm_mcp_auth_sessions_active',
   help: 'Non-expired gateway sessions currently stored in Redis',
   registers: [metricsRegistry],
   async collect() {
