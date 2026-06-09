@@ -70,7 +70,7 @@ ENV_FILE           = "/etc/suitecrm-mcp/gateway.env"   # single-entity env
 ENTITIES_JSON      = "/etc/suitecrm-mcp/entities.json"  # runtime entity config for the server
 CRM_HOSTS_FILE     = "/etc/suitecrm-mcp/crm-hosts.json"  # SSH provisioning config
 # NOTE: user-profiles.json is no longer used. Profiles are stored in Redis
-# under the crm:profiles hash (key = SSO sub, value = JSON). Use mcp-admin to manage them.
+# under the crm:profiles hash (key = email, value = JSON). Use mcp-admin to manage them.
 DOMAIN_FILE        = "/etc/suitecrm-mcp/domain"
 AUTH_ENV_FILE      = "/etc/suitecrm-mcp/auth.env"
 AUTH_SVC_NAME      = "suitecrm-mcp-auth"
@@ -551,6 +551,8 @@ def write_entities_json(entities):
             entry["tls_skip"] = True
         if data.get("group"):
             entry["group"] = data["group"]
+        if data.get("v4_endpoint"):
+            entry["v4_endpoint"] = data["v4_endpoint"]
         out[code] = entry
 
     write_file(ENTITIES_JSON, json.dumps(out, indent=2), mode="640")
@@ -1281,13 +1283,21 @@ def install_server():
         if bridges_dst.exists():
             shutil.rmtree(bridges_dst)
         shutil.copytree(bridges_src, bridges_dst)
-    # Copy admin scripts (migrate_profiles, etc.)
+    # Copy admin scripts (migrate_profiles, find-suitecrm-config, etc.)
     scripts_src = script_dir() / "scripts"
     scripts_dst = Path(SERVER_DIR) / "scripts"
     if scripts_src.is_dir():
         if scripts_dst.exists():
             shutil.rmtree(scripts_dst)
         shutil.copytree(scripts_src, scripts_dst)
+    # Copy tools/ to SERVER_DIR/tools/ so admin scripts are available after the clone is removed
+    tools_src = script_dir() / "tools"
+    tools_dst = Path(SERVER_DIR) / "tools"
+    if tools_src.is_dir():
+        if tools_dst.exists():
+            shutil.rmtree(tools_dst)
+        shutil.copytree(tools_src, tools_dst)
+        run(["chmod", "750", str(tools_dst / "crm-provision-user.sh")])
     lock_file = Path(SERVER_DIR) / "package-lock.json"
     if not lock_file.exists():
         error(f"package-lock.json not found in {SERVER_DIR}. Run 'npm install' in the repo first to generate it.")

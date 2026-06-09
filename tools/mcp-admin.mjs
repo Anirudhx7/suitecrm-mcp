@@ -26,7 +26,7 @@ if (!process.env.REDIS_URL) {
 const REDIS_URL      = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const ENTITIES_FILE  = process.env.ENTITIES_FILE || '/etc/suitecrm-mcp/entities.json';
 const HOSTS_FILE     = process.env.CRM_HOSTS_FILE || '/etc/suitecrm-mcp/crm-hosts.json';
-const REPO_DIR       = '/opt/suitecrm-mcp';
+const REPO_DIR       = '/opt/suitecrm-mcp-server';
 const PROVISION_SH   = `${REPO_DIR}/tools/crm-provision-user.sh`;
 const FIND_CONFIG_SH = `${REPO_DIR}/scripts/find-suitecrm-config.sh`;
 
@@ -123,6 +123,27 @@ async function loadAllSessions() {
 
 async function deleteSession(token) {
   await redis.del(`auth:session:${token}`);
+}
+
+async function loadRateLimits(emailFilter) {
+  const results = [];
+  for await (const batch of scanKeys('rl:sse:*')) {
+    for (const key of batch) {
+      const email = key.slice('rl:sse:'.length);
+      if (emailFilter && !email.toLowerCase().includes(emailFilter.toLowerCase())) continue;
+      const [count, ttl] = await Promise.all([redis.get(key), redis.ttl(key)]);
+      results.push({ type: 'SSE', label: email, count: parseInt(count) || 0, ttl, max: 60 });
+    }
+  }
+  for await (const batch of scanKeys('rl:msg:*')) {
+    for (const key of batch) {
+      const sid = key.slice('rl:msg:'.length);
+      if (emailFilter) continue; // msg keys are session IDs, can't filter by email
+      const [count, ttl] = await Promise.all([redis.get(key), redis.ttl(key)]);
+      results.push({ type: 'MSG', label: sid.slice(0, 20) + '...', count: parseInt(count) || 0, ttl, max: 100 });
+    }
+  }
+  return results.sort((a, b) => b.count - a.count);
 }
 
 // ── profile lookup helper ─────────────────────────────────────────────────────
@@ -449,12 +470,15 @@ async function cmdTest(opts) {
     const email = p.email || '?';
     for (const [code, creds] of Object.entries(p.entities || {})) {
       if (opts.entity && code !== opts.entity) continue;
-      const endpoint = entities[code]?.endpoint;
+      const ent = entities[code];
+      // For dual v4+v8 setups the primary endpoint is v8 GraphQL; use v4_endpoint for the
+      // REST login test because crmLogin uses the v4 SuiteCRM REST protocol.
+      const endpoint = ent?.v4_endpoint || ent?.endpoint;
       if (!endpoint) {
         console.log(`  ${c(email, CYAN)}/${c(code, BOLD)}  ${c('no endpoint configured', YELLOW)}`);
         continue;
       }
-      const label = entities[code]?.label || code;
+      const label = ent?.label || code;
       process.stdout.write(`  ${c(email, CYAN)}/${c(code, BOLD)} (${label})  ... `);
       try {
         const result = await crmLogin(endpoint, creds.user, creds.pass, opts.verifyTls);
@@ -592,8 +616,15 @@ async function cmdSessions(opts) {
   const sessions = await loadAllSessions();
   const now      = nowMs();
 
-  const active  = Object.entries(sessions).filter(([, s]) => (s.expiresAt || 0) >  now);
-  const expired = Object.entries(sessions).filter(([, s]) => (s.expiresAt || 0) <= now);
+  let active  = Object.entries(sessions).filter(([, s]) => (s.expiresAt || 0) >  now);
+  let expired = Object.entries(sessions).filter(([, s]) => (s.expiresAt || 0) <= now);
+
+  if (opts.email) {
+    const needle = opts.email.toLowerCase();
+    const match  = ([, s]) => (s.email || '').toLowerCase().includes(needle);
+    active  = active.filter(match);
+    expired = expired.filter(match);
+  }
 
   if (opts.purgeExpired && expired.length) {
     for (const [tok] of expired) await deleteSession(tok);
@@ -604,14 +635,64 @@ async function cmdSessions(opts) {
     ? active
     : [...active, ...expired].sort((a, b) => (b[1].expiresAt || 0) - (a[1].expiresAt || 0));
 
-  if (!display.length) { console.log(c('No sessions.', DIM)); await disconnect(); return; }
+  if (!display.length) { console.log(c('No sessions.', DIM)); }
+  else {
+    console.log(c(`${active.length} active, ${opts.purgeExpired ? 0 : expired.length} expired`, BOLD));
+    console.log();
 
-  console.log(c(`${active.length} active, ${opts.purgeExpired ? 0 : expired.length} expired\n`, BOLD));
-  for (const [tok, s] of display) {
-    const isExp  = (s.expiresAt || 0) <= now;
-    const status = isExp ? c('expired', RED) : c('active', GREEN);
-    console.log(`  ${tok.slice(0, 20)}...  ${c(s.email || '?', CYAN)}  ${status}  expires ${ts(s.expiresAt || 0)}`);
+    // Build table rows first to compute column widths
+    const rows = display.map(([tok, s]) => {
+      const isExp   = (s.expiresAt || 0) <= now;
+      const expDate = ts(s.expiresAt || 0);
+      return {
+        tok:    tok.slice(0, 20) + '...',
+        email:  s.email || '?',
+        isExp,
+        expDate,
+      };
+    });
+
+    const colWidths = {
+      tok:     Math.max(...rows.map(r => r.tok.length)),
+      email:   Math.max(...rows.map(r => r.email.length)),
+      expDate: Math.max(...rows.map(r => r.expDate.length)),
+    };
+
+    for (const r of rows) {
+      const statusCol = r.isExp ? c('expired'.padEnd(7), RED) : c('active '.padEnd(7), GREEN);
+      console.log(
+        `  ${c(r.tok.padEnd(colWidths.tok), DIM)}` +
+        `  ${c(r.email.padEnd(colWidths.email), CYAN)}` +
+        `  ${statusCol}` +
+        `  ${r.expDate}`
+      );
+    }
   }
+
+  if (opts.rateLimits) {
+    const rls = await loadRateLimits(opts.email);
+    console.log();
+    console.log(c('Rate limits:', BOLD));
+    if (!rls.length) {
+      console.log(c('  (none active — RL keys expire after 60s of inactivity)', DIM));
+    } else {
+      const typeW  = Math.max(...rls.map(r => (r.type  || '').length));
+      const labelW = Math.max(...rls.map(r => (r.label || '').length));
+      for (const r of rls) {
+        const pct    = r.count / r.max;
+        const barCol = pct >= 0.8 ? RED : pct >= 0.5 ? YELLOW : GREEN;
+        const bar    = `${r.count}/${r.max}`;
+        const reset  = r.ttl > 0 ? `resets in ${r.ttl}s` : 'expiring';
+        console.log(
+          `  ${c(r.type.padEnd(typeW), BOLD)}` +
+          `  ${r.label.padEnd(labelW)}` +
+          `  ${c(bar.padStart(7), barCol)}` +
+          `  ${c('(' + reset + ')', DIM)}`
+        );
+      }
+    }
+  }
+
   await disconnect();
 }
 
@@ -1008,7 +1089,7 @@ async function cmdSetupCrmHost(entityArg) {
 
   for (const [label, path] of [['crm-provision-user.sh', PROVISION_SH], ['find-suitecrm-config.sh', FIND_CONFIG_SH]]) {
     if (!existsSync(path)) {
-      console.error(c(`${label} not found at ${path} — clone repo to /opt/suitecrm-mcp`, RED));
+      console.error(c(`${label} not found at ${path} — run install.py to populate ${REPO_DIR}`, RED));
       process.exit(1);
     }
   }
@@ -1132,7 +1213,7 @@ const program = new Command();
 program
   .name('mcp-admin')
   .description('SuiteCRM MCP Gateway admin tool')
-  .version('5.2.2');
+  .version('5.3.0');
 
 program
   .command('list')
@@ -1202,7 +1283,9 @@ program
 program
   .command('sessions')
   .description('List active gateway sessions')
-  .option('--purge-expired', 'Delete expired sessions from Redis')
+  .option('--email <email>',   'Filter by user email')
+  .option('--purge-expired',   'Delete expired sessions from Redis')
+  .option('--rate-limits',     'Show Redis rate limit counters')
   .action(cmdSessions);
 
 program

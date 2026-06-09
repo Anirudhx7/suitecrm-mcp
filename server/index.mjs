@@ -160,24 +160,24 @@ new Gauge({
       const allProfiles = await redis.hgetall('crm:profiles') || {};
 
       const now = Date.now();
-      const activeSubs = new Set();
+      const activeEmails = new Set();
 
       for (const data of sessionData) {
         if (data) {
           try {
             const session = JSON.parse(data);
             if (session.expiresAt > now) {
-              activeSubs.add(session.sub);
+              activeEmails.add(session.email);
             }
           } catch { /* skip corrupt session */ }
         }
       }
 
       let count = 0;
-      for (const [sub, profileRaw] of Object.entries(allProfiles)) {
+      for (const [email, profileRaw] of Object.entries(allProfiles)) {
         try {
           const profile = JSON.parse(profileRaw);
-          if (profile?.entities?.[CODE] && activeSubs.has(sub)) {
+          if (profile?.entities?.[CODE] && activeEmails.has(email)) {
             count++;
           }
         } catch { /* skip corrupt profile */ }
@@ -195,7 +195,7 @@ const transports  = new Map(); // sid -> SSEServerTransport
 const connCreds   = new Map(); // sid -> { user, pass }
 const connLoggers = new Map(); // sid -> pino child logger
 const connAuth    = new Map(); // sid -> { sub, email }
-const subSids     = new Map(); // sub -> Set<sid>  (all live connections per user)
+const emailSids   = new Map(); // email -> Set<sid>  (all live connections per user)
 
 // ---------------------------------------------------------------------------
 // Redis-backed state helpers (replaces in-memory Maps)
@@ -210,58 +210,58 @@ async function getAuthSession(token) {
 }
 
 // CRM sessions (v4 sessionId + v8 token per user:entity)
-async function getCrmSession(sub) {
+async function getCrmSession(email) {
   try {
-    const raw = await redis.get(`crm:session:${sub}:${CODE}`);
+    const raw = await redis.get(`crm:session:${email}:${CODE}`);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
-async function setCrmSession(sub, sessions) {
-  await redis.setex(`crm:session:${sub}:${CODE}`, CRM_SESSION_TTL_SEC, JSON.stringify(sessions));
+async function setCrmSession(email, sessions) {
+  await redis.setex(`crm:session:${email}:${CODE}`, CRM_SESSION_TTL_SEC, JSON.stringify(sessions));
 }
-async function delCrmSession(sub) {
-  await redis.del(`crm:session:${sub}:${CODE}`);
+async function delCrmSession(email) {
+  await redis.del(`crm:session:${email}:${CODE}`);
 }
 
-// Connection maps (sub <-> sid)
-async function getSubBySid(sid)  { return redis.get(`crm:sid2sub:${sid}`);  }
-async function getSidBySub(sub)  { return redis.get(`crm:sub2sid:${sub}`);  }
-async function setSubSidMapping(sub, sid) {
+// Connection maps (email <-> sid)
+async function getEmailBySid(sid)    { return redis.get(`crm:sid2email:${sid}`);  }
+async function getSidByEmail(email)  { return redis.get(`crm:email2sid:${email}`);  }
+async function setEmailSidMapping(email, sid) {
   await Promise.all([
-    redis.setex(`crm:sub2sid:${sub}`, 86400, sid),
-    redis.setex(`crm:sid2sub:${sid}`, 3600, sub),  // 1h — timing-race zombies expire quickly
+    redis.setex(`crm:email2sid:${email}`, 86400, sid),
+    redis.setex(`crm:sid2email:${sid}`, 3600, email),  // 1h — timing-race zombies expire quickly
   ]);
 }
-async function delSubSidMapping(sub, sid) {
-  // Only remove the sid→sub reverse lookup; sub→sid already points to the newest sid
-  await redis.del(`crm:sid2sub:${sid}`);
+async function delEmailSidMapping(email, sid) {
+  // Only remove the sid→email reverse lookup; email→sid already points to the newest sid
+  await redis.del(`crm:sid2email:${sid}`);
 }
 
-// Startup cleanup: delete crm:sid2sub:* entries that are no longer the authoritative sid for their sub.
+// Startup cleanup: delete crm:sid2email:* entries that are no longer the authoritative sid for their email.
 // This eliminates zombies left by the previous process run (or a reconnect storm timing race).
 async function cleanupOrphanSidMappings() {
   try {
-    // Collect all valid (sub → current_sid) pairs from the authoritative sub2sid keys
-    const sub2sidKeys = [];
+    // Collect all valid (email → current_sid) pairs from the authoritative email2sid keys
+    const email2sidKeys = [];
     let cursor = '0';
     do {
-      const [next, batch] = await redis.scan(cursor, 'MATCH', 'crm:sub2sid:*', 'COUNT', 100);
-      sub2sidKeys.push(...batch); cursor = next;
+      const [next, batch] = await redis.scan(cursor, 'MATCH', 'crm:email2sid:*', 'COUNT', 100);
+      email2sidKeys.push(...batch); cursor = next;
     } while (cursor !== '0');
     const validSids = new Set();
-    if (sub2sidKeys.length) {
-      const vals = await redis.mget(...sub2sidKeys);
+    if (email2sidKeys.length) {
+      const vals = await redis.mget(...email2sidKeys);
       for (const v of vals) { if (v) validSids.add(v); }
     }
 
-    // Scan all sid2sub entries and delete any whose sid is not in validSids
-    const sid2subKeys = [];
+    // Scan all sid2email entries and delete any whose sid is not in validSids
+    const sid2emailKeys = [];
     cursor = '0';
     do {
-      const [next, batch] = await redis.scan(cursor, 'MATCH', 'crm:sid2sub:*', 'COUNT', 100);
-      sid2subKeys.push(...batch); cursor = next;
+      const [next, batch] = await redis.scan(cursor, 'MATCH', 'crm:sid2email:*', 'COUNT', 100);
+      sid2emailKeys.push(...batch); cursor = next;
     } while (cursor !== '0');
-    const orphans = sid2subKeys.filter(k => !validSids.has(k.slice('crm:sid2sub:'.length)));
+    const orphans = sid2emailKeys.filter(k => !validSids.has(k.slice('crm:sid2email:'.length)));
     if (orphans.length) {
       await redis.del(...orphans);
       logger.info({ count: orphans.length }, 'startup_orphan_sid_cleanup');
@@ -270,9 +270,9 @@ async function cleanupOrphanSidMappings() {
 }
 
 // User profiles (was user-profiles.json)
-async function getProfile(sub) {
+async function getProfile(email) {
   try {
-    const raw = await redis.hget('crm:profiles', sub);
+    const raw = await redis.hget('crm:profiles', email);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
@@ -389,7 +389,7 @@ function deriveUsername(email) {
   return (email || '').split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 60);
 }
 
-async function autoProvisionUser(sub, email) {
+async function autoProvisionUser(email) {
   const hosts = loadCrmHosts();
   if (!hosts?.[CODE]) throw new Error(`No SSH config for entity ${CODE} in crm-hosts.json`);
   const host = hosts[CODE];
@@ -413,15 +413,15 @@ async function autoProvisionUser(sub, email) {
   });
   if (stderr) logger.warn({ entity: CODE, crm_user: username, stderr: stderr.slice(0, 200) }, 'auto_provision_stderr');
   logger.info({ entity: CODE, crm_user: username }, 'auto_provision_success');
-  const lockKey = `crm:provision-lock:${sub}`;
+  const lockKey = `crm:provision-lock:${email}`;
   const locked = await redis.set(lockKey, '1', 'NX', 'EX', 30);
   if (!locked) throw new Error('Provision already in progress for this user');
   try {
-    const raw = await redis.hget('crm:profiles', sub);
+    const raw = await redis.hget('crm:profiles', email);
     const profile = raw ? JSON.parse(raw) : { email, entities: {} };
     if (!profile.entities) profile.entities = {};
     profile.entities[CODE] = { user: username, pass: password };
-    await redis.hset('crm:profiles', sub, JSON.stringify(profile));
+    await redis.hset('crm:profiles', email, JSON.stringify(profile));
   } finally {
     await redis.del(lockKey);
   }
@@ -454,12 +454,12 @@ async function jwtMiddleware(req, res, next) {
 
 async function profileMiddleware(req, res, next) {
   try {
-    let profile = await getProfile(req.auth.sub);
+    let profile = await getProfile(req.auth.email);
     if (!profile) {
       // Auto-create bare profile; entity credentials are provisioned by groupAccessMiddleware
       profile = { email: req.auth.email, entities: {} };
-      await redis.hset('crm:profiles', req.auth.sub, JSON.stringify(profile));
-      logger.info({ sub: req.auth.sub, email: req.auth.email }, 'profile_auto_created');
+      await redis.hset('crm:profiles', req.auth.email, JSON.stringify(profile));
+      logger.info({ email: req.auth.email }, 'profile_auto_created');
     }
     req.crmProfile = profile;
     return next();
@@ -475,8 +475,8 @@ async function groupAccessMiddleware(req, res, next) {
     }
     const creds = req.crmProfile?.entities?.[CODE];
     if (!creds?.user || !creds?.pass) {
-      logger.info({ entity: CODE, email: req.auth.email, sub: req.auth.sub }, 'auto_provision_triggered');
-      const newCreds = await autoProvisionUser(req.auth.sub, req.auth.email);
+      logger.info({ entity: CODE, email: req.auth.email }, 'auto_provision_triggered');
+      const newCreds = await autoProvisionUser(req.auth.email);
       req.crmProfile.entities[CODE] = newCreds;
       req.crmCreds = newCreds;
       return next();
@@ -498,13 +498,13 @@ async function groupAccessMiddleware(req, res, next) {
 // ---------------------------------------------------------------------------
 // Session Lifecycle
 // ---------------------------------------------------------------------------
-const crmLoginInflight = new Map(); // sub -> Promise — prevents parallel logins creating duplicate SuiteCRM tokens
+const crmLoginInflight = new Map(); // email -> Promise — prevents parallel logins creating duplicate SuiteCRM tokens
 
 async function ensureCrmSession(sid) {
   // connAuth is authoritative for live connections; Redis is fallback for edge cases
-  const sub = connAuth.get(sid)?.sub ?? await getSubBySid(sid);
-  if (!sub) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} — connection may have been evicted`);
-  const cached = await getCrmSession(sub);
+  const email = connAuth.get(sid)?.email ?? await getEmailBySid(sid);
+  if (!email) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} — connection may have been evicted`);
+  const cached = await getCrmSession(email);
   if (cached) {
     // Proactively refresh the v8 access token if it expires within 10 minutes,
     // so we never create a new SuiteCRM OAuth token for an already-authenticated user.
@@ -512,22 +512,22 @@ async function ensureCrmSession(sid) {
     if (v8 && typeof v8 === 'object' && v8.refreshToken && v8.expiresAt) {
       const REFRESH_BUFFER_MS = 10 * 60 * 1000;
       if (v8.expiresAt - Date.now() < REFRESH_BUFFER_MS) {
-        if (crmLoginInflight.has(sub)) return crmLoginInflight.get(sub);
+        if (crmLoginInflight.has(email)) return crmLoginInflight.get(email);
         const refreshPromise = v8g.refreshAccess(v8)
           .then(async refreshed => {
             cached.v8 = refreshed;
-            await setCrmSession(sub, cached);
+            await setCrmSession(email, cached);
             logger.info('v8_token_refreshed');
-            return getCrmSession(sub);
+            return getCrmSession(email);
           })
           .catch(async err => {
             logger.warn({ err: err.message }, 'v8_token_refresh_failed');
             // Refresh failed — delete so next call does a full re-login
-            await delCrmSession(sub);
+            await delCrmSession(email);
             throw err;
           })
-          .finally(() => crmLoginInflight.delete(sub));
-        crmLoginInflight.set(sub, refreshPromise);
+          .finally(() => crmLoginInflight.delete(email));
+        crmLoginInflight.set(email, refreshPromise);
         return refreshPromise;
       }
     }
@@ -535,20 +535,20 @@ async function ensureCrmSession(sid) {
   }
 
   // Deduplicate: if a login is already in flight for this user, piggyback on it
-  if (crmLoginInflight.has(sub)) return crmLoginInflight.get(sub);
+  if (crmLoginInflight.has(email)) return crmLoginInflight.get(email);
 
   const creds = connCreds.get(sid);
   if (!creds) throw new Error('No credentials for session');
 
   const promise = crm.login(creds.user, creds.pass)
     .then(async sessions => {
-      await setCrmSession(sub, sessions);
+      await setCrmSession(email, sessions);
       metricCrmSessionsCached.inc({ entity: PREFIX });
       return sessions;
     })
-    .finally(() => crmLoginInflight.delete(sub));
+    .finally(() => crmLoginInflight.delete(email));
 
-  crmLoginInflight.set(sub, promise);
+  crmLoginInflight.set(email, promise);
   return promise;
 }
 
@@ -565,26 +565,26 @@ async function resilientCall(sid, method, params) {
     const isExpired = err.code === 11 || (err.message && err.message.toLowerCase().includes('expired'));
     if (isExpired) {
       metricSessionRenewals.inc({ entity: PREFIX });
-      const sub = connAuth.get(sid)?.sub ?? await getSubBySid(sid);
-      if (!sub) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} — connection may have been evicted`);
+      const email = connAuth.get(sid)?.email ?? await getEmailBySid(sid);
+      if (!email) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} — connection may have been evicted`);
       // Try refreshing the v8 access token before falling back to a full re-login
       // (which would create a new SuiteCRM OAuth token entry)
-      const cached = await getCrmSession(sub);
+      const cached = await getCrmSession(email);
       if (cached?.v8?.refreshToken) {
         try {
           let refreshed;
-          if (crmLoginInflight.has(sub)) {
-            refreshed = await crmLoginInflight.get(sub);
+          if (crmLoginInflight.has(email)) {
+            refreshed = await crmLoginInflight.get(email);
           } else {
             const p = v8g.refreshAccess(cached.v8)
               .then(async r => {
                 const updated = { ...cached, v8: r };
-                await setCrmSession(sub, updated);
+                await setCrmSession(email, updated);
                 logger.info('v8_token_refreshed_on_expiry');
-                return getCrmSession(sub);
+                return getCrmSession(email);
               })
-              .finally(() => crmLoginInflight.delete(sub));
-            crmLoginInflight.set(sub, p);
+              .finally(() => crmLoginInflight.delete(email));
+            crmLoginInflight.set(email, p);
             refreshed = await p;
           }
           if (refreshed) {
@@ -594,10 +594,10 @@ async function resilientCall(sid, method, params) {
           }
         } catch (refreshErr) {
           logger.warn({ err: refreshErr.message }, 'v8_token_refresh_failed_fallback_relogin');
-          crmLoginInflight.delete(sub);
+          crmLoginInflight.delete(email);
         }
       }
-      await delCrmSession(sub);
+      await delCrmSession(email);
       try {
         sessions = await ensureCrmSession(sid);
         const result = await crm[method](sessions, params);
@@ -650,7 +650,7 @@ async function logCall(sid,args)           { if(!args.name||!args.date_start)thr
 async function createTask(sid,args)        { if(!args.name)throw new McpError(ErrorCode.InvalidParams,'name required'); if(args.contact_id)validateId(args.contact_id); if(args.parent_id)validateId(args.parent_id); if(args.parent_type)validateModule(args.parent_type); return resilientCall(sid,'createTask',args); }
 async function createLinkedNote(sid,args)  { if(!args.name)throw new McpError(ErrorCode.InvalidParams,'name required'); if(args.parent_id)validateId(args.parent_id); if(args.contact_id)validateId(args.contact_id); if(args.parent_type)validateModule(args.parent_type); return resilientCall(sid,'createNote',args); }
 async function getRecordActivities(sid,args){ validateModule(args.module); validateId(args.id); args.max_results=coerceNumeric(args.max_results,10,1,MAX_RESULTS_CAP); if(args.types!==undefined){const v=['calls','meetings','tasks','notes'];const f=(args.types||[]).filter(t=>v.includes(t));if(f.length===0)throw new McpError(ErrorCode.InvalidParams,`types must include one of: ${v.join(', ')}`);args.types=f;} return resilientCall(sid,'getRecordActivities',args); }
-async function serverInfo(sid)             { const creds=connCreds.get(sid)||{}; const sessions=await ensureCrmSession(sid).catch(()=>({})); const sub=connAuth.get(sid)?.sub??await getSubBySid(sid)??sid; return { prefix:PREFIX, port:PORT, entity:CODE, endpoint:ENDPOINT, api_strategy:API_STRATEGY==='8'?'Modern (v8 + v4 Fallback)':'Legacy (v4.1)', crm_user:creds.user||'?', auth:'gateway-session', required_group:REQUIRED_GROUP, v8_session:!!sessions.v8, v4_session:!!sessions.v4, session_active:!!(await getCrmSession(sub)), active_connections:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), persistence:'redis' }; }
+async function serverInfo(sid)             { const creds=connCreds.get(sid)||{}; const sessions=await ensureCrmSession(sid).catch(()=>({})); const email=connAuth.get(sid)?.email??await getEmailBySid(sid)??sid; return { prefix:PREFIX, port:PORT, entity:CODE, endpoint:ENDPOINT, api_strategy:API_STRATEGY==='8'?'Modern (v8 + v4 Fallback)':'Legacy (v4.1)', crm_user:creds.user||'?', auth:'gateway-session', required_group:REQUIRED_GROUP, v8_session:!!sessions.v8, v4_session:!!sessions.v4, session_active:!!(await getCrmSession(email)), active_connections:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), persistence:'redis' }; }
 
 // ---------------------------------------------------------------------------
 // Dry-run handler — returns a preview object without touching the CRM
@@ -699,7 +699,7 @@ const TOOLS = [
   { name:`${PREFIX}_get`, description:'Get a single record by UUID', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'array',items:{type:'string'}}}}},
   { name:`${PREFIX}_create`, description:'Create a new record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','fields'],properties:{module:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_update`, description:'Update an existing record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id','fields'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}},dry_run:{type:'boolean'}}}},
-  { name:`${PREFIX}_delete`, description:'Soft-delete a record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},dry_run:{type:'boolean'}}}},
+//  { name:`${PREFIX}_delete`, description:'Soft-delete a record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_count`, description:'Count records matching an optional SQL WHERE clause', inputSchema:{type:'object',required:['module'],properties:{module:{type:'string'},query:{type:'string'}}}},
   { name:`${PREFIX}_get_relationships`, description:'Get related records via a named link field', inputSchema:{type:'object',required:['module','id','link_field'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_fields:{type:'array',items:{type:'string'}},max_results:{type:'number'},offset:{type:'number'}}}},
   { name:`${PREFIX}_link_records`, description:'Create a relationship between records. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id','link_field','related_ids'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_ids:{type:'array',items:{type:'string'}},dry_run:{type:'boolean'}}}},
@@ -708,7 +708,7 @@ const TOOLS = [
   { name:`${PREFIX}_list_modules`, description:'List all available CRM modules', inputSchema:{type:'object',properties:{}}},
   { name:`${PREFIX}_server_info`, description:'Get server status, API strategy, persistence info', inputSchema:{type:'object',properties:{}}},
   { name:`${PREFIX}_get_many`, description:'Fetch multiple records by ID list in one call', inputSchema:{type:'object',required:['module','ids'],properties:{module:{type:'string'},ids:{type:'array',items:{type:'string'},maxItems:100},fields:{type:'array',items:{type:'string'}}}}},
-  { name:`${PREFIX}_bulk_upsert`, description:'Create or update multiple records. Include "id" in fields to update, omit to create. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','records'],properties:{module:{type:'string'},records:{type:'array',items:{type:'object',additionalProperties:{type:'string'}},maxItems:100},dry_run:{type:'boolean'}}}},
+//  { name:`${PREFIX}_bulk_upsert`, description:'Create or update multiple records. Include "id" in fields to update, omit to create. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','records'],properties:{module:{type:'string'},records:{type:'array',items:{type:'object',additionalProperties:{type:'string'}},maxItems:100},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_get_dropdown_values`, description:'List dropdown names or get key→label values for a specific dropdown', inputSchema:{type:'object',properties:{dropdown_name:{type:'string'}}}},
   { name:`${PREFIX}_get_recent`, description:'Get recently viewed records for the current user', inputSchema:{type:'object',properties:{modules:{type:'array',items:{type:'string'}},max_results:{type:'number'}}}},
   { name:`${PREFIX}_get_note_attachment`, description:'Download a file attachment from a Notes record', inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'}}}},
@@ -786,7 +786,7 @@ function createMcpServer(sid) {
       else if (name===`${PREFIX}_get`)                   result=await getRecord(sid,args);
       else if (name===`${PREFIX}_create`)                result=await createRecord(sid,args);
       else if (name===`${PREFIX}_update`)                result=await updateRecord(sid,args);
-      else if (name===`${PREFIX}_delete`)                result=await deleteRecord(sid,args);
+      else if (name===`${PREFIX}_delete`)                throw new McpError(ErrorCode.MethodNotFound, `Tool "${name}" is disabled`); 
       else if (name===`${PREFIX}_count`)                 result=await countRecords(sid,args);
       else if (name===`${PREFIX}_get_relationships`)     result=await getRelationships(sid,args);
       else if (name===`${PREFIX}_link_records`)          result=await linkRecords(sid,args);
@@ -795,7 +795,7 @@ function createMcpServer(sid) {
       else if (name===`${PREFIX}_list_modules`)          result=await listModules(sid);
       else if (name===`${PREFIX}_server_info`)           result=await serverInfo(sid);
       else if (name===`${PREFIX}_get_many`)              result=await getMany(sid,args);
-      else if (name===`${PREFIX}_bulk_upsert`)           result=await bulkUpsert(sid,args);
+      else if (name===`${PREFIX}_bulk_upsert`)           throw new McpError(ErrorCode.MethodNotFound, `Tool "${name}" is disabled`);
       else if (name===`${PREFIX}_get_dropdown_values`)   result=await getDropdownValues(sid,args);
       else if (name===`${PREFIX}_get_recent`)            result=await getRecent(sid,args);
       else if (name===`${PREFIX}_get_note_attachment`)   result=await getNoteAttachment(sid,args);
@@ -822,7 +822,7 @@ function createMcpServer(sid) {
 // Rate Limiters (Redis-backed for shared global limits)
 // ---------------------------------------------------------------------------
 const redisStore = (pfx) => new RedisStore({ sendCommand: (...args) => redis.call(...args), prefix:pfx });
-const sseRL = rateLimit({ windowMs:60000, max:60, standardHeaders:true, legacyHeaders:false, message:{error:'Too many connection attempts - try again shortly'}, store:redisStore('rl:sse:'), keyGenerator:async(req)=>{ const token=req.headers.authorization?.startsWith('Bearer ')?req.headers.authorization.slice(7).trim():''; if(token){ const session=await getAuthSession(token); if(session?.sub) return session.sub; return token; } return ipKeyGenerator(req); }, handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'sse'}); logger.warn({route:'sse'},'rate_limit_hit'); res.status(opts.statusCode).json(opts.message); } });
+const sseRL = rateLimit({ windowMs:60000, max:60, standardHeaders:true, legacyHeaders:false, message:{error:'Too many connection attempts - try again shortly'}, store:redisStore('rl:sse:'), keyGenerator:async(req)=>{ const token=req.headers.authorization?.startsWith('Bearer ')?req.headers.authorization.slice(7).trim():''; if(token){ const session=await getAuthSession(token); if(session?.email) return session.email; return token; } return ipKeyGenerator(req); }, handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'sse'}); logger.warn({route:'sse'},'rate_limit_hit'); res.status(opts.statusCode).json(opts.message); } });
 const messagesRL = rateLimit({ windowMs:60000, max:100, standardHeaders:true, legacyHeaders:false, message:{error:'Too many tool calls - slow down'}, store:redisStore('rl:msg:'), keyGenerator:(req)=>req.query.sessionId||ipKeyGenerator(req), handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'messages'}); logger.warn({route:'messages'},'rate_limit_hit'); res.status(opts.statusCode).json(opts.message); } });
 const deepHealthRL = rateLimit({ windowMs:60000, max:10, standardHeaders:true, legacyHeaders:false, message:{error:'Too many health check requests'}, handler:(req,res,next,opts)=>{ metricRateLimited.inc({entity:PREFIX,route:'health_deep'}); res.status(opts.statusCode).json(opts.message); } });
 const healthRL = rateLimit({ windowMs:60000, max:120, standardHeaders:true, legacyHeaders:false, message:{error:'Too many health check requests'}, handler:(req,res,next,opts)=>{ res.status(opts.statusCode).json(opts.message); } });
@@ -854,25 +854,17 @@ app.get('/health/deep', deepHealthRL, async (_req,res) => {
   checks.sessions={status:'ok',active:transports.size};
   if (API_STRATEGY === '8') {
     const v8Start = Date.now();
-    const anySid = connAuth.size > 0 ? connAuth.keys().next().value : null;
-    if (anySid) {
-      try {
-        const session = await ensureCrmSession(anySid);
-        const token = session?.v8?.token;
-        const expiresAt = session?.v8?.expiresAt;
-        if (!token) throw new Error('No v8 access token in session');
-        if (expiresAt && expiresAt < Date.now()) throw new Error('v8 access token expired');
-        // crm.v8Healthy is set by the hybrid bridge on real tool calls — more accurate than a
-        // raw GraphQL probe (some SuiteCRM versions enforce CSRF on the GraphQL endpoint).
-        if (crm.v8Healthy === false) {
-          checks.v8 = { status: 'error', message: 'v8 auth ok but API calls failing — CSRF or permission issue on CRM' };
-          if (checks.v4?.status !== 'ok' && status === 'healthy') status = 'degraded';
-        } else {
-          checks.v8 = { status: 'ok', latency_ms: Date.now() - v8Start, ...(crm.v8Healthy === null ? { note: 'auth_only — no tool calls yet' } : {}) };
-        }
-      } catch(e) {
-        checks.v8 = { status: 'error', message: e.message.slice(0, 300) };
+    let v8Session = null;
+    for (const [, auth] of connAuth.entries()) {
+      const s = auth.email ? await getCrmSession(auth.email).catch(() => null) : null;
+      if (s?.v8?.token && (!s.v8.expiresAt || s.v8.expiresAt > Date.now())) { v8Session = s; break; }
+    }
+    if (v8Session) {
+      if (crm.v8Healthy === false) {
+        checks.v8 = { status: 'error', message: 'v8 auth ok but API calls failing — CSRF or permission issue on CRM' };
         if (checks.v4?.status !== 'ok' && status === 'healthy') status = 'degraded';
+      } else {
+        checks.v8 = { status: 'ok', latency_ms: Date.now() - v8Start, ...(crm.v8Healthy === null ? { note: 'auth_only — no tool calls yet' } : {}) };
       }
     } else {
       checks.v8 = { status: 'unknown' };
@@ -898,12 +890,12 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   // The MCP client immediately POSTs initialize to /messages after the SSE stream opens.
   // If transports.set is deferred until after Redis awaits (~20-50ms), those POSTs return
   // 404 → client drops the SSE and reconnects → eviction death-spiral.
-  const prevSids = subSids.get(req.auth.sub) ?? new Set();
-  subSids.set(req.auth.sub, new Set([sid]));
+  const prevSids = emailSids.get(req.auth.email) ?? new Set();
+  emailSids.set(req.auth.email, new Set([sid]));
   connCreds.set(sid,req.crmCreds);
   connAuth.set(sid,{sub:req.auth.sub,email:req.auth.email});
   transports.set(sid,transport);
-  const connLogger=logger.child({sub:req.auth.sub,email:req.auth.email,sessionId:sid});
+  const connLogger=logger.child({email:req.auth.email,sessionId:sid});
   connLoggers.set(sid,connLogger);
 
   // Close handler must also be registered synchronously so it fires even if we are
@@ -911,19 +903,19 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   res.on('close',async()=>{
     connLogger.info('sse_disconnected');
     transports.delete(sid); connCreds.delete(sid); connLoggers.delete(sid); connAuth.delete(sid);
-    const sids=subSids.get(req.auth.sub); if(sids){sids.delete(sid); if(sids.size===0)subSids.delete(req.auth.sub);}
-    try { await delSubSidMapping(req.auth.sub,sid); } catch(err) { connLogger.error({err:err.message},'sse_close_mapping_delete_failed'); }
+    const sids=emailSids.get(req.auth.email); if(sids){sids.delete(sid); if(sids.size===0)emailSids.delete(req.auth.email);}
+    try { await delEmailSidMapping(req.auth.email,sid); } catch(err) { connLogger.error({err:err.message},'sse_close_mapping_delete_failed'); }
     metricActiveConnections.set({entity:PREFIX},transports.size);
   });
 
   // Evict prior connections (async Redis ops happen here)
-  // Post-restart recovery: subSids was empty, but Redis may still hold the last known sid.
-  const lastRedisSid = await getSidBySub(req.auth.sub);
+  // Post-restart recovery: emailSids was empty, but Redis may still hold the last known sid.
+  const lastRedisSid = await getSidByEmail(req.auth.email);
   if (lastRedisSid && !prevSids.has(lastRedisSid)) prevSids.add(lastRedisSid);
 
   const staleRedisDeletes = [];
   for (const prevSid of prevSids) {
-    staleRedisDeletes.push(redis.del(`crm:sid2sub:${prevSid}`).catch(() => {}));
+    staleRedisDeletes.push(redis.del(`crm:sid2email:${prevSid}`).catch(() => {}));
     if (transports.has(prevSid)) {
       connLoggers.get(prevSid)?.info('sse_evicted_by_reconnect');
       transports.get(prevSid).close?.();
@@ -933,22 +925,22 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   await Promise.all(staleRedisDeletes);
 
   // If a concurrent reconnect evicted us during the async phase above, abort — the newer
-  // connection already owns this user's slot. Writing sub2sid now would overwrite theirs.
+  // connection already owns this user's slot. Writing email2sid now would overwrite theirs.
   if (!transports.has(sid)) {
     connLogger.info('sse_aborted_evicted_during_setup');
     return;
   }
 
-  await setSubSidMapping(req.auth.sub, sid);
+  await setEmailSidMapping(req.auth.email, sid);
 
   // Post-write cleanup: remove zombie sid2sub entries for this user from previous process runs.
   (async () => {
     try {
       const allKeys = []; let c = '0';
-      do { const [next, batch] = await redis.scan(c, 'MATCH', 'crm:sid2sub:*', 'COUNT', 100); allKeys.push(...batch); c = next; } while (c !== '0');
+      do { const [next, batch] = await redis.scan(c, 'MATCH', 'crm:sid2email:*', 'COUNT', 100); allKeys.push(...batch); c = next; } while (c !== '0');
       if (!allKeys.length) return;
       const vals = await redis.mget(...allKeys);
-      const orphans = allKeys.filter((k, i) => k !== `crm:sid2sub:${sid}` && vals[i] === req.auth.sub);
+      const orphans = allKeys.filter((k, i) => k !== `crm:sid2email:${sid}` && vals[i] === req.auth.email);
       if (orphans.length) { await redis.del(...orphans); logger.debug({ count: orphans.length }, 'post_connect_zombie_cleanup'); }
     } catch { /* non-fatal */ }
   })();
@@ -958,6 +950,9 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   metricConnections.inc({entity:PREFIX});
   ensureCrmSession(sid).catch(err=>connLogger.error({crm_user:connCreds.get(sid)?.user, err:err.message},'crm_login_failed'));
   await srv.connect(transport);
+  // Keepalive: ping every 20s so clients detect server restart and reconnect
+  const _ping = setInterval(() => { try { res.write(':ping\n\n'); } catch { clearInterval(_ping); } }, 20000);
+  res.on('close', () => clearInterval(_ping));
 });
 
 app.post('/messages', messagesRL, async (req,res) => {
@@ -968,8 +963,8 @@ app.post('/messages', messagesRL, async (req,res) => {
   if (!token) return res.status(401).json({error:'Bearer token required'});
   const session=await getAuthSession(token);
   // connAuth is authoritative for live connections; fall back to Redis only if not found in-process
-  const expectedSub = connAuth.get(sid)?.sub ?? await getSubBySid(sid);
-  if (!session||!expectedSub||session.sub!==expectedSub) return res.status(403).json({error:'Token does not match session owner'});
+  const expectedEmail = connAuth.get(sid)?.email ?? await getEmailBySid(sid);
+  if (!session||!expectedEmail||session.email!==expectedEmail) return res.status(403).json({error:'Token does not match session owner'});
   if (session.expiresAt<Date.now()) return res.status(401).json({error:'Session expired'});
   // Re-check group membership on every tool call using the groups cached in the session.
   // Groups reflect state at login time; for immediate revocation delete the session via POST /auth/logout.

@@ -113,7 +113,7 @@ async function deleteSession(apiKey) {
   await redis.del(SK(apiKey));
 }
 
-async function getAllSessionsForUser(sub) {
+async function getAllSessionsForUser(email) {
   const keys = await scanSessionKeys();
   if (!keys.length) return [];
   const results = [];
@@ -123,7 +123,7 @@ async function getAllSessionsForUser(sub) {
     for (let j = 0; j < batch.length; j++) {
       if (!values[j]) continue;
       const s = JSON.parse(values[j]);
-      if (s.sub === sub) results.push([batch[j].slice('auth:session:'.length), s]);
+      if (s.email === email) results.push([batch[j].slice('auth:session:'.length), s]);
     }
   }
   return results;
@@ -210,10 +210,11 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
   try { crmHosts = JSON.parse(readFileSync(CRM_HOSTS_FILE, 'utf8')); } catch (e) { logger.warn({ err: e.message }, 'crm_hosts_load_failed'); }
 
   // Redis is the single source of truth for profiles
-  const existing = await redis.hget('crm:profiles', sub).catch(() => null);
+  const existing = await redis.hget('crm:profiles', email).catch(() => null);
   const profile = existing ? JSON.parse(existing) : { email, name: email, entities: {} };
   profile.email = email || profile.email;
   profile.name  = email || profile.name;
+  if (sub) profile.sub = sub;
   if (!profile.entities) profile.entities = {};
 
   const crmUser = sam.includes('@') ? sam.split('@')[0].toLowerCase() : sam.toLowerCase();
@@ -258,16 +259,16 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
     }
   }
 
-  const lockKey = `crm:provision-lock:${sub}`;
+  const lockKey = `crm:provision-lock:${email}`;
   const locked = await redis.set(lockKey, '1', 'NX', 'EX', 30);
   if (!locked) {
-    logger.info({ sub: sub.slice(-8) }, 'provision_skipped_locked');
-    const existing2 = await redis.hget('crm:profiles', sub).catch(() => null);
+    logger.info({ email }, 'provision_skipped_locked');
+    const existing2 = await redis.hget('crm:profiles', email).catch(() => null);
     return existing2 ? JSON.parse(existing2) : profile;
   }
   try {
     // Re-read under lock to avoid overwriting concurrent writes
-    const latest = await redis.hget('crm:profiles', sub).catch(() => null);
+    const latest = await redis.hget('crm:profiles', email).catch(() => null);
     const merged = latest ? JSON.parse(latest) : profile;
     merged.email = profile.email || merged.email;
     merged.name  = profile.name  || merged.name;
@@ -275,8 +276,8 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
     for (const [code, creds] of Object.entries(profile.entities)) {
       merged.entities[code] = creds;
     }
-    await redis.hset('crm:profiles', sub, JSON.stringify(merged));
-    logger.info({ sub: sub.slice(-8), entities: Object.keys(merged.entities) }, 'profile_saved_to_redis');
+    await redis.hset('crm:profiles', email, JSON.stringify(merged));
+    logger.info({ email, entities: Object.keys(merged.entities) }, 'profile_saved_to_redis');
     return merged;
   } finally {
     await redis.del(lockKey);
@@ -365,6 +366,17 @@ app.get('/auth/callback', loginLimiter, async (req, res) => {
     const sam        = payload[`${NS}samaccountname`] || '';
     const email      = sam.includes('@') ? sam : (payload.email || '');
     const userGroups = payload[`${NS}groups`] || [];
+
+    // Email is now the primary identity key (profiles, sessions, sid mappings).
+    // Auth0 sub always exists, but email/samaccountname may be absent in some
+    // token claims. Reject rather than fall through to an empty-string identity
+    // that every email-less user would collide on.
+    if (!email || !email.includes('@')) {
+      logger.warn({ sub: sub.slice(-8) }, 'login_rejected_no_email');
+      metricLogins.inc({ result: 'failure' });
+      return res.status(403).send('Authentication token is missing an email or samaccountname claim — cannot provision an identity.');
+    }
+
     const linuxUser  = email.split('@')[0].toLowerCase();
 
     logger.info({ email, sub: sub.slice(-8) }, 'login');
@@ -372,7 +384,7 @@ app.get('/auth/callback', loginLimiter, async (req, res) => {
     await provisionCrmAccounts(sub, email, sam, userGroups);
 
     // Reuse existing valid session for this user, or create a new one in Redis
-    const userSessions = (await getAllSessionsForUser(sub))
+    const userSessions = (await getAllSessionsForUser(email))
       .sort(([, a], [, b]) => b.createdAt - a.createdAt);
 
     let apiKey;

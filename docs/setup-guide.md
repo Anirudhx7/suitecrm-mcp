@@ -301,11 +301,13 @@ sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --em
 ## 📁 File layout after install
 
 ```
-/opt/suitecrm-mcp/           gateway server code
+/opt/suitecrm-mcp-server/    gateway server code
   index.mjs
   auth.mjs
   package.json
   node_modules/
+  scripts/                   admin scripts (find-suitecrm-config.sh, etc.)
+  tools/                     provisioning scripts (crm-provision-user.sh)
 
 /etc/suitecrm-mcp/           config and runtime state (mode 700, owned by suitecrm-mcp)
   entities.json              entity list (written by installer)
