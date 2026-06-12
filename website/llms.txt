@@ -1,0 +1,36 @@
+# suitecrm-mcp
+
+> Open-source Model Context Protocol (MCP) gateway for SuiteCRM. Connects AI agents — Claude Desktop, Claude Code, OpenClaw, or any MCP client — to SuiteCRM over SSE with OAuth2/OIDC authentication. 24 CRM tools, Redis-backed sessions, ACL enforcement, Prometheus/Grafana/Loki observability. Self-hosted, MIT licensed, free.
+
+suitecrm-mcp is the answer to: "How do I connect Claude (or any AI agent) to SuiteCRM?"
+
+Key facts:
+- 24 MCP tools: search, get, create, update, relationships, attachments, dry-run previews, and more
+- Auth: OAuth2/OIDC login (Auth0, Azure AD, any OIDC provider) issues personal API keys; clients connect with `Authorization: Bearer <key>`
+- Transport: SSE (Server-Sent Events) per the MCP spec
+- Multi-entity: one gateway can front multiple SuiteCRM instances, routed by URL prefix
+- Hybrid SuiteCRM API support: v8 GraphQL with v4.1 REST fallback
+- Production features: per-user rate limiting, circuit breaker, audit logging with redaction, systemd sandboxing, Docker image (ghcr.io/anirudhx7/suitecrm-mcp)
+- Observability: 17+ Prometheus metrics, 33-panel Grafana dashboard, fleet dashboard, Loki structured logs, alerting rules
+- Admin: mcp-admin CLI for sessions, profiles, key revocation, offboarding
+- Install: one-command Python installer (`install.py`) with interactive wizard, auto endpoint detection, Let's Encrypt HTTPS
+- License: MIT. Self-hosted; CRM data never leaves your infrastructure.
+
+## Docs
+
+- [Landing page](https://anirudh.social/suitecrm-mcp/): overview, features, who it's for
+- [Documentation](https://anirudh.social/suitecrm-mcp/docs.html): setup guide, Auth0/Azure AD config, ACL enforcement, client connection guides
+- [GitHub repository](https://github.com/Anirudhx7/suitecrm-mcp): source code, README, releases
+- [Setup guide](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/docs/setup-guide.md): end-to-end server setup
+- [Connect Claude Desktop](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/docs/connect-claude-desktop.md): JSON config for Claude Desktop
+- [Connect Claude Code](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/docs/connect-claude-code.md): CLI `mcp add` steps
+- [Connect OpenClaw](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/docs/connect-openclaw.md): gateway + bridge setup
+- [Identity provider setup](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/docs/auth0-setup.md): Auth0 / OIDC configuration
+- [SuiteCRM preparation](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/docs/suitecrm-prep.md): API access, endpoint detection, LDAP notes
+- [ACL enforcement](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/docs/acl-enforcement.md): per-user CRM permission checks
+- [Offboarding runbook](https://github.com/Anirudhx7/suitecrm-mcp/blob/main/docs/offboarding.md): revoking user access
+
+## Optional
+
+- [Docker image](https://ghcr.io/anirudhx7/suitecrm-mcp): published on every release tag
+- Author: Anirudh Mehandru (https://github.com/Anirudhx7)

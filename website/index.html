@@ -4,22 +4,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SuiteCRM-mcp - MCP Gateway for SuiteCRM</title>
+  <title>SuiteCRM MCP Server - Connect Claude &amp; AI Agents to SuiteCRM | suitecrm-mcp</title>
   <meta name="description"
-    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools, Redis-backed sessions, mcp-admin operations, OAuth2/OIDC auth." />
+    content="Open-source SuiteCRM MCP server. Connect Claude Desktop, Claude Code, or any AI agent to SuiteCRM in under 5 minutes. 24 CRM tools, OAuth2/OIDC auth, Redis sessions, Prometheus monitoring. Free, MIT licensed." />
+  <link rel="canonical" href="https://anirudh.social/suitecrm-mcp/" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-2 -2 28 28' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15.536 11.293a1 1 0 0 0 0 1.414l2.376 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414l-2.377-2.377a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M2.297 11.293a1 1 0 0 0 0 1.414l2.377 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414L6.088 8.916a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M8.916 17.912a1 1 0 0 0 0 1.415l2.377 2.376a1 1 0 0 0 1.414 0l2.377-2.376a1 1 0 0 0 0-1.415l-2.377-2.376a1 1 0 0 0-1.414 0z'/%3E%3Cpath d='M8.916 4.674a1 1 0 0 0 0 1.414l2.377 2.376a1 1 0 0 0 1.414 0l2.377-2.376a1 1 0 0 0 0-1.414l-2.377-2.377a1 1 0 0 0-1.414 0z'/%3E%3C/svg%3E" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="SuiteCRM-mcp - MCP Gateway for SuiteCRM" />
+  <meta property="og:site_name" content="suitecrm-mcp" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:title" content="SuiteCRM MCP Server - Connect Claude &amp; AI Agents to SuiteCRM" />
   <meta property="og:description"
-    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to your SuiteCRM in minutes. 24 tools, Redis-backed sessions, mcp-admin operations, OAuth2/OIDC auth." />
-  <meta property="og:url" content="https://anirudhx7.github.io/suitecrm-mcp/" />
+    content="Open-source SuiteCRM MCP server. Connect Claude Desktop, Claude Code, or any AI agent to SuiteCRM in under 5 minutes. 24 CRM tools, OAuth2/OIDC auth, full observability." />
+  <meta property="og:url" content="https://anirudh.social/suitecrm-mcp/" />
+  <meta property="og:image" content="https://opengraph.githubassets.com/1/Anirudhx7/suitecrm-mcp" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="suitecrm-mcp - open-source MCP gateway for SuiteCRM" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="SuiteCRM-mcp - MCP Gateway for SuiteCRM" />
+  <meta name="twitter:title" content="SuiteCRM MCP Server - Connect Claude &amp; AI Agents to SuiteCRM" />
   <meta name="twitter:description"
-    content="Open-source MCP gateway. Connect Claude Desktop, Claude Code, or OpenClaw to SuiteCRM. 24 tools, Redis-backed sessions, mcp-admin operations, OAuth2/OIDC auth." />
-  <meta name="keywords" content="SuiteCRM, MCP, Model Context Protocol, Claude, Claude Desktop, Claude Code, OpenClaw, AI Agents, CRM Integration" />
+    content="Open-source SuiteCRM MCP server. Connect Claude Desktop, Claude Code, or any AI agent to SuiteCRM in under 5 minutes. 24 CRM tools, OAuth2/OIDC auth, full observability." />
+  <meta name="twitter:image" content="https://opengraph.githubassets.com/1/Anirudhx7/suitecrm-mcp" />
+  <meta name="keywords" content="SuiteCRM MCP, SuiteCRM MCP server, SuiteCRM AI integration, SuiteCRM Claude, Model Context Protocol, MCP gateway, Claude Desktop SuiteCRM, Claude Code CRM, AI agents CRM, SuiteCRM API, CRM automation, OpenClaw" />
   <meta name="author" content="Anirudh Mehandru" />
+  <meta name="theme-color" content="#080a0e" />
 
   <!-- JSON-LD SoftwareApplication Metadata Schema -->
   <script type="application/ld+json">
@@ -37,13 +47,65 @@
     "description": "An open-source Model Context Protocol (MCP) gateway for SuiteCRM. Connect Claude Desktop, Claude Code, or OpenClaw to your CRM in minutes with OAuth2 and full observability.",
     "softwareVersion": "5.3.0",
     "license": "https://opensource.org/licenses/MIT",
-    "url": "https://anirudhx7.github.io/suitecrm-mcp/",
+    "url": "https://anirudh.social/suitecrm-mcp/",
+    "downloadUrl": "https://github.com/Anirudhx7/suitecrm-mcp",
+    "softwareHelp": "https://anirudh.social/suitecrm-mcp/docs.html",
+    "keywords": "SuiteCRM MCP, SuiteCRM AI integration, Model Context Protocol, MCP gateway, Claude, CRM automation",
     "repository": "https://github.com/Anirudhx7/suitecrm-mcp",
     "author": {
       "@type": "Person",
       "name": "Anirudh Mehandru",
       "url": "https://github.com/Anirudhx7"
     }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "suitecrm-mcp",
+    "url": "https://anirudh.social/suitecrm-mcp/",
+    "description": "Open-source MCP gateway connecting AI agents like Claude to SuiteCRM."
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is suitecrm-mcp?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "suitecrm-mcp is an open-source Model Context Protocol (MCP) gateway that connects AI agents such as Claude Desktop, Claude Code, and OpenClaw to SuiteCRM. It exposes 24 CRM tools (search, get, create, update, relationships, and more) over SSE with OAuth2/OIDC authentication."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I connect Claude to SuiteCRM?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Run the one-command installer on a Linux server, log in via your OAuth2/OIDC identity provider to receive a personal API key, then add the gateway URL with an Authorization Bearer header to Claude Desktop or Claude Code. Setup typically takes under 5 minutes."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is suitecrm-mcp free?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. suitecrm-mcp is fully open source under the MIT license. It is self-hosted, so there are no per-seat fees and your CRM data never leaves your infrastructure."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Why use an MCP gateway instead of calling the SuiteCRM API directly?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "The gateway handles session lifecycle, per-user authentication, rate limiting, audit logging, circuit breaking, and Prometheus/Grafana observability out of the box. AI agents get a clean, typed tool interface instead of raw REST calls, and admins get per-user revocation and ACL enforcement."
+        }
+      }
+    ]
   }
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
