@@ -1,0 +1,62 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Anirudhx7/suitecrm-mcp",
+  "description": "Open-source MCP gateway for SuiteCRM - 24 CRM tools, OAuth2/OIDC auth, multi-entity, observability.",
+  "repository": {
+    "url": "https://github.com/Anirudhx7/suitecrm-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://anirudh.social/suitecrm-mcp/",
+  "version": "5.3.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "suitecrm-mcp-gateway",
+      "version": "5.3.1",
+      "transport": {
+        "type": "sse",
+        "url": "http://127.0.0.1:{PORT}/sse",
+        "headers": [
+          {
+            "name": "Authorization",
+            "description": "Bearer token - personal API key issued by the gateway after OAuth2/OIDC login",
+            "isRequired": true,
+            "isSecret": true
+          }
+        ]
+      },
+      "environmentVariables": [
+        {
+          "name": "SUITECRM_ENDPOINT",
+          "description": "SuiteCRM v4_1 REST endpoint URL, e.g. https://crm.example.com/service/v4_1/rest.php",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "SUITECRM_PREFIX",
+          "description": "Tool name prefix, e.g. suitecrm",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "PORT",
+          "description": "Port the gateway listens on",
+          "isRequired": true,
+          "format": "number"
+        },
+        {
+          "name": "AUTH0_DOMAIN",
+          "description": "OIDC provider domain, e.g. your-tenant.auth0.com",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "AUTH0_AUDIENCE",
+          "description": "OAuth2 API audience identifier",
+          "isRequired": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
