@@ -58,7 +58,7 @@ const NS = AUTH0_AUDIENCE + '/';
 const logger = pino({
   base: { service: 'suitecrm-mcp-auth' },
   timestamp: pino.stdTimeFunctions.isoTime,
-});
+}, process.stderr);
 
 const metricsRegistry = new Registry();
 collectDefaultMetrics({ register: metricsRegistry });
