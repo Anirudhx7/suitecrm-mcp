@@ -9,6 +9,10 @@ import { Command } from 'commander';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { createRequire } from 'module';
+import { createConnection } from 'net';
+import { connect as tlsConnect } from 'tls';
+const _require = createRequire(import.meta.url);
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createInterface } from 'readline';
@@ -465,7 +469,7 @@ async function cmdTest(opts) {
     targets = Object.entries(profiles);
   }
 
-  let failed = 0;
+  let passed = 0, failed = 0;
   for (const [, p] of targets) {
     const email = p.email || '?';
     for (const [code, creds] of Object.entries(p.entities || {})) {
@@ -475,25 +479,32 @@ async function cmdTest(opts) {
       // REST login test because crmLogin uses the v4 SuiteCRM REST protocol.
       const endpoint = ent?.v4_endpoint || ent?.endpoint;
       if (!endpoint) {
-        console.log(`  ${c(email, CYAN)}/${c(code, BOLD)}  ${c('no endpoint configured', YELLOW)}`);
+        if (!opts.quiet) console.log(`  ${c(email, CYAN)}/${c(code, BOLD)}  ${c('no endpoint configured', YELLOW)}`);
         continue;
       }
       const label = ent?.label || code;
-      process.stdout.write(`  ${c(email, CYAN)}/${c(code, BOLD)} (${label})  ... `);
+      if (!opts.quiet) process.stdout.write(`  ${c(email, CYAN)}/${c(code, BOLD)} (${label})  ... `);
       try {
         const result = await crmLogin(endpoint, creds.user, creds.pass, opts.verifyTls);
         const sid = result?.id;
         if (sid && sid !== '0' && sid !== 0 && sid !== '') {
-          console.log(c('OK', GREEN));
+          if (!opts.quiet) console.log(c('OK', GREEN));
+          passed++;
         } else {
+          if (opts.quiet) process.stdout.write(`  ${c(email, CYAN)}/${c(code, BOLD)} (${label})  ... `);
           console.log(c(`FAIL  (CRM returned id=${JSON.stringify(sid)})`, RED));
           failed++;
         }
       } catch (e) {
+        if (opts.quiet) process.stdout.write(`  ${c(email, CYAN)}/${c(code, BOLD)} (${label})  ... `);
         console.log(c(`ERROR  ${e.message}`, RED));
         failed++;
       }
     }
+  }
+  if (opts.quiet) {
+    const total = passed + failed;
+    console.log(failed === 0 ? c(`All ${total} login(s) OK`, GREEN) : c(`${failed}/${total} failed`, RED));
   }
   await disconnect();
   if (failed) process.exit(1);
@@ -966,54 +977,6 @@ async function cmdStats() {
 
 // ── logs ──────────────────────────────────────────────────────────────────────
 
-const PINO_LEVELS = { 10:'TRACE', 20:'DEBUG', 30:'INFO ', 40:'WARN ', 50:'ERROR', 60:'FATAL' };
-const PINO_COLORS = { 10:DIM, 20:DIM, 30:GREEN, 40:YELLOW, 50:RED, 60:RED+BOLD };
-const LEVEL_NAMES = { trace:10, debug:20, info:30, warn:40, error:50, fatal:60 };
-const JOURNAL_RE  = /^\S+\s+\S+\s+([\w-]+)\[\d+\]:\s*(.*)$/;
-
-function formatLogLine(raw, minLevel, multiUnit) {
-  const m        = raw.match(JOURNAL_RE);
-  const unitFull = m ? m[1] : '';
-  const msgStr   = m ? m[2] : raw;
-  const entity   = unitFull.replace(/^suitecrm-mcp-/, '');
-
-  let parsed = null;
-  try { parsed = JSON.parse(msgStr); } catch {}
-
-  if (!parsed) {
-    if (minLevel > 0) return;
-    const prefix = (multiUnit && entity) ? c(entity.padEnd(6), CYAN) + '  ' : '';
-    process.stdout.write(prefix + raw + '\n');
-    return;
-  }
-
-  const level    = parsed.level || 30;
-  if (level < minLevel) return;
-
-  const timeStr  = parsed.time ? new Date(parsed.time).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '';
-  const levelStr = PINO_LEVELS[level] || String(level).padEnd(5);
-  const levelCol = PINO_COLORS[level] || '';
-  const reqId    = parsed.reqId ? c(parsed.reqId.slice(0, 8), DIM) + '  ' : '';
-  const tool     = parsed.tool  ? c(parsed.tool, BOLD) + '  '            : '';
-  const logMsg   = parsed.msg   || '';
-  const errMsg   = parsed.err
-    ? '  ' + c(typeof parsed.err === 'object' ? (parsed.err.message || JSON.stringify(parsed.err)) : parsed.err, RED)
-    : '';
-  const entityPart = (multiUnit && entity) ? c(entity.padEnd(6), CYAN) + '  ' : '';
-
-  // Show who triggered this event: gateway email + CRM username
-  const email    = parsed.email    || '';
-  const crmUser  = parsed.crm_user || parsed.user || '';
-  let userPart   = '';
-  if (email && crmUser)  userPart = c(email, BOLD) + c(` → ${crmUser}`, DIM) + '  ';
-  else if (email)        userPart = c(email, BOLD) + '  ';
-  else if (crmUser)      userPart = c(`crm:${crmUser}`, DIM) + '  ';
-
-  process.stdout.write(
-    `${c(timeStr, DIM)}  ${c(levelStr, levelCol)}  ${entityPart}${userPart}${reqId}${tool}${logMsg}${errMsg}\n`
-  );
-}
-
 async function cmdLogs(entityArg, opts) {
   const entities = loadJson(ENTITIES_FILE);
 
@@ -1034,27 +997,13 @@ async function cmdLogs(entityArg, opts) {
     if (opts.auth) units.unshift('suitecrm-mcp-auth.service');
   }
 
-  const minLevel = LEVEL_NAMES[opts.level?.toLowerCase()] ?? 0;
-
-  const jArgs = ['--no-pager', '-o', 'short-iso'];
+  const jArgs = ['--no-pager'];
   for (const u of units) jArgs.push('-u', u);
   jArgs.push('-n', String(opts.lines ?? 50));
   if (opts.follow) jArgs.push('-f');
   if (opts.since)  jArgs.push('--since', opts.since);
 
-  const multiUnit = units.length > 1;
-  const proc = spawn('journalctl', jArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-
-  let buf = '';
-  proc.stdout.on('data', chunk => {
-    buf += chunk.toString();
-    const lines = buf.split('\n');
-    buf = lines.pop();
-    for (const line of lines) { if (line.trim()) formatLogLine(line, minLevel, multiUnit); }
-  });
-  proc.stdout.on('end', () => { if (buf.trim()) formatLogLine(buf, minLevel, multiUnit); });
-  proc.stderr.on('data', chunk => process.stderr.write(chunk));
-
+  const proc = spawn('journalctl', jArgs, { stdio: 'inherit' });
   await new Promise(resolve => proc.on('exit', resolve));
 }
 
@@ -1206,6 +1155,216 @@ async function cmdFlush(opts) {
   await disconnect();
 }
 
+// ── audit ─────────────────────────────────────────────────────────────────────
+
+const AUDIT_DB  = '/var/log/suitecrm-mcp/audit.db';
+
+const AUDIT_WRITE_TOOLS = new Set([
+  'create','update','log_call','upsert',
+  'create_task','create_note','set_note_attachment',
+  'link_records','unlink_records',
+]);
+
+function openAuditDb() {
+  if (!existsSync(AUDIT_DB)) return null;
+  try {
+    const Database = _require('better-sqlite3');
+    const db = new Database(AUDIT_DB, { readonly: true });
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 3000');
+    return db;
+  } catch (e) {
+    console.error(c(`Cannot open audit DB: ${e.message}`, RED));
+    return null;
+  }
+}
+
+function buildAuditQuery(opts, since, until, forSummary = false) {
+  const where  = ['1=1'];
+  const params = {};
+
+  if (since) { where.push('ts >= @since'); params.since = since.toISOString(); }
+  if (until) { where.push('ts <  @until'); params.until = until.toISOString(); }
+
+  if (!opts.raw) where.push("msg != 'tool_call'");
+
+  if (opts.email)  { where.push('email  LIKE @email');  params.email  = `%${opts.email}%`; }
+  if (opts.entity) { where.push('entity = @entity');    params.entity = opts.entity; }
+  if (opts.tool)   { where.push('tool   LIKE @tool');   params.tool   = `%${opts.tool}%`; }
+  if (opts.module) { where.push('module LIKE @module'); params.module = `%${opts.module}%`; }
+  if (opts.status) { where.push('status = @status');    params.status = opts.status; }
+
+  if (opts.action === 'write') {
+    where.push(`tool IN (${[...AUDIT_WRITE_TOOLS].map((_, i) => `@wt${i}`).join(',')})`);
+    [...AUDIT_WRITE_TOOLS].forEach((t, i) => { params[`wt${i}`] = t; });
+  } else if (opts.action === 'read') {
+    where.push(`tool NOT IN (${[...AUDIT_WRITE_TOOLS].map((_, i) => `@wt${i}`).join(',')})`);
+    [...AUDIT_WRITE_TOOLS].forEach((t, i) => { params[`wt${i}`] = t; });
+  }
+
+  const clause = where.join(' AND ');
+  return { clause, params };
+}
+
+function auditFmtTime(ts) {
+  return new Date(ts).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
+function cmdAudit(opts) {
+  // ── resolve time range ──────────────────────────────────────────────────────
+  let since, until;
+  const now = new Date();
+  if (opts.date) {
+    since = new Date(opts.date + 'T00:00:00Z');
+    until = new Date(since); until.setUTCDate(until.getUTCDate() + 1);
+  } else if (opts.from || opts.to) {
+    since = opts.from ? new Date(opts.from + 'T00:00:00Z') : null;
+    until = opts.to   ? (() => { const d = new Date(opts.to + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d; })() : null;
+  } else {
+    since = new Date(now - (opts.days ?? 7) * 86400000);
+    until = null;
+  }
+
+  const db = openAuditDb();
+  if (!db) {
+    console.log(c('No audit database found yet — it will be created once the gateway receives its first tool call.', YELLOW));
+    return;
+  }
+
+  const { clause, params } = buildAuditQuery(opts, since, until);
+
+  // ── summary mode ────────────────────────────────────────────────────────────
+  if (opts.summary) {
+    // Per-user aggregates via SQL
+    const summaryRows = db.prepare(`
+      SELECT
+        email,
+        COUNT(*)                                                          AS calls,
+        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)                AS errors,
+        SUM(CASE WHEN tool IN (${[...AUDIT_WRITE_TOOLS].map(t => `'${t}'`).join(',')}) THEN 1 ELSE 0 END) AS writes,
+        MAX(ts)                                                           AS last_seen,
+        GROUP_CONCAT(DISTINCT entity)                                     AS entities
+      FROM audit_log
+      WHERE ${clause} AND msg != 'tool_call'
+      GROUP BY email
+      ORDER BY calls DESC
+    `).all(params);
+
+    if (!summaryRows.length) { console.log(c('No activity in this period.', DIM)); db.close(); return; }
+
+    // Top-3 tools per user (separate query — GROUP_CONCAT can't rank)
+    const topTools = {};
+    for (const r of summaryRows) {
+      const toolRows = db.prepare(`
+        SELECT tool, COUNT(*) AS n FROM audit_log
+        WHERE ${clause} AND msg != 'tool_call' AND email = @_email
+        GROUP BY tool ORDER BY n DESC LIMIT 3
+      `).all({ ...params, _email: r.email });
+      topTools[r.email] = toolRows.map(t => `${t.tool}(${t.n})`).join('  ');
+    }
+
+    const total = summaryRows.reduce((s, r) => s + r.calls, 0);
+
+    const rows = summaryRows.map(r => ({
+      email:    r.email,
+      calls:    String(r.calls),
+      errs:     String(r.errors),
+      writes:   String(r.writes),
+      lastSeen: auditFmtTime(r.last_seen).slice(0, 16),
+      ents:     (r.entities || '').split(',').filter(Boolean).sort().join(', '),
+      top3:     topTools[r.email] || '—',
+    }));
+
+    const headers = ['User', 'Calls', 'Errors', 'Writes', 'Last Seen (UTC)', 'Entities', 'Top Tools'];
+    const keys    = ['email','calls','errs','writes','lastSeen','ents','top3'];
+    const widths  = keys.map((k, i) => Math.max(headers[i].length, ...rows.map(r => (r[k] || '').length)));
+
+    const sep = '+-' + widths.map(w => '-'.repeat(w)).join('-+-') + '-+';
+    const hdr = '| ' + headers.map((h, i) => h.padEnd(widths[i])).join(' | ') + ' |';
+    console.log(sep); console.log(hdr); console.log(sep);
+    for (const r of rows) {
+      const hasErr = parseInt(r.errs) > 0;
+      const row = '| ' + keys.map((k, i) => {
+        const cell = (r[k] || '').padEnd(widths[i]);
+        if (k === 'email') return c(cell, CYAN);
+        if (k === 'errs' && hasErr) return c(cell, parseInt(r.errs) >= 10 ? RED : YELLOW);
+        return cell;
+      }).join(' | ') + ' |';
+      console.log(row);
+    }
+    console.log(sep);
+    console.log(`\n${c(String(rows.length), BOLD)} user(s) · ${c(String(total), BOLD)} tool completions`);
+    db.close(); return;
+  }
+
+  // ── CSV mode ────────────────────────────────────────────────────────────────
+  if (opts.csv) {
+    const csvLine = (...cols) => cols.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+    console.log(csvLine('ts','email','entity','tool','module','msg','status','duration_ms','req_id','err'));
+    const stmt = db.prepare(`SELECT * FROM audit_log WHERE ${clause} ORDER BY ts ASC`);
+    for (const row of stmt.iterate(params)) {
+      console.log(csvLine(
+        row.ts, row.email, row.entity, row.tool, row.module ?? '',
+        row.msg, row.status ?? '', row.duration_ms ?? '', row.req_id ?? '', row.err ?? '',
+      ));
+    }
+    db.close(); return;
+  }
+
+  // ── table mode (default) ─────────────────────────────────────────────────────
+  const limit = opts.limit ?? 200;
+  const dbRows = db.prepare(
+    `SELECT * FROM audit_log WHERE ${clause} ORDER BY ts DESC LIMIT @_limit`
+  ).all({ ...params, _limit: limit + 1 });
+
+  const truncated = dbRows.length > limit;
+  const rows = dbRows.slice(0, limit);
+
+  if (!rows.length) { console.log(c('No matching records.', DIM)); db.close(); return; }
+
+  const formatted = rows.map(rec => {
+    const toolCol    = rec.module ? `${rec.tool} [${rec.module}]` : (rec.tool || '—');
+    const statusPlain = rec.status || rec.msg || '—';
+    const statusCol  = rec.status === 'error'
+      ? c(statusPlain + (rec.err ? ` — ${rec.err.slice(0, 60)}` : ''), RED)
+      : rec.status === 'dry_run' ? c(statusPlain, YELLOW)
+      : c(statusPlain, GREEN);
+    return {
+      time:    auditFmtTime(rec.ts),
+      email:   rec.email  || '?',
+      entity:  rec.entity || '?',
+      tool:    toolCol,
+      status:  statusCol,
+      ms:      rec.duration_ms != null ? String(rec.duration_ms) : '',
+      _status: statusPlain,
+      _tool:   toolCol.replace(/\x1b\[[0-9;]*m/g, ''),
+    };
+  });
+
+  const headers = ['Time (UTC)', 'User', 'Entity', 'Tool [Module]', 'Status', 'ms'];
+  const keys    = ['time','email','entity','_tool','_status','ms'];
+  const widths  = keys.map((k, i) => Math.max(headers[i].length, ...formatted.map(r => (r[k] || '').length)));
+
+  const sep = '+-' + widths.map(w => '-'.repeat(w)).join('-+-') + '-+';
+  const hdr = '| ' + headers.map((h, i) => h.padEnd(widths[i])).join(' | ') + ' |';
+  console.log(sep); console.log(hdr); console.log(sep);
+  for (const r of formatted) {
+    console.log(
+      `| ${c(r.time, DIM)}` +
+      ` | ${c(r.email.padEnd(widths[1]), CYAN)}` +
+      ` | ${r.entity.padEnd(widths[2])}` +
+      ` | ${c(r._tool.padEnd(widths[3]), BOLD)}` +
+      ` | ${r.status + ' '.repeat(Math.max(0, widths[4] - r._status.length))}` +
+      ` | ${r.ms.padEnd(widths[5])} |`
+    );
+  }
+  console.log(sep);
+
+  const note = truncated ? c(` (newest ${limit} shown — use --limit N or --csv for more)`, DIM) : '';
+  console.log(`\n${c(String(rows.length), BOLD)} record(s)${note}`);
+  db.close();
+}
+
 // ── CLI definition ────────────────────────────────────────────────────────────
 
 const program = new Command();
@@ -1213,7 +1372,7 @@ const program = new Command();
 program
   .name('mcp-admin')
   .description('SuiteCRM MCP Gateway admin tool')
-  .version('5.3.0');
+  .version('5.2.2');
 
 program
   .command('list')
@@ -1255,6 +1414,7 @@ program
   .option('--email <email>', 'User email')
   .option('--entity <code>', 'Entity to test (omit to test all entities for matched users)')
   .option('--verify-tls',    'Enable TLS certificate verification (default: off)')
+  .option('--quiet',         'Suppress OK lines — only show failures + summary')
   .action(cmdTest);
 
 program
@@ -1327,13 +1487,542 @@ program
 
 program
   .command('logs')
-  .description('Show logs from MCP gateway services')
-  .argument('[entity]',      'Entity code (e.g. crm1, crm2) or "auth" — omit for all gateways')
+  .description('Raw journalctl output for MCP gateway services')
+  .argument('[entity]',      'Entity code (e.g. aeau, aesg) or "auth" — omit for all gateways')
   .option('-f, --follow',    'Stream logs in real time (like tail -f)')
   .option('-n, --lines <n>', 'Number of recent lines to show (default: 50)', v => parseInt(v) || 50, 50)
   .option('--since <time>',  'Show logs since time, e.g. "1h ago", "2026-05-18 10:00"')
-  .option('--level <level>', 'Minimum log level: trace|debug|info|warn|error')
   .option('--auth',          'Include auth service when showing all gateways')
+  .addHelpText('after', `
+Purpose:
+  Direct journalctl pass-through — for crash diagnostics and raw service output.
+  For user activity (who called what, errors, write ops), use: mcp-admin audit
+
+Examples:
+  mcp-admin logs                        # last 50 lines from all gateways
+  mcp-admin logs aeau                   # one entity only
+  mcp-admin logs auth                   # auth service only
+  mcp-admin logs --follow               # live tail
+  mcp-admin logs --since "1h ago"       # last hour
+  mcp-admin logs --since "2026-06-01"   # from a date
+  mcp-admin logs -n 200                 # more lines`)
   .action(cmdLogs);
+
+program
+  .command('audit')
+  .description('Query the persistent user activity audit log')
+  .option('--email <email>',       'Filter by user email (partial match)')
+  .option('--entity <code>',       'Filter by CRM entity (aeau, aesg, aeph, pcau)')
+  .option('--tool <name>',         'Filter by tool name (partial match)')
+  .option('--module <name>',       'Filter by CRM module (Contacts, Accounts, Leads…)')
+  .option('--action <read|write>', 'Show only read or write operations')
+  .option('--status <status>',     'Filter by result: success | error | dry_run')
+  .option('--date <YYYY-MM-DD>',   'Show only a specific day')
+  .option('--from <YYYY-MM-DD>',   'Start date (inclusive)')
+  .option('--to <YYYY-MM-DD>',     'End date (inclusive)')
+  .option('--days <N>',            'Last N days (default: 7)', v => parseInt(v) || 7, 7)
+  .option('--summary',             'Show per-user summary table instead of individual rows')
+  .option('--csv',                 'Output as CSV (for Excel / external tools)')
+  .option('--raw',                 'Include tool_call start entries (default: completions only)')
+  .option('--limit <N>',           'Max rows in table mode (default: 200)', v => parseInt(v) || 200, 200)
+  .addHelpText('after', `
+Examples:
+  # Everything in the last 7 days (default view)
+  mcp-admin audit
+
+  # All activity for one user
+  mcp-admin audit --email john@example.com
+
+  # What a user did on a specific day
+  mcp-admin audit --email john@example.com --date 2026-06-17
+
+  # Date range investigation
+  mcp-admin audit --email john@example.com --from 2026-06-01 --to 2026-06-15
+
+  # Per-user summary — call counts, errors, write ops, last seen
+  mcp-admin audit --summary
+  mcp-admin audit --summary --days 30
+
+  # All write operations (create, update, log_call…) this week
+  mcp-admin audit --days 7 --action write
+
+  # All errors — who triggered them, which tool, what went wrong
+  mcp-admin audit --status error --days 14
+
+  # Errors for a specific user
+  mcp-admin audit --email john@example.com --status error
+
+  # Everything on the Contacts module across all users
+  mcp-admin audit --module Contacts --days 30
+
+  # All activity on one CRM entity
+  mcp-admin audit --entity aeau --days 7
+
+  # Export a user's full history as CSV (for investigation / HR)
+  mcp-admin audit --email john@example.com --days 365 --csv > john_activity.csv
+
+  # Export everything this month as CSV
+  mcp-admin audit --days 30 --csv > monthly_audit.csv
+
+  # Show more than the default 200 rows
+  mcp-admin audit --days 30 --limit 1000`)
+  .action(cmdAudit);
+
+// ── report ────────────────────────────────────────────────────────────────────
+
+const ALERTMANAGER_YML = '/opt/suitecrm-mcp-monitoring/alertmanager.yml';
+
+function loadSmtpConfig() {
+  let text = '';
+  try { text = readFileSync(ALERTMANAGER_YML, 'utf8'); } catch { return {}; }
+
+  const get = (re, def = '') => { const m = text.match(re); return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : def; };
+  const tls_raw = get(/^\s*smtp_require_tls:\s*([^\s#]+)/m, 'true');
+
+  const cfg = {
+    host:     get(/^\s*smtp_smarthost:\s*['"]?([^\s'"#]+)/m),
+    from:     get(/^\s*smtp_from:\s*['"]?([^\s'"#]+)/m),
+    user:     get(/^\s*smtp_auth_username:\s*['"]?([^\s'"#]+)/m),
+    password: get(/^\s*smtp_auth_password:\s*['"]?([^\s'"#]+)/m),
+    tls:      !['false','0','no'].includes(tls_raw.toLowerCase()),
+  };
+
+  const m = text.match(/email_configs[\s\S]*?to:\s*['"]?([^\s'"#\n]+)/);
+  cfg.to = m ? m[1].trim().replace(/^['"]|['"]$/g, '') : '';
+
+  // env overrides
+  if (process.env.SMTP_HOST)  cfg.host     = process.env.SMTP_HOST;
+  if (process.env.SMTP_USER)  cfg.user     = process.env.SMTP_USER;
+  if (process.env.SMTP_PASS)  cfg.password = process.env.SMTP_PASS;
+  if (process.env.SMTP_FROM)  cfg.from     = process.env.SMTP_FROM;
+  if (process.env.REPORT_TO)  cfg.to       = process.env.REPORT_TO;
+  return cfg;
+}
+
+function getReportRange(period, refDate) {
+  const ref = new Date(refDate);
+  ref.setUTCHours(0, 0, 0, 0);
+  const end   = ref;
+  let start, label;
+  if (period === 'daily') {
+    start = new Date(end - 86400000);
+    label = `Daily Report — ${start.toLocaleDateString('en-GB', { weekday:'long', day:'2-digit', month:'long', year:'numeric', timeZone:'UTC' })}`;
+  } else if (period === 'weekly') {
+    start = new Date(end - 7 * 86400000);
+    const fmt = d => d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', timeZone:'UTC' });
+    label = `Weekly Report — ${fmt(start)} to ${fmt(new Date(end - 86400000))}`;
+  } else {
+    start = new Date(end - 30 * 86400000);
+    const fmt = d => d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', timeZone:'UTC' });
+    label = `Monthly Report — ${fmt(start)} to ${fmt(new Date(end - 86400000))}`;
+  }
+  return { start, end, label };
+}
+
+function aggregateReport(rows) {
+  const userCalls    = {};
+  const userErrors   = {};
+  const userWrites   = {};
+  const userEntities = {};
+  const userTools    = {};
+  const toolTotals   = {};
+  const entityTotals = {};
+  const rawErrors    = [];
+  let totalCalls = 0, totalErrors = 0, totalWrites = 0;
+
+  for (const row of rows) {
+    const email  = row.email  || 'unknown';
+    const tool   = row.tool   || '';
+    const entity = row.entity || '';
+    const msg    = row.msg;
+
+    if (msg === 'tool_done') {
+      totalCalls++;
+      userCalls[email]    = (userCalls[email]    || 0) + 1;
+      userEntities[email] = userEntities[email] || new Set();
+      userEntities[email].add(entity);
+      userTools[email]    = userTools[email] || {};
+      userTools[email][tool] = (userTools[email][tool] || 0) + 1;
+      toolTotals[tool]    = (toolTotals[tool]    || 0) + 1;
+      entityTotals[entity]= (entityTotals[entity]|| 0) + 1;
+      if (AUDIT_WRITE_TOOLS.has(tool)) {
+        totalWrites++;
+        userWrites[email] = (userWrites[email] || 0) + 1;
+      }
+    } else if (msg === 'tool_error') {
+      totalErrors++;
+      totalCalls++;
+      userCalls[email]  = (userCalls[email]  || 0) + 1;
+      userErrors[email] = (userErrors[email] || 0) + 1;
+      if (rawErrors.length < 50) rawErrors.push({ ts: row.ts, email, tool, entity, err: row.err || '' });
+    }
+  }
+
+  return {
+    userCalls, userErrors, userWrites,
+    userEntities: Object.fromEntries(Object.entries(userEntities).map(([k,v]) => [k, [...v].sort()])),
+    userTools, toolTotals, entityTotals,
+    totalCalls, totalErrors, totalWrites, rawErrors,
+  };
+}
+
+function buildReportHtml(stats, label, start, end) {
+  const { userCalls, userErrors, userWrites, userEntities, userTools, toolTotals, entityTotals,
+          totalCalls, totalErrors, totalWrites, rawErrors } = stats;
+
+  const usersByCall  = Object.entries(userCalls).sort((a,b) => b[1]-a[1]);
+  const topTools     = Object.entries(toolTotals).sort((a,b) => b[1]-a[1]).slice(0,15);
+  const topEntities  = Object.entries(entityTotals).sort((a,b) => b[1]-a[1]);
+  const errPct       = totalCalls > 0 ? `${(totalErrors/totalCalls*100).toFixed(1)}%` : '0%';
+  const fmtDate      = d => d.toISOString().slice(0,16).replace('T',' ') + ' UTC';
+
+  const rowBg = n => n === 0 ? '' : n < 3 ? 'background:#fff3cd' : 'background:#f8d7da';
+
+  const userRows = usersByCall.map(([email, calls]) => {
+    const errs     = userErrors[email]   || 0;
+    const writes   = userWrites[email]   || 0;
+    const entities = (userEntities[email]|| []).join(', ');
+    const top3     = Object.entries(userTools[email]||{}).sort((a,b)=>b[1]-a[1]).slice(0,3)
+                       .map(([t,n]) => `${t} (${n})`).join(', ');
+    const ep       = calls > 0 ? `${Math.round(errs/calls*100)}%` : '0%';
+    const errCell  = errs ? `<span style="color:#dc3545;font-weight:bold">${errs} (${ep})</span>` : '0';
+    return `<tr style="${rowBg(errs)}">
+      <td style="padding:6px 10px;border-bottom:1px solid #dee2e6">${email}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #dee2e6;text-align:center">${calls}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #dee2e6;text-align:center">${errCell}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #dee2e6;text-align:center">${writes}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #dee2e6;font-size:13px">${top3}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #dee2e6">${entities}</td>
+    </tr>`;
+  }).join('');
+
+  const toolRows = topTools.map(([tool, n]) => {
+    const pct = totalCalls > 0 ? `${(n/totalCalls*100).toFixed(1)}%` : '0%';
+    return `<tr>
+      <td style="padding:5px 10px;border-bottom:1px solid #dee2e6;font-family:monospace;font-size:13px">${tool}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #dee2e6;text-align:center">${n}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #dee2e6;text-align:center;color:#888">${pct}</td>
+    </tr>`;
+  }).join('');
+
+  const entityRows = topEntities.map(([ent, n]) => {
+    const pct = totalCalls > 0 ? `${(n/totalCalls*100).toFixed(1)}%` : '0%';
+    return `<tr>
+      <td style="padding:5px 10px;border-bottom:1px solid #dee2e6">${ent}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #dee2e6;text-align:center">${n}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #dee2e6;text-align:center;color:#888">${pct}</td>
+    </tr>`;
+  }).join('');
+
+  const errorRows = rawErrors.map(e =>
+    `<tr>
+      <td style="padding:5px 8px;border-bottom:1px solid #f5c6cb;font-size:11px;white-space:nowrap">${e.ts}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid #f5c6cb;font-size:12px">${e.email}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid #f5c6cb;font-family:monospace;font-size:12px">${e.tool}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid #f5c6cb;font-size:12px">${e.entity}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid #f5c6cb;font-size:12px;color:#721c24">${e.err.slice(0,250)}</td>
+    </tr>`).join('');
+
+  const noActivity = '<p style="color:#888;font-style:italic;padding:12px 0">No user activity recorded in this period.</p>';
+
+  const statCards = [
+    [totalCalls,  '#1a73e8', 'Total Calls'],
+    [totalErrors, totalErrors ? '#dc3545' : '#28a745', `Errors (${errPct})`],
+    [totalWrites, '#6f42c1', 'Write Ops'],
+    [usersByCall.length, '#fd7e14', 'Active Users'],
+  ].map(([v,color,lbl]) =>
+    `<div style="text-align:center;flex:1;min-width:110px;padding:8px;border-right:1px solid #dee2e6">
+      <div style="font-size:28px;font-weight:bold;color:${color}">${v}</div>
+      <div style="font-size:12px;color:#666;margin-top:2px">${lbl}</div>
+    </div>`).join('');
+
+  const generatedAt = new Date().toISOString().slice(0,16).replace('T',' ') + ' UTC';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>MCP Gateway — ${label}</title></head>
+<body style="font-family:Arial,sans-serif;max-width:960px;margin:0 auto;padding:20px;color:#333;font-size:14px">
+  <div style="background:#1a73e8;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0">
+    <h1 style="margin:0;font-size:20px">SuiteCRM MCP Gateway — Activity Report</h1>
+    <p style="margin:4px 0 0;opacity:0.9;font-size:14px">${label}</p>
+    <p style="margin:4px 0 0;opacity:0.75;font-size:12px">${fmtDate(start)} → ${fmtDate(end)}</p>
+  </div>
+  <div style="background:#f8f9fa;padding:16px 24px;border:1px solid #dee2e6;border-top:none;display:flex;gap:0;flex-wrap:wrap">
+    ${statCards}
+  </div>
+  <h2 style="margin-top:28px;font-size:16px">User Activity</h2>
+  ${!userRows ? noActivity : `
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="background:#e9ecef">
+      <th style="padding:8px 10px;text-align:left">User</th>
+      <th style="padding:8px 10px">Calls</th>
+      <th style="padding:8px 10px">Errors</th>
+      <th style="padding:8px 10px">Writes</th>
+      <th style="padding:8px 10px;text-align:left">Top Tools</th>
+      <th style="padding:8px 10px;text-align:left">Entities</th>
+    </tr></thead>
+    <tbody>${userRows}</tbody>
+  </table>
+  <p style="font-size:11px;color:#999;margin-top:4px">Rows in orange/red have elevated error counts.</p>`}
+  <div style="display:flex;gap:28px;margin-top:28px;flex-wrap:wrap">
+    <div style="flex:1;min-width:260px">
+      <h2 style="font-size:16px">Top Tools</h2>
+      ${!toolRows ? noActivity : `
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:#e9ecef">
+          <th style="padding:6px 10px;text-align:left">Tool</th>
+          <th style="padding:6px 10px">Calls</th>
+          <th style="padding:6px 10px">%</th>
+        </tr></thead>
+        <tbody>${toolRows}</tbody>
+      </table>`}
+    </div>
+    <div style="flex:0 0 220px">
+      <h2 style="font-size:16px">Calls by Entity</h2>
+      ${!entityRows ? noActivity : `
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:#e9ecef">
+          <th style="padding:6px 10px;text-align:left">Entity</th>
+          <th style="padding:6px 10px">Calls</th>
+          <th style="padding:6px 10px">%</th>
+        </tr></thead>
+        <tbody>${entityRows}</tbody>
+      </table>`}
+    </div>
+  </div>
+  ${rawErrors.length ? `
+  <h2 style="color:#721c24;margin-top:32px;font-size:16px">Errors (${rawErrors.length} shown, ${totalErrors} total)</h2>
+  <table style="width:100%;border-collapse:collapse;background:#fff5f5;font-size:13px">
+    <thead><tr style="background:#f8d7da">
+      <th style="padding:6px 8px;text-align:left">Time</th>
+      <th style="padding:6px 8px;text-align:left">User</th>
+      <th style="padding:6px 8px;text-align:left">Tool</th>
+      <th style="padding:6px 8px;text-align:left">Entity</th>
+      <th style="padding:6px 8px;text-align:left">Error</th>
+    </tr></thead>
+    <tbody>${errorRows}</tbody>
+  </table>` : ''}
+  <hr style="margin-top:40px;border:none;border-top:1px solid #dee2e6">
+  <p style="font-size:11px;color:#bbb">Generated ${generatedAt} · SuiteCRM MCP Gateway</p>
+</body>
+</html>`;
+}
+
+// Minimal SMTP client using Node.js built-ins — supports plain, STARTTLS, and SSL
+async function sendSmtp(cfg, subject, htmlBody) {
+  const hostPort = cfg.host || '';
+  const colonIdx = hostPort.lastIndexOf(':');
+  const host     = colonIdx > 0 ? hostPort.slice(0, colonIdx) : hostPort;
+  const port     = colonIdx > 0 ? parseInt(hostPort.slice(colonIdx + 1)) : (cfg.tls ? 587 : 25);
+  const user     = cfg.user     || '';
+  const pass     = cfg.password || '';
+  const from     = cfg.from     || user;
+  const to       = cfg.to       || '';
+
+  if (!host) throw new Error('No SMTP host configured (smtp_smarthost in alertmanager.yml)');
+  if (!to)   throw new Error('No recipient configured (to: in alertmanager.yml email_configs or REPORT_TO env)');
+
+  const recipients = to.split(',').map(s => s.trim()).filter(Boolean);
+  const boundary   = `mcp_rpt_${Date.now().toString(36)}`;
+  const plain      = `MCP Gateway Report: ${subject}\n\nOpen in an HTML email client.`;
+
+  const msgLines = [
+    `From: ${from}`,
+    `To: ${recipients.join(', ')}`,
+    `Subject: ${subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/plain; charset=utf-8`,
+    ``,
+    plain,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/html; charset=utf-8`,
+    ``,
+    htmlBody,
+    ``,
+    `--${boundary}--`,
+  ];
+  const msgData = msgLines.join('\r\n');
+
+  await new Promise((resolve, reject) => {
+    let socket;
+
+    const talk = (() => {
+      let buf = '';
+      const handlers = [];
+      let current = null;
+
+      const next = () => {
+        if (handlers.length && !current) {
+          current = handlers.shift();
+          current();
+        }
+      };
+
+      const queue = fn => { handlers.push(fn); next(); };
+
+      const send = (line) => new Promise(res => queue(() => {
+        socket.write(line + '\r\n');
+        waitReply(res);
+      }));
+
+      const waitReply = (cb) => {
+        current = null;
+        const check = () => {
+          const lines = buf.split('\r\n');
+          for (let i = 0; i < lines.length; i++) {
+            const l = lines[i];
+            if (/^\d{3} /.test(l)) {
+              buf = lines.slice(i + 1).join('\r\n');
+              const code = parseInt(l.slice(0, 3));
+              cb(code, l);
+              next();
+              return;
+            }
+          }
+        };
+        socket.on('data', function handler(chunk) {
+          buf += chunk.toString();
+          const lines = buf.split('\r\n');
+          for (let i = 0; i < lines.length; i++) {
+            if (/^\d{3} /.test(lines[i])) {
+              socket.removeListener('data', handler);
+              buf = lines.slice(i + 1).join('\r\n');
+              const code = parseInt(lines[i].slice(0, 3));
+              cb(code, lines[i]);
+              next();
+              return;
+            }
+          }
+        });
+      };
+
+      return { send, waitReply, queue };
+    })();
+
+    const runSmtp = async (sock) => {
+      socket = sock;
+      socket.on('error', reject);
+      socket.on('end', () => {});
+
+      await new Promise(res => talk.waitReply(res)); // banner
+      await talk.send(`EHLO mcp-admin`);
+
+      if (cfg.tls && port !== 465) {
+        const [stCode] = await new Promise(res => talk.send('STARTTLS').then((...a) => res(a)));
+        if (stCode !== 220) throw new Error(`STARTTLS rejected: ${stCode}`);
+        socket = tlsConnect({ socket, host, servername: host }, async () => {
+          try {
+            await talk.send(`EHLO mcp-admin`);
+            if (user) {
+              await talk.send('AUTH LOGIN');
+              await talk.send(Buffer.from(user).toString('base64'));
+              await talk.send(Buffer.from(pass).toString('base64'));
+            }
+            await talk.send(`MAIL FROM:<${from}>`);
+            for (const r of recipients) await talk.send(`RCPT TO:<${r}>`);
+            await talk.send('DATA');
+            await new Promise(res => {
+              socket.write(msgData + '\r\n.\r\n');
+              talk.waitReply(res);
+            });
+            await talk.send('QUIT');
+            resolve();
+          } catch (e) { reject(e); }
+        });
+        socket.on('error', reject);
+        return;
+      }
+
+      if (user) {
+        await talk.send('AUTH LOGIN');
+        await talk.send(Buffer.from(user).toString('base64'));
+        await talk.send(Buffer.from(pass).toString('base64'));
+      }
+      await talk.send(`MAIL FROM:<${from}>`);
+      for (const r of recipients) await talk.send(`RCPT TO:<${r}>`);
+      await talk.send('DATA');
+      await new Promise(res => {
+        socket.write(msgData + '\r\n.\r\n');
+        talk.waitReply(res);
+      });
+      await talk.send('QUIT');
+      resolve();
+    };
+
+    if (port === 465) {
+      socket = tlsConnect({ host, port, servername: host }, () => runSmtp(socket).catch(reject));
+      socket.on('error', reject);
+    } else {
+      socket = createConnection({ host, port }, () => runSmtp(socket).catch(reject));
+      socket.on('error', reject);
+    }
+  });
+}
+
+async function cmdReport(opts) {
+  const db = openAuditDb();
+  if (!db) {
+    console.error(c('No audit database found. Run the gateway first to generate activity data.', YELLOW));
+    process.exit(1);
+  }
+
+  const ref = opts.date ? new Date(opts.date + 'T23:59:59Z') : new Date();
+  const { start, end, label } = getReportRange(opts.period, ref);
+
+  process.stderr.write(`[INFO] Period: ${start.toISOString()} → ${end.toISOString()}\n`);
+
+  const rows = db.prepare(
+    `SELECT ts, email, entity, tool, msg, err
+     FROM audit_log
+     WHERE ts >= ? AND ts < ? AND msg IN ('tool_done','tool_error')
+     ORDER BY ts`
+  ).all(start.toISOString(), end.toISOString());
+  db.close();
+
+  process.stderr.write(`[INFO] ${rows.length} entries\n`);
+
+  const stats = aggregateReport(rows);
+  const html  = buildReportHtml(stats, label, start, end);
+
+  if (opts.stdout) { process.stdout.write(html + '\n'); return; }
+
+  const periodSubjects = {
+    daily:   `[MCP Gateway] Daily Activity — ${start.toISOString().slice(0,10)}`,
+    weekly:  `[MCP Gateway] Weekly Activity — w/e ${new Date(end - 86400000).toISOString().slice(0,10)}`,
+    monthly: `[MCP Gateway] Monthly Activity — ${start.toLocaleDateString('en-GB', { month:'long', year:'numeric', timeZone:'UTC' })}`,
+  };
+
+  const cfg = loadSmtpConfig();
+  try {
+    await sendSmtp(cfg, periodSubjects[opts.period], html);
+    console.log(c(`[OK] Report sent to: ${cfg.to}`, GREEN));
+  } catch (e) {
+    console.error(c(`[ERROR] Email failed: ${e.message}`, RED));
+    process.exit(1);
+  }
+}
+
+program
+  .command('report')
+  .description('Generate and email an activity report (daily/weekly/monthly)')
+  .option('--period <period>', 'Report period: daily | weekly | monthly  (default: daily)', 'daily')
+  .option('--date <YYYY-MM-DD>', 'Reference date — report covers the period ending on this day (default: today)')
+  .option('--stdout', 'Print HTML to stdout instead of emailing (useful for testing)')
+  .addHelpText('after', `
+SMTP config is read from ${ALERTMANAGER_YML} (same config Alertmanager uses).
+Override any value with env vars: SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM, REPORT_TO.
+
+Examples:
+  mcp-admin report                          # email daily report for yesterday
+  mcp-admin report --period weekly          # email weekly report
+  mcp-admin report --period monthly         # email monthly report
+  mcp-admin report --stdout                 # print HTML, no email (quick test)
+  mcp-admin report --date 2026-06-15        # report for a specific day
+  mcp-admin report --stdout | python3 -m http.server  # view in browser`)
+  .action(cmdReport);
 
 program.parseAsync(process.argv);

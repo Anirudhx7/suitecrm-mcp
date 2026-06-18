@@ -25,6 +25,7 @@ import { GraphQLBridge } from './bridges/graphql.mjs';
 import { HybridBridge } from './bridges/hybrid.mjs';
 import { redis } from './redis.mjs';
 import { initAclDb, isAclDenied, ACTION_MAP } from './acl-check.mjs';
+import { writeAuditEvent } from './audit-db.mjs';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -441,6 +442,7 @@ async function jwtMiddleware(req, res, next) {
       if (session.expiresAt < Date.now()) {
         metricAuthFailures.inc({ entity: PREFIX });
         logger.warn({ reason: 'session_expired', sub: session.sub }, 'auth_failed');
+        writeAuditEvent({ ts: new Date().toISOString(), email: 'unknown', entity: CODE, tool: '', module: null, msg: 'auth_failed', err: `session_expired: ${session.sub}`, reqId: null });
         return res.status(401).json({ error: 'Session expired' });
       }
       req.auth = { sub: session.sub, email: session.email, [`${NS}samaccountname`]: session.email, [GROUPS_CLAIM]: session.groups || [] };
@@ -449,6 +451,7 @@ async function jwtMiddleware(req, res, next) {
   } catch (err) { return next(err); }
   metricAuthFailures.inc({ entity: PREFIX });
   logger.warn({ reason: 'invalid_token' }, 'auth_failed');
+  writeAuditEvent({ ts: new Date().toISOString(), email: 'unknown', entity: CODE, tool: '', module: null, msg: 'auth_failed', err: 'invalid_token', reqId: null });
   return res.status(401).json({ error: 'Invalid token' });
 }
 
@@ -728,10 +731,15 @@ function createMcpServer(sid) {
   srv.setRequestHandler(ListToolsRequestSchema, async () => ({ tools:TOOLS }));
   srv.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args={} } = req.params;
-    const cLog = (connLoggers.get(sid)||logger).child({ reqId:randomUUID() });
+    const reqId = randomUUID();
+    const cLog = (connLoggers.get(sid)||logger).child({ reqId });
     const callStart = Date.now();
     const end = metricToolDuration.startTimer({ entity:PREFIX, tool:name });
     cLog.info({ audit:true, tool:name, args:redactAuditArgs(args) },'tool_call');
+    const _auditEmail  = connAuth.get(sid)?.email || 'unknown';
+    const _auditModule = args.module || (name.endsWith('_log_call') ? 'Calls' : name.endsWith('_create_task') ? 'Tasks' : name.endsWith('_create_note') ? 'Notes' : null);
+    const _toolShort   = name.startsWith(`${PREFIX}_`) ? name.slice(`${PREFIX}_`.length) : name;
+    writeAuditEvent({ ts: new Date().toISOString(), email: _auditEmail, entity: CODE, tool: _toolShort, module: _auditModule, reqId, msg: 'tool_call' });
     try {
       let result;
 
@@ -778,6 +786,7 @@ function createMcpServer(sid) {
         const dryResult = await handleDryRun(sid, name, args);
         end(); metricToolCalls.inc({entity:PREFIX,tool:name,status:'success'});
         cLog.info({audit:true,tool:name,status:'dry_run',durationMs:Date.now()-callStart},'tool_done');
+        writeAuditEvent({ ts: new Date().toISOString(), email: _auditEmail, entity: CODE, tool: _toolShort, module: _auditModule, reqId, msg: 'tool_done', status: 'dry_run', durationMs: Date.now()-callStart });
         return { content:[{type:'text',text:JSON.stringify(dryResult,null,2)}] };
       }
 
@@ -808,10 +817,13 @@ function createMcpServer(sid) {
       else throw new McpError(ErrorCode.MethodNotFound,`Unknown tool: ${name}`);
       end(); metricToolCalls.inc({entity:PREFIX,tool:name,status:'success'});
       cLog.info({audit:true,tool:name,status:'success',durationMs:Date.now()-callStart},'tool_done');
+      const _rc = (() => { try { if (Array.isArray(result?.records)) return result.records.length; if (Array.isArray(result?.data)) return result.data.length; if (Array.isArray(result)) return result.length; if (typeof result?.total_count==='number') return result.total_count; if (typeof result?.count==='number') return result.count; } catch {} return null; })();
+      writeAuditEvent({ ts: new Date().toISOString(), email: _auditEmail, entity: CODE, tool: _toolShort, module: _auditModule, reqId, msg: 'tool_done', status: 'success', durationMs: Date.now()-callStart, resultCount: _rc });
       return { content:[{type:'text',text:JSON.stringify(result,null,2)}] };
     } catch(err) {
       end(); metricToolCalls.inc({entity:PREFIX,tool:name,status:'error'});
       cLog.error({audit:true,tool:name,status:'error',err:err.message},'tool_error');
+      writeAuditEvent({ ts: new Date().toISOString(), email: _auditEmail, entity: CODE, tool: _toolShort, module: _auditModule, reqId, msg: 'tool_error', status: 'error', err: err.message, durationMs: Date.now()-callStart });
       return { content:[{type:'text',text:`Error: ${err.message}`}], isError:true };
     }
   });
@@ -902,6 +914,7 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   // evicted by a concurrent reconnect during the async eviction phase below.
   res.on('close',async()=>{
     connLogger.info('sse_disconnected');
+    writeAuditEvent({ ts: new Date().toISOString(), email: req.auth.email, entity: CODE, tool: '', module: null, msg: 'disconnect', reqId: sid });
     transports.delete(sid); connCreds.delete(sid); connLoggers.delete(sid); connAuth.delete(sid);
     const sids=emailSids.get(req.auth.email); if(sids){sids.delete(sid); if(sids.size===0)emailSids.delete(req.auth.email);}
     try { await delEmailSidMapping(req.auth.email,sid); } catch(err) { connLogger.error({err:err.message},'sse_close_mapping_delete_failed'); }
@@ -946,6 +959,7 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   })();
 
   connLogger.info('sse_connected');
+  writeAuditEvent({ ts: new Date().toISOString(), email: req.auth.email, entity: CODE, tool: '', module: null, msg: 'connect', reqId: sid });
   metricActiveConnections.set({entity:PREFIX},transports.size);
   metricConnections.inc({entity:PREFIX});
   ensureCrmSession(sid).catch(err=>connLogger.error({crm_user:connCreds.get(sid)?.user, err:err.message},'crm_login_failed'));
@@ -973,6 +987,7 @@ app.post('/messages', messagesRL, async (req,res) => {
     if (!groups.some(g => g.toLowerCase() === REQUIRED_GROUP.toLowerCase())) {
       metricAuthFailures.inc({ entity: PREFIX });
       logger.warn({ sub: session.sub, reason: 'group_check_failed_on_message' }, 'auth_failed');
+      writeAuditEvent({ ts: new Date().toISOString(), email: session.email, entity: CODE, tool: '', module: null, msg: 'auth_failed', err: `group_check_failed: not in "${REQUIRED_GROUP}"`, reqId: null });
       return res.status(403).json({ error: `Not in group "${REQUIRED_GROUP}"` });
     }
   }

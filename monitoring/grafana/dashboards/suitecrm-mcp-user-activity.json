@@ -1,0 +1,517 @@
+{
+  "uid": "suitecrm-mcp-user-activity",
+  "title": "SuiteCRM MCP — User Activity",
+  "tags": ["suitecrm", "audit", "users"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "entity",
+        "label": "Entity",
+        "type": "custom",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "options": [
+          { "selected": true, "text": "All", "value": "$__all" },
+          { "selected": false, "text": "aeau", "value": "aeau" },
+          { "selected": false, "text": "aesg", "value": "aesg" },
+          { "selected": false, "text": "aeph", "value": "aeph" },
+          { "selected": false, "text": "pcau", "value": "pcau" }
+        ]
+      },
+      {
+        "name": "user_filter",
+        "label": "Filter by user (email)",
+        "type": "textbox",
+        "current": { "value": "" },
+        "query": ""
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Summary",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }
+    },
+    {
+      "id": 2,
+      "title": "Total Tool Calls",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum(count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" [$__range]))",
+          "instant": true,
+          "legendFormat": "Calls"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" }
+    },
+    {
+      "id": 3,
+      "title": "Total Errors",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum(count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_error\" [$__range]))",
+          "instant": true,
+          "legendFormat": "Errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 5 }, { "color": "red", "value": 20 }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" }
+    },
+    {
+      "id": 4,
+      "title": "Write Operations (create / update / log_call)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum(count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" | tool=~\".*(create|update|log_call|upsert).*\" [$__range]))",
+          "instant": true,
+          "legendFormat": "Writes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" }
+    },
+    {
+      "id": 5,
+      "title": "Dry Runs",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum(count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" | status=\"dry_run\" [$__range]))",
+          "instant": true,
+          "legendFormat": "Dry Runs"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "yellow", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" }
+    },
+
+    {
+      "id": 10,
+      "title": "User Activity Overview",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 1 }
+    },
+    {
+      "id": 11,
+      "title": "Calls per User",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (email) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" [$__range]))",
+          "instant": true,
+          "legendFormat": "{{email}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Errors per User",
+      "type": "barchart",
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (email) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_error\" [$__range]))",
+          "instant": true,
+          "legendFormat": "{{email}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Activity Over Time (Calls per User)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 14, "w": 24, "h": 9 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (email) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" [$__interval]))",
+          "legendFormat": "{{email}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum", "max"] }
+      }
+    },
+
+    {
+      "id": 20,
+      "title": "Tool Usage Breakdown",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 1 }
+    },
+    {
+      "id": 21,
+      "title": "Tool Calls by User",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 24, "w": 14, "h": 10 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (email, tool) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" [$__range]))",
+          "instant": true,
+          "legendFormat": "{{email}} — {{tool}}"
+        }
+      ],
+      "transformations": [
+        { "id": "labelsToFields", "options": { "mode": "columns" } },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": { "email": "User", "tool": "Tool", "Value": "Calls" }
+          }
+        },
+        { "id": "sortBy", "options": { "fields": [{ "displayName": "Calls", "desc": true }] } }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Calls" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background-solid" },
+              { "id": "color", "value": { "mode": "continuous-BlYlRd" } }
+            ]
+          }
+        ]
+      },
+      "options": { "sortBy": [{ "displayName": "Calls", "desc": true }] }
+    },
+    {
+      "id": 22,
+      "title": "Write Operations per User",
+      "type": "barchart",
+      "gridPos": { "x": 14, "y": 24, "w": 10, "h": 10 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (email) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" | tool=~\".*(create|update|log_call|upsert).*\" [$__range]))",
+          "instant": true,
+          "legendFormat": "{{email}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 23,
+      "title": "Top Tools Used (Overall)",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 34, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "topk(15, sum by (tool) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" [$__range])))",
+          "instant": true,
+          "legendFormat": "{{tool}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 24,
+      "title": "Avg Duration per Tool (ms)",
+      "type": "table",
+      "gridPos": { "x": 12, "y": 34, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (tool) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" [$__range]))",
+          "instant": true,
+          "legendFormat": "{{tool}}"
+        }
+      ],
+      "transformations": [
+        { "id": "labelsToFields", "options": { "mode": "columns" } },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": { "tool": "Tool", "Value": "Total Calls" }
+          }
+        },
+        { "id": "sortBy", "options": { "fields": [{ "displayName": "Total Calls", "desc": true }] } }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Total Calls" },
+            "properties": [{ "id": "custom.displayMode", "value": "color-background-solid" }, { "id": "color", "value": { "mode": "continuous-blues" } }]
+          }
+        ]
+      }
+    },
+
+    {
+      "id": 30,
+      "title": "Error Tracking & Misuse Detection",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 42, "w": 24, "h": 1 }
+    },
+    {
+      "id": 31,
+      "title": "Users with Errors",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 43, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (email) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_error\" [$__range]))",
+          "instant": true,
+          "legendFormat": "{{email}}"
+        }
+      ],
+      "transformations": [
+        { "id": "labelsToFields", "options": { "mode": "columns" } },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": { "email": "User", "Value": "Error Count" }
+          }
+        },
+        { "id": "sortBy", "options": { "fields": [{ "displayName": "Error Count", "desc": true }] } }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Error Count" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background-solid" },
+              { "id": "color", "value": { "mode": "thresholds" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 3 }, { "color": "red", "value": 10 }] } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 32,
+      "title": "Errors Over Time per User",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 43, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (email) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_error\" [$__interval]))",
+          "legendFormat": "{{email}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2 },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 33,
+      "title": "Error Log (tool errors only)",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 51, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "{job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_error\"",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      }
+    },
+
+    {
+      "id": 40,
+      "title": "User Detail — Filtered View",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 59, "w": 24, "h": 1 }
+    },
+    {
+      "id": 41,
+      "title": "Calls Over Time — $user_filter",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 60, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (tool) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" | email=~\"(?i)$user_filter\" [$__interval]))",
+          "legendFormat": "{{tool}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } }
+    },
+    {
+      "id": 42,
+      "title": "Tool Breakdown — $user_filter",
+      "type": "barchart",
+      "gridPos": { "x": 12, "y": 60, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "sum by (tool) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" | email=~\"(?i)$user_filter\" [$__range]))",
+          "instant": true,
+          "legendFormat": "{{tool}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 43,
+      "title": "Audit Log — $user_filter",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 68, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "Loki" },
+          "expr": "{job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json |~ \"(?i)$user_filter\"",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}

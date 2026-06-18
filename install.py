@@ -643,6 +643,11 @@ def install_profile_admin():
         run(["chmod", "750", f"{SERVER_DIR}/mcp-admin.mjs"])
         run(["chown", f"{SVC_USER}:{SVC_USER}", f"{SERVER_DIR}/mcp-admin.mjs"])
     ok(f"Admin tool: {PROFILE_ADMIN_DEST}")
+    # Remove legacy mcp-report symlink — reporting moved into mcp-admin report
+    stale = Path("/usr/local/bin/mcp-report")
+    if stale.is_symlink() or stale.exists():
+        stale.unlink(missing_ok=True)
+        ok("Removed legacy /usr/local/bin/mcp-report (use: mcp-admin report)")
 
 
 def write_crm_hosts(crm_hosts):
@@ -1272,7 +1277,7 @@ def install_server():
     if lock.exists():
         shutil.copy(lock, f"{SERVER_DIR}/package-lock.json")
     # Copy all additional modules required by index.mjs at runtime
-    for extra in ("redis.mjs", "acl-check.mjs", "auth.mjs"):
+    for extra in ("redis.mjs", "acl-check.mjs", "auth.mjs", "audit-db.mjs"):
         extra_src = script_dir() / "server" / extra
         if extra_src.exists():
             shutil.copy(extra_src, f"{SERVER_DIR}/{extra}")
@@ -1303,6 +1308,98 @@ def install_server():
         error(f"package-lock.json not found in {SERVER_DIR}. Run 'npm install' in the repo first to generate it.")
     run(["npm", "ci", "--omit=dev", "--silent"], cwd=SERVER_DIR)
     ok("Server installed")
+
+# ---------------------------------------------------------------------------
+# Audit DB setup (directories, permissions, cron jobs)
+# ---------------------------------------------------------------------------
+
+def install_audit():
+    """Create audit log/backup directories, fix permissions, install cron jobs,
+    and ensure better-sqlite3 native module is compiled and working."""
+    # ── better-sqlite3 native module ─────────────────────────────────────────
+    # npm ci installs it as an optional dependency. If the native binary was not
+    # built (no pre-built binary for this Node version + no build tools), we
+    # install build-essential and compile it now — same pattern as install_redis().
+    native_addon = Path(SERVER_DIR) / "node_modules" / "better-sqlite3" / "build" / "Release" / "better_sqlite3.node"
+    if native_addon.exists():
+        ok("better-sqlite3: present")
+    else:
+        info("better-sqlite3 native module not found — installing build tools and compiling ...")
+        if run(["dpkg", "-l", "build-essential"], check=False, capture=True).returncode != 0:
+            run(["apt-get", "update", "-qq"])
+            run(["apt-get", "install", "-y", "build-essential", "python3-dev"])
+            ok("Build tools installed")
+        run(["npm", "install", "--no-save", "better-sqlite3"], cwd=SERVER_DIR)
+        ok("better-sqlite3 compiled and installed")
+
+    # Fix ownership of the audit DB file if it already exists (e.g. upgrading)
+    audit_db = Path("/var/log/suitecrm-mcp/audit.db")
+    if audit_db.exists():
+        run(["chown", f"{SVC_USER}:{SVC_USER}", str(audit_db)], check=False)
+        run(["chmod", "640", str(audit_db)], check=False)
+
+    # ── Directories and permissions ───────────────────────────────────────────
+    audit_dir  = "/var/log/suitecrm-mcp"
+    backup_dir = "/var/backups/suitecrm-mcp"
+    log_file   = "/var/log/suitecrm-mcp-reports.log"
+
+    os.makedirs(audit_dir,  exist_ok=True)
+    os.makedirs(backup_dir, exist_ok=True)
+    run(["chown", f"{SVC_USER}:{SVC_USER}", audit_dir],  check=False)
+    run(["chmod", "750", audit_dir],                      check=False)
+    run(["chown", f"root:{SVC_USER}", backup_dir],        check=False)
+    run(["chmod", "750", backup_dir],                     check=False)
+
+    # Idempotent cron install: strip existing audit block, then re-add it.
+    marker_start = "# BEGIN suitecrm-mcp-audit"
+    marker_end   = "# END suitecrm-mcp-audit"
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        existing = result.stdout if result.returncode == 0 else ""
+    except Exception:
+        existing = ""
+
+    # Remove any previously installed audit block
+    lines = existing.splitlines(keepends=True)
+    in_block, cleaned = False, []
+    for line in lines:
+        if marker_start in line:
+            in_block = True
+        if not in_block:
+            cleaned.append(line)
+        if marker_end in line:
+            in_block = False
+
+    alert_script = f"{SERVER_DIR}/scripts/audit-alert.py"
+    audit_block = (
+        f"\n{marker_start}\n"
+        f"# Notorious user alerts — every 15 minutes, fires to Alertmanager\n"
+        f"*/15 * * * * /usr/bin/python3 {alert_script} >> {log_file} 2>&1\n"
+        f"# Daily activity report — 7:00 AM UTC\n"
+        f"0 7 * * * /usr/local/bin/mcp-admin report --period daily >> {log_file} 2>&1\n"
+        f"# Weekly activity report — Monday 7:30 AM UTC\n"
+        f"30 7 * * 1 /usr/local/bin/mcp-admin report --period weekly >> {log_file} 2>&1\n"
+        f"# Monthly activity report — 1st of month 8:00 AM UTC\n"
+        f"0 8 1 * * /usr/local/bin/mcp-admin report --period monthly >> {log_file} 2>&1\n"
+        f"# Audit DB retention — delete records older than 730 days, nightly 3:00 AM UTC\n"
+        f"0 3 * * * /usr/bin/python3 -c \""
+        f"import sqlite3; db=sqlite3.connect('/var/log/suitecrm-mcp/audit.db'); "
+        f"db.execute(\\\"DELETE FROM audit_log WHERE ts < datetime('now','-730 days')\\\"); "
+        f"db.execute('VACUUM'); db.commit(); db.close()"
+        f"\" >> {log_file} 2>&1\n"
+        f"# Audit DB backup — weekly snapshot, Sundays 2:00 AM UTC, keep 8 weeks\n"
+        f"0 2 * * 0 cp /var/log/suitecrm-mcp/audit.db /var/backups/suitecrm-mcp/audit-$(date +\\%Y-\\%m-\\%d).db "
+        f"&& find /var/backups/suitecrm-mcp/ -name 'audit-*.db' -mtime +56 -delete >> {log_file} 2>&1\n"
+        f"{marker_end}\n"
+    )
+    new_crontab = "".join(cleaned) + audit_block
+    proc = subprocess.run(["crontab", "-"], input=new_crontab, text=True)
+    if proc.returncode == 0:
+        ok("Audit cron jobs installed")
+    else:
+        warn("Could not install audit cron jobs — set them up manually")
+
+    ok("Audit directories and permissions configured")
 
 # ---------------------------------------------------------------------------
 # Per-entity install
@@ -2016,6 +2113,7 @@ def main():
         print(); info("=" * 60); info("UPDATE MODE"); info("=" * 60); print()
         install_server(); print()
         info("Installing admin tool ..."); install_profile_admin(); print()
+        info("Configuring audit logging ..."); install_audit(); print()
         info("Applying hardening to existing installs ...")
         codes = list(entities.keys()) if is_multi else [SVC_NAME]
         apply_update_hardening(codes, is_multi); print()
@@ -2102,6 +2200,9 @@ def main():
 
     # Admin tool
     info("Installing admin tool ..."); install_profile_admin(); print()
+
+    # Audit logging
+    info("Configuring audit logging ..."); install_audit(); print()
 
     # Env dir
     os.makedirs(ENV_DIR, exist_ok=True)
