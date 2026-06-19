@@ -1,10 +1,10 @@
-# suitecrm-mcp — open-source MCP gateway for SuiteCRM
+# suitecrm-mcp - open-source MCP gateway for SuiteCRM
 # All crawlers welcome, including AI/LLM agents.
 
 User-agent: *
 Allow: /
 
-# AI / LLM crawlers — explicitly allowed
+# AI / LLM crawlers - explicitly allowed
 User-agent: GPTBot
 Allow: /
 

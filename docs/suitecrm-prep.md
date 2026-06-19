@@ -2,7 +2,7 @@
 
 > **When to run this:** Once per CRM instance, before connecting the gateway.
 > Three setup steps: enable API access per user, fix the OAuth2 token lifetime
-> (default is 1 minute — too short for MCP sessions), and create the `mcp_acl_reader`
+> (default is 1 minute - too short for MCP sessions), and create the `mcp_acl_reader`
 > service account (required if you enable ACL enforcement).
 
 ---
@@ -46,7 +46,7 @@ The first path that returns `200` is your `SUITECRM_ENDPOINT`.
 
 ---
 
-## Prerequisites — Collect DB Credentials
+## Prerequisites - Collect DB Credentials
 
 From the CRM server's `config.php`:
 
@@ -60,9 +60,9 @@ You'll need: `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME`.
 
 ---
 
-## Part 1 — Fix OAuth2 Token Lifetime
+## Part 1 - Fix OAuth2 Token Lifetime
 
-SuiteCRM's default OAuth2 token lifetime is 1 minute. MCP sessions run for hours or days —
+SuiteCRM's default OAuth2 token lifetime is 1 minute. MCP sessions run for hours or days -
 they will break constantly unless you extend this.
 
 ### Check current lifetime
@@ -73,7 +73,7 @@ SELECT id, name, duration_value, duration_amount, duration_unit
 FROM oauth2clients WHERE deleted=0;"
 ```
 
-If you see `duration_unit = minute` — it needs fixing.
+If you see `duration_unit = minute` - it needs fixing.
 
 ### Set to 30 days
 
@@ -96,7 +96,7 @@ Expected: `duration_unit = day`, `duration_value = 30`.
 
 ---
 
-## Part 2 — Create `mcp_acl_reader` Service Account
+## Part 2 - Create `mcp_acl_reader` Service Account
 
 Required if you enable ACL enforcement (`SUITECRM_DB_HOST` is set in the gateway env).
 The gateway queries SuiteCRM's `users` and `acl_roles` tables to enforce write permissions
@@ -127,7 +127,7 @@ WHERE user_name='mcp_acl_reader';"
 ```
 
 Use a strong random password. Add it to the gateway env as `SUITECRM_DB_PASSWORD`
-(for the MySQL connection in `acl-check.mjs`) — not to be confused with the CRM user
+(for the MySQL connection in `acl-check.mjs`) - not to be confused with the CRM user
 account password.
 
 ### Verify
@@ -164,7 +164,7 @@ once per LDAP user who needs gateway access.
 
 ---
 
-## Part 3 — All-in-One Block
+## Part 3 - All-in-One Block
 
 Run everything at once for a new CRM instance:
 
@@ -202,9 +202,9 @@ mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "
 
 | Duration  | Notes |
 |-----------|-------|
-| 1 minute  | SuiteCRM default — too short for MCP |
+| 1 minute  | SuiteCRM default - too short for MCP |
 | 1 day     | Acceptable for short-lived sessions |
-| **30 days** | **Recommended — matches gateway session TTL** |
+| **30 days** | **Recommended - matches gateway session TTL** |
 
 ---
 

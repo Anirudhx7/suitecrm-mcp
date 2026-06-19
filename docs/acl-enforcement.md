@@ -1,4 +1,4 @@
-# ACL Enforcement — SuiteCRM MCP Gateway
+# ACL Enforcement - SuiteCRM MCP Gateway
 
 ## 1. Overview
 
@@ -6,7 +6,7 @@
 
 The MCP gateway allows AI agents to call SuiteCRM tools (create, update, delete records)
 on behalf of authenticated users. SuiteCRM's own ACL system restricts what each user can
-do in the Web UI — but those restrictions are not checked at the CRM REST API level by
+do in the Web UI - but those restrictions are not checked at the CRM REST API level by
 default. A user blocked from editing Tasks in the browser could still call
 `suitecrm_crm1_update` with `module=Tasks` and the write would go through.
 
@@ -20,26 +20,26 @@ Before forwarding any write tool call (create, update, delete, bulk_upsert), the
 1. Opens a direct read-only MySQL connection to the CRM's own database.
 2. Looks up the CRM user's internal UUID and `is_admin` flag.
 3. Computes the **effective permission** = `MAX(access_override)` across all roles
-   assigned to the user — both directly and via security group membership.
+   assigned to the user - both directly and via security group membership.
 4. Applies SuiteCRM's "most permissive role wins" semantics to decide allow/deny.
 
-The lookup is live (no cache) so that Web UI permission changes take effect immediately —
+The lookup is live (no cache) so that Web UI permission changes take effect immediately -
 no restarts or cache flushes needed.
 
 ### What is and isn't enforced
 
 **Enforced (write path):**
-- `*_create` — maps to SuiteCRM ACL action `create`
-- `*_update` — maps to SuiteCRM ACL action `edit`
-- `*_delete` — maps to SuiteCRM ACL action `delete`
-- `*_bulk_upsert` — maps to SuiteCRM ACL action `edit`
-- `*_log_call`, `*_create_task`, `*_create_note` etc. — mapped to `create` on their module
-- `*_link_records`, `*_unlink_records` — mapped to `edit` on the primary module
+- `*_create` - maps to SuiteCRM ACL action `create`
+- `*_update` - maps to SuiteCRM ACL action `edit`
+- `*_delete` - maps to SuiteCRM ACL action `delete`
+- `*_bulk_upsert` - maps to SuiteCRM ACL action `edit`
+- `*_log_call`, `*_create_task`, `*_create_note` etc. - mapped to `create` on their module
+- `*_link_records`, `*_unlink_records` - mapped to `edit` on the primary module
 
 **Not enforced:**
-- `*_search`, `*_get`, `*_get_many` etc. — read operations pass through; the CRM API
+- `*_search`, `*_get`, `*_get_many` etc. - read operations pass through; the CRM API
   enforces read-level visibility natively
-- Field-level ACL — only module-level action restrictions are checked
+- Field-level ACL - only module-level action restrictions are checked
 - Record-level visibility rules beyond ownership (e.g. security group record assignment)
 
 ---
@@ -116,8 +116,8 @@ Authenticated SSE connection (CRM username resolved from user profile)
 
 SuiteCRM has two ways to restrict a user's access:
 
-1. **Direct role assignment** — via `acl_roles_users` (Query A)
-2. **Security group role assignment** — role on a group, user in that group via
+1. **Direct role assignment** - via `acl_roles_users` (Query A)
+2. **Security group role assignment** - role on a group, user in that group via
    `securitygroups_users` (Query B)
 
 Both must be checked independently. Missing Query B silently skips all group-based
@@ -140,10 +140,10 @@ constants only if that maximum is still a deny value.
 | `SUITECRM_DB_HOST` not set | allow | ACL disabled for this entity |
 | DB unreachable | **DENY** | Fail-closed: cannot confirm permission |
 | User not found in `users` table | allow | Let CRM enforce; unknown user will fail anyway |
-| Owner check — record not found | allow | Record may be in a related table; let CRM handle |
-| Owner check — no `recordId` passed | allow | Gateway can't determine ownership without an ID |
+| Owner check - record not found | allow | Record may be in a related table; let CRM handle |
+| Owner check - no `recordId` passed | allow | Gateway can't determine ownership without an ID |
 
-Writes are never assumed safe. If the gateway cannot confirm permission it refuses — a DB
+Writes are never assumed safe. If the gateway cannot confirm permission it refuses - a DB
 outage is not an accidental permission escalation.
 
 ---
@@ -182,7 +182,7 @@ ACL_ALLOW_DISABLED=-98 # module disabled for this role
 The gateway connects as a **read-only** user with `SELECT` privileges only. It cannot
 modify CRM data.
 
-### Step 1 — Find the correct DB host
+### Step 1 - Find the correct DB host
 
 **Do not assume the DB is on the CRM app server.** SuiteCRM stores the DB host it uses in
 `config.php`. SSH into the CRM app server and check:
@@ -191,13 +191,13 @@ modify CRM data.
 grep 'db_host_name\|db_name' /path/to/suitecrm/public/legacy/config.php
 ```
 
-Use that value as `SUITECRM_DB_HOST` — it may be a hostname (`internaldb.example.com`) or
+Use that value as `SUITECRM_DB_HOST` - it may be a hostname (`internaldb.example.com`) or
 a LAN IP. If it's a hostname, resolve it on the CRM server (`getent hosts <hostname>`) to
 confirm the IP.
 
-### Step 2 — Find the correct grant IP
+### Step 2 - Find the correct grant IP
 
-The MySQL `GRANT` must list the IP that the gateway's connection **appears as in MySQL** —
+The MySQL `GRANT` must list the IP that the gateway's connection **appears as in MySQL** -
 which is not always the gateway's own IP. If there is a DB proxy (HAProxy, ProxySQL, etc.)
 between the gateway and MySQL, MySQL sees the proxy's internal IP.
 
@@ -212,10 +212,10 @@ node -e "
 "
 ```
 
-The error will read `Access denied for user 'x'@'<IP>'` — that `<IP>` is what to use in
+The error will read `Access denied for user 'x'@'<IP>'` - that `<IP>` is what to use in
 the `GRANT`.
 
-### Step 3 — Create the user on the DB server
+### Step 3 - Create the user on the DB server
 
 ```bash
 # Generate a password
@@ -262,13 +262,13 @@ Then `sudo systemctl restart mysql`.
 
 ## 7. Adding a New Entity
 
-1. **Find the DB host** — SSH into the CRM app server, grep `config.php` for `db_host_name`
+1. **Find the DB host** - SSH into the CRM app server, grep `config.php` for `db_host_name`
    and `db_name` (see Section 6 Step 1).
 2. **Verify port reachability** from the gateway: `nc -zv <db_host> 3306`.
-3. **Find the connecting IP** — run the probe in Section 6 Step 2 to get the IP MySQL sees.
+3. **Find the connecting IP** - run the probe in Section 6 Step 2 to get the IP MySQL sees.
 4. **Create `mcp_acl_reader`** on the DB server (or add a GRANT if the user already exists
    for another entity on the same cluster).
-5. **Check ACL constants** — on the CRM app server:
+5. **Check ACL constants** - on the CRM app server:
    ```bash
    grep 'ACL_ALLOW_OWNER\|ACL_ALLOW_GROUP\|ACL_ALLOW_ALL\|ACL_ALLOW_DISABLED' \
      /path/to/suitecrm/public/legacy/modules/ACLActions/actiondefs.override.php
@@ -297,7 +297,7 @@ Then `sudo systemctl restart mysql`.
 
 Run after initial setup or any change to `acl-check.mjs` / `index.mjs`.
 
-**Test A — restricted user write (expect: DENIED)**
+**Test A - restricted user write (expect: DENIED)**
 
 Find a user with an explicit deny on a module action in the CRM:
 
@@ -315,17 +315,17 @@ ORDER BY u.user_name, aa.category LIMIT 20;
 Call the corresponding write tool. Response must contain `"Permission denied"` and
 `"isError": true`.
 
-**Test B — unrestricted user write (expect: SUCCESS or CRM error)**
+**Test B - unrestricted user write (expect: SUCCESS or CRM error)**
 
 Response must NOT contain `"Permission denied"`. A CRM-level error (record not found,
-network error) is acceptable — it means ACL passed.
+network error) is acceptable - it means ACL passed.
 
-**Test C — any user read (expect: NOT BLOCKED)**
+**Test C - any user read (expect: NOT BLOCKED)**
 
-Call `*_search` for any module. Response must return records or a CRM error — never
+Call `*_search` for any module. Response must return records or a CRM error - never
 `"Permission denied"`.
 
-**Test D — live permission change**
+**Test D - live permission change**
 
 Restrict a user in SuiteCRM Web UI → next write from that user must be blocked
 immediately, without restarting the service or flushing any cache.
@@ -334,7 +334,7 @@ immediately, without restarting the service or flushing any cache.
 
 ## 9. Checklist
 
-- [ ] DB host sourced from CRM's `config.php` — not assumed to be the app server IP
+- [ ] DB host sourced from CRM's `config.php` - not assumed to be the app server IP
 - [ ] `nc -zv <db_host> 3306` succeeds from the gateway
 - [ ] Connecting IP confirmed via the Section 6 Step 2 probe (especially if DB is behind a proxy)
 - [ ] `mcp_acl_reader` user exists with `SELECT ON <db>.*` grant from the correct connecting IP

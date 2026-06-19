@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 
 /**
  * Legacy REST API Bridge (v4.1)
- * Identical to 0-apiv8/server/bridges/legacy.mjs — no Redis changes needed here.
+ * Identical to 0-apiv8/server/bridges/legacy.mjs - no Redis changes needed here.
  * Session IDs are passed in/out by index.mjs which manages Redis persistence.
  */
 export class LegacyBridge {

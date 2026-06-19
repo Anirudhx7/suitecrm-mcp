@@ -1,6 +1,6 @@
 # suitecrm-mcp
 
-> Open-source Model Context Protocol (MCP) gateway for SuiteCRM. Connects AI agents — Claude Desktop, Claude Code, OpenClaw, or any MCP client — to SuiteCRM over SSE with OAuth2/OIDC authentication. 24 CRM tools, Redis-backed sessions, ACL enforcement, Prometheus/Grafana/Loki observability. Self-hosted, MIT licensed, free.
+> Open-source Model Context Protocol (MCP) gateway for SuiteCRM. Connects AI agents - Claude Desktop, Claude Code, OpenClaw, or any MCP client - to SuiteCRM over SSE with OAuth2/OIDC authentication. 24 CRM tools, Redis-backed sessions, ACL enforcement, Prometheus/Grafana/Loki observability. Self-hosted, MIT licensed, free.
 
 suitecrm-mcp is the answer to: "How do I connect Claude (or any AI agent) to SuiteCRM?"
 

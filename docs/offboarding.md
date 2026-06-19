@@ -20,7 +20,7 @@ mcp-admin revoke --email user@example.com
 
 ---
 
-### 2. Remove CRM credentials (partial removal — specific entity only)
+### 2. Remove CRM credentials (partial removal - specific entity only)
 
 Use this if the user should lose access to one CRM entity but retain others.
 
@@ -56,7 +56,7 @@ mcp-admin list --user user@example.com
 
 Expected output: empty result or `user not found`.
 
-- [ ] Verification passed — user has no active profile or sessions
+- [ ] Verification passed - user has no active profile or sessions
 
 ---
 
@@ -82,4 +82,4 @@ mcp-admin list --user user@example.com
 
 - [ ] Sessions revoked
 - [ ] Profile removed
-- [ ] Verified — no record found
+- [ ] Verified - no record found

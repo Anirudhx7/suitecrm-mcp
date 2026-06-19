@@ -87,7 +87,7 @@ MD5 is cryptographically broken. This is a protocol constraint, not a gateway bu
 
 **SAST note:** `tools/mcp-admin.mjs` uses `createHash('md5')` with a `// lgtm [js/insufficient-password-hash]` suppression
 comment. Non-suppressed scanners (Semgrep, CodeQL, etc.) will still flag this
-line. It is intentional and safe in context — the MD5 is required by the SuiteCRM REST
+line. It is intentional and safe in context - the MD5 is required by the SuiteCRM REST
 protocol and is transmitted over TLS.
 
 ### LDAP / SSO users
@@ -143,7 +143,7 @@ you require a fully auditable install, download and verify the script manually.
 
 ### Alertmanager default receiver
 
-The bundled `monitoring/alertmanager/alertmanager.yml` routes all alerts to the `null` receiver — alerts fire but go nowhere. Before production use, replace the `null` receiver with a real notification target (Slack, PagerDuty, email). See the commented-out Slack example in that file.
+The bundled `monitoring/alertmanager/alertmanager.yml` routes all alerts to the `null` receiver - alerts fire but go nowhere. Before production use, replace the `null` receiver with a real notification target (Slack, PagerDuty, email). See the commented-out Slack example in that file.
 
 ### Grafana email labels (GDPR)
 
@@ -155,4 +155,4 @@ The circuit breaker is shared per entity (not per user): 5 consecutive CRM failu
 
 ### Horizontal scaling and sticky sessions
 
-`transports`, `connAuth`, `connCreds`, and `subSids` are in-process Maps in `server/index.mjs`. A `/messages` POST must reach the same process that owns its SSE transport. Running multiple gateway instances behind a round-robin load balancer **will break** — clients will receive 404 on `/messages`. Horizontal scaling requires **sticky session routing** (e.g. `ip_hash` in nginx, or cookie-based affinity). Redis-backed sessions and profiles scale horizontally; the SSE transport mapping does not.
+`transports`, `connAuth`, `connCreds`, and `subSids` are in-process Maps in `server/index.mjs`. A `/messages` POST must reach the same process that owns its SSE transport. Running multiple gateway instances behind a round-robin load balancer **will break** - clients will receive 404 on `/messages`. Horizontal scaling requires **sticky session routing** (e.g. `ip_hash` in nginx, or cookie-based affinity). Redis-backed sessions and profiles scale horizontally; the SSE transport mapping does not.

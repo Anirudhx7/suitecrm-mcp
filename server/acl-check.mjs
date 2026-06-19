@@ -1,19 +1,19 @@
 import mysql from 'mysql2/promise';
 
 // =============================================================================
-// GATEWAY ACL DESIGN — FINAL (do not change without understanding the tradeoffs)
+// GATEWAY ACL DESIGN - FINAL (do not change without understanding the tradeoffs)
 // =============================================================================
 //
 // PURPOSE
 //   The gateway ACL is a defence-in-depth layer that enforces SuiteCRM's own
 //   permission tables *before* a write reaches the CRM API. It is NOT the only
-//   enforcer — the CRM API also checks permissions. The gateway layer exists so
+//   enforcer - the CRM API also checks permissions. The gateway layer exists so
 //   that a denied write is rejected early, without touching SuiteCRM at all.
 //
 // WHAT IS CHECKED
 //   Only destructive / mutating operations are checked (create, edit, delete).
 //   Read operations (list, view / search, get, get_many, etc.) are NOT checked
-//   here — the CRM API enforces read ACL natively and those checks are redundant
+//   here - the CRM API enforces read ACL natively and those checks are redundant
 //   at the gateway layer.
 //
 // HOW THE CHECK WORKS (live DB, no cache)
@@ -32,7 +32,7 @@ import mysql from 'mysql2/promise';
 //
 //   There is NO Redis caching of ACL data. Every write hits the live DB so that
 //   any permission change made in the SuiteCRM Web UI takes effect on the very
-//   next API call — no restarts, no cache flushes, no sync jobs required.
+//   next API call - no restarts, no cache flushes, no sync jobs required.
 //
 // FAILURE BEHAVIOUR
 //   - ACL DB not configured (no SUITECRM_DB_HOST)  → allow (entity has no ACL)
@@ -70,7 +70,7 @@ export const ACTION_MAP = { create: 'create', update: 'edit', delete: 'delete', 
 // Only these SuiteCRM action names trigger a live DB check.
 const WRITE_ACTIONS = new Set(['create', 'edit', 'delete']);
 
-// ACL permission level constants — configurable per entity via env vars.
+// ACL permission level constants - configurable per entity via env vars.
 // Defaults match standard SuiteCRM. Override if your install uses different values
 // (check modules/ACLActions/actiondefs.php or actiondefs.override.php).
 let ACL_ALLOW_ALL      = 89;
@@ -79,7 +79,7 @@ let ACL_ALLOW_OWNER    = 69;
 let ACL_ALLOW_DISABLED = -98;
 const ACL_DENY_ALL = -99;
 
-// MySQL pool — null when SUITECRM_DB_HOST is not set (ACL disabled for this entity).
+// MySQL pool - null when SUITECRM_DB_HOST is not set (ACL disabled for this entity).
 let pool = null;
 
 export function initAclDb() {
@@ -103,7 +103,7 @@ export function initAclDb() {
 }
 
 // Returns true if the user is DENIED this action on this module.
-// recordId is required for owner checks on edit/delete — pass null for create.
+// recordId is required for owner checks on edit/delete - pass null for create.
 export async function isAclDenied(crmUsername, module, aclAction, recordId = null) {
   if (!pool) return false;
   if (!WRITE_ACTIONS.has(aclAction)) return false;

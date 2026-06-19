@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SuiteCRM MCP Gateway — Activity Report Generator
+SuiteCRM MCP Gateway - Activity Report Generator
 Reads from the persistent audit log (SQLite: /var/log/suitecrm-mcp/audit.db),
 falls back to Loki for data before the DB existed.
 SMTP config is read from Alertmanager's config so you configure credentials once.
@@ -33,7 +33,7 @@ MAX_LOG_LINES    = 5000
 AUDIT_DB         = '/var/log/suitecrm-mcp/audit.db'
 
 # ---------------------------------------------------------------------------
-# SMTP config — read from alertmanager.yml so you configure SMTP in one place
+# SMTP config - read from alertmanager.yml so you configure SMTP in one place
 # ---------------------------------------------------------------------------
 def load_smtp_from_alertmanager(path=ALERTMANAGER_YML):
     """Parse SMTP settings out of alertmanager.yml global section and email_configs."""
@@ -78,19 +78,19 @@ def get_time_range(period: str, ref: datetime):
     end   = ref.replace(hour=0, minute=0, second=0, microsecond=0)
     if period == 'daily':
         start = end - timedelta(days=1)
-        label = f"Daily Report — {start.strftime('%A, %d %B %Y')}"
+        label = f"Daily Report - {start.strftime('%A, %d %B %Y')}"
     elif period == 'weekly':
         start = end - timedelta(days=7)
-        label = f"Weekly Report — {start.strftime('%d %b')} to {(end - timedelta(days=1)).strftime('%d %b %Y')}"
+        label = f"Weekly Report - {start.strftime('%d %b')} to {(end - timedelta(days=1)).strftime('%d %b %Y')}"
     elif period == 'monthly':
         start = end - timedelta(days=30)
-        label = f"Monthly Report — {start.strftime('%d %b')} to {(end - timedelta(days=1)).strftime('%d %b %Y')}"
+        label = f"Monthly Report - {start.strftime('%d %b')} to {(end - timedelta(days=1)).strftime('%d %b %Y')}"
     else:
         raise ValueError(f"Unknown period: {period}")
     return start, end, label
 
 # ---------------------------------------------------------------------------
-# Audit DB reader (primary source — persistent, email-indexed SQLite)
+# Audit DB reader (primary source - persistent, email-indexed SQLite)
 # ---------------------------------------------------------------------------
 def read_audit_db(start: datetime, end: datetime):
     """Read audit records from SQLite for the given time range."""
@@ -129,7 +129,7 @@ def read_audit_db(start: datetime, end: datetime):
     return records
 
 # ---------------------------------------------------------------------------
-# Loki query (fallback — used only if audit file has no data for the period)
+# Loki query (fallback - used only if audit file has no data for the period)
 # ---------------------------------------------------------------------------
 def loki_query(loki_base: str, logql: str, start: datetime, end: datetime, limit: int = MAX_LOG_LINES):
     params = {
@@ -320,11 +320,11 @@ def build_html(stats: dict, period_label: str, start: datetime, end: datetime) -
 
     return f"""<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>MCP Gateway — {period_label}</title></head>
+<head><meta charset="UTF-8"><title>MCP Gateway - {period_label}</title></head>
 <body style="font-family:Arial,sans-serif;max-width:960px;margin:0 auto;padding:20px;color:#333;font-size:14px">
 
   <div style="background:#1a73e8;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0">
-    <h1 style="margin:0;font-size:20px">SuiteCRM MCP Gateway — Activity Report</h1>
+    <h1 style="margin:0;font-size:20px">SuiteCRM MCP Gateway - Activity Report</h1>
     <p style="margin:4px 0 0;opacity:0.9;font-size:14px">{period_label}</p>
     <p style="margin:4px 0 0;opacity:0.75;font-size:12px">{start.strftime('%Y-%m-%d %H:%M UTC')} → {end.strftime('%Y-%m-%d %H:%M UTC')}</p>
   </div>
@@ -435,7 +435,7 @@ def send_email(smtp_cfg: dict, subject: str, html_body: str):
             # Implicit SSL (rare, legacy)
             server = smtplib.SMTP_SSL(host, port, timeout=30)
         else:
-            # Plain SMTP — internal relays, port 25, no TLS
+            # Plain SMTP - internal relays, port 25, no TLS
             server = smtplib.SMTP(host, port, timeout=30)
         if user:
             server.login(user, password)
@@ -476,7 +476,7 @@ def main():
     if entries:
         print(f"[INFO] {len(entries)} entries from audit DB", file=sys.stderr)
     else:
-        print(f"[INFO] Audit DB empty for this period — querying Loki", file=sys.stderr)
+        print(f"[INFO] Audit DB empty for this period - querying Loki", file=sys.stderr)
         entries = loki_query(loki_base, '{job="suitecrm-mcp", audit="true"} | json', start, end)
         print(f"[INFO] {len(entries)} entries from Loki", file=sys.stderr)
 
@@ -489,11 +489,11 @@ def main():
 
     titles = {'daily': 'Daily', 'weekly': 'Weekly', 'monthly': 'Monthly'}
     if args.period == 'daily':
-        subject = f"[MCP Gateway] Daily Activity — {start.strftime('%Y-%m-%d')}"
+        subject = f"[MCP Gateway] Daily Activity - {start.strftime('%Y-%m-%d')}"
     elif args.period == 'weekly':
-        subject = f"[MCP Gateway] Weekly Activity — w/e {(end - timedelta(days=1)).strftime('%Y-%m-%d')}"
+        subject = f"[MCP Gateway] Weekly Activity - w/e {(end - timedelta(days=1)).strftime('%Y-%m-%d')}"
     else:
-        subject = f"[MCP Gateway] Monthly Activity — {start.strftime('%b %Y')}"
+        subject = f"[MCP Gateway] Monthly Activity - {start.strftime('%b %Y')}"
 
     send_email(smtp_cfg, subject, html)
 

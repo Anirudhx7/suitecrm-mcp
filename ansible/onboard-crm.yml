@@ -1,11 +1,11 @@
 ---
 # ==============================================================
-# onboard-crm.yml — Onboard CRM VMs to the suitecrm-mcp gateway
+# onboard-crm.yml - Onboard CRM VMs to the suitecrm-mcp gateway
 # ==============================================================
-# Idempotent — safe to re-run anytime (e.g. when adding a new entity).
+# Idempotent - safe to re-run anytime (e.g. when adding a new entity).
 # Run after install.py has provisioned the gateway.
 #
-# Play 1 — push-crm-provisioner (crm_vms):
+# Play 1 - push-crm-provisioner (crm_vms):
 #   - Deploys crm-provision-user script to each CRM VM
 #   - Adds gateway SSH public key to each CRM VM's authorized_keys
 #   - Discovers SuiteCRM config.php and persists SUITECRM_CONFIG
@@ -14,11 +14,11 @@
 #   - Restarts the entity MCP service if .env changed
 #   - Runs a smoke test
 #
-# Play 2 — sync-gateway-config (gateway):
+# Play 2 - sync-gateway-config (gateway):
 #   - Rebuilds entities.json from inventory + discovered endpoints
 #   - Restarts suitecrm-mcp-auth if entities.json changed
 #
-# Play 3 — setup-acl-db-users (crm_vms, optional):
+# Play 3 - setup-acl-db-users (crm_vms, optional):
 #   - Deploys mcp_acl_setup.sh, creates mcp_acl_reader SuiteCRM user (run-once)
 #   - Fixes OAuth2 token lifetime to 30 days (run-once)
 #   - Creates read-only MySQL mcp_acl_reader user for direct ACL queries (idempotent)
@@ -59,7 +59,7 @@
         state: present
         update_cache: no
 
-    # ── Script deployment — redeploys if source changed ──────────
+    # ── Script deployment - redeploys if source changed ──────────
     - name: Check deployed script stat
       stat:
         path: /usr/local/bin/crm-provision-user
@@ -403,14 +403,14 @@
     - name: Report OAuth2 key status
       debug:
         msg: >
-          {{ oauth2_key_dir }}: {{ 'keys already exist — skipped' if oauth2_key_stat.stat.exists | default(false)
-          else 'generated as ' + (ws_user | default('unknown')) + ' — private.key + public.key OK' }}
+          {{ oauth2_key_dir }}: {{ 'keys already exist - skipped' if oauth2_key_stat.stat.exists | default(false)
+          else 'generated as ' + (ws_user | default('unknown')) + ' - private.key + public.key OK' }}
       when: _do_oauth_keys
 
     - name: Confirm CRM VM deployment
       debug:
         msg: >
-          {{ inventory_hostname }} ({{ hostvars[inventory_hostname].entity_code }}) ready —
+          {{ inventory_hostname }} ({{ hostvars[inventory_hostname].entity_code }}) ready -
           config: {{ final_config_path }} |
           endpoint: {{ derived_endpoint | default(entity_endpoint.stdout | default('not changed') | trim) }}
 
@@ -494,7 +494,7 @@
 
 
 # ==============================================================
-# Play 3: ACL enforcement setup (optional — set acl_enabled: true)
+# Play 3: ACL enforcement setup (optional - set acl_enabled: true)
 # ==============================================================
 # Two things happen here:
 #
@@ -543,7 +543,7 @@
 
     - name: Fail if SUITECRM_CONFIG not set (run crm-fleet-sync.yml Play 1 first)
       fail:
-        msg: "SUITECRM_CONFIG not set on {{ inventory_hostname }} — run crm-fleet-sync.yml Play 1 first."
+        msg: "SUITECRM_CONFIG not set on {{ inventory_hostname }} - run crm-fleet-sync.yml Play 1 first."
       when: crm_config_path == ""
 
     # ── Deploy mcp_acl_setup.sh (one-time tool, stays on VM) ─────

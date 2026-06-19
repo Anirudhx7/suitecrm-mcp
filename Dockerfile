@@ -16,5 +16,5 @@ EXPOSE 3101
 EXPOSE 9090
 EXPOSE 9091
 # Healthcheck defined per-service in docker-compose (auth=3100, gateway=3101).
-# No default here — hardcoding either port would be wrong for the other service.
+# No default here - hardcoding either port would be wrong for the other service.
 CMD ["node", "index.mjs"]

@@ -248,7 +248,7 @@ def _test_graphql_api(base_url):
             req.add_header("Content-Type", "application/json")
             req.add_header("User-Agent", "SuiteCRM-MCP-Installer/1.5")
             with urllib.request.urlopen(req, timeout=API_DETECT_TIMEOUT, context=ctx):
-                return True, endpoint  # 200 — endpoint live
+                return True, endpoint  # 200 - endpoint live
         except urllib.error.HTTPError as e:
             if e.code in (400, 401, 403):  # endpoint exists, auth/query error expected
                 return True, endpoint
@@ -317,7 +317,7 @@ def _collect_v8_endpoint(base_url, code):
 def prompt_entity_config(entity_code=None, default_port=3101, api_mode=None):
     """
     Interactively gather one entity's config.
-    api_mode: "v4" | "v8" | "both" — if None, prompted interactively.
+    api_mode: "v4" | "v8" | "both" - if None, prompted interactively.
     Returns entities.json-style dict plus 'code' key.
     """
     print()
@@ -336,9 +336,9 @@ def prompt_entity_config(entity_code=None, default_port=3101, api_mode=None):
     if api_mode is None:
         print()
         print(f"  [{code}] Which SuiteCRM API version are you connecting to?")
-        print("    [1] v4 only  — legacy REST  (SuiteCRM 7.x / older)")
-        print("    [2] v8 only  — GraphQL      (SuiteCRM 8.x)")
-        print("    [3] Both     — v4 REST + v8 GraphQL on the same CRM")
+        print("    [1] v4 only  - legacy REST  (SuiteCRM 7.x / older)")
+        print("    [2] v8 only  - GraphQL      (SuiteCRM 8.x)")
+        print("    [3] Both     - v4 REST + v8 GraphQL on the same CRM")
         api_choice = input(f"  [{code}] API version [1/2/3, default=1]: ").strip()
         if api_choice == "2":
             api_mode = "v8"
@@ -614,7 +614,7 @@ def install_auth_service(auth_cfg):
         f"PrivateTmp=yes\n"
         f"ProtectSystem=strict\n"
         f"ProtectHome=yes\n"
-        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server\n\n"
+        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server /var/log/suitecrm-mcp\n\n"
         f"[Install]\n"
         f"WantedBy=multi-user.target\n"
     )
@@ -643,7 +643,7 @@ def install_profile_admin():
         run(["chmod", "750", f"{SERVER_DIR}/mcp-admin.mjs"])
         run(["chown", f"{SVC_USER}:{SVC_USER}", f"{SERVER_DIR}/mcp-admin.mjs"])
     ok(f"Admin tool: {PROFILE_ADMIN_DEST}")
-    # Remove legacy mcp-report symlink — reporting moved into mcp-admin report
+    # Remove legacy mcp-report symlink - reporting moved into mcp-admin report
     stale = Path("/usr/local/bin/mcp-report")
     if stale.is_symlink() or stale.exists():
         stale.unlink(missing_ok=True)
@@ -746,7 +746,7 @@ def setup_crm_host(code, host_cfg):
     provision_bin = "/usr/local/bin/crm-provision-user"
 
     info(f"  [{code}] Copying provision script to {target} ...")
-    # Remove stale copy first — a previous failed run can leave it owned by root
+    # Remove stale copy first - a previous failed run can leave it owned by root
     run(["ssh"] + ssh_opts + [target, "sudo rm -f /tmp/crm-provision-user"],
         check=False, capture=True)
     r = run(["scp"] + ssh_opts + [str(src), f"{target}:/tmp/crm-provision-user"],
@@ -764,7 +764,7 @@ def setup_crm_host(code, host_cfg):
 
     ok(f"  [{code}] Provision script deployed to {ssh_host}:{provision_bin}")
 
-    # Resolve SUITECRM_CONFIG — mirrors ansible/deploy.yml logic:
+    # Resolve SUITECRM_CONFIG - mirrors ansible/deploy.yml logic:
     # 1. Read from /etc/environment if already set (persisted by previous run)
     # 2. Otherwise run find-suitecrm-config.sh as root and persist the result
     # 3. Fall back to manual prompt if discovery fails
@@ -782,9 +782,9 @@ def setup_crm_host(code, host_cfg):
         config_path = candidate
         ok(f"  [{code}] SUITECRM_CONFIG already set: {config_path}")
 
-    # Step 2: discover — same find command used inside crm-provision-user.sh
+    # Step 2: discover - same find command used inside crm-provision-user.sh
     if not config_path:
-        info(f"  [{code}] Not set — running discovery (may take a minute) ...")
+        info(f"  [{code}] Not set - running discovery (may take a minute) ...")
         find_cmd = (
             "sudo bash -c '"
             "find / \\( -path /proc -o -path /sys -o -path /dev \\) -prune -o"
@@ -819,7 +819,7 @@ def setup_crm_host(code, host_cfg):
         warn(f"  [{code}] Could not auto-detect config.php on {ssh_host}")
         config_path = _prompt(f"  [{code}] Enter SUITECRM_CONFIG path on the CRM VM").strip()
         if not config_path or not config_path.startswith("/"):
-            warn(f"  [{code}] No valid path provided — skipping")
+            warn(f"  [{code}] No valid path provided - skipping")
             return False
         ok(f"  [{code}] SUITECRM_CONFIG={config_path}")
 
@@ -1059,11 +1059,11 @@ def _write_monitoring_htpasswd():
             elif line.startswith("MONITORING_ADMIN_PASSWORD="):
                 pw = line.split("=", 1)[1].strip()
     if not pw:
-        warn("  MONITORING_ADMIN_PASSWORD not set in .env — skipping htpasswd")
+        warn("  MONITORING_ADMIN_PASSWORD not set in .env - skipping htpasswd")
         return
     r = run(["openssl", "passwd", "-apr1", pw], capture=True, check=False)
     if r.returncode != 0:
-        warn("  openssl not available — skipping htpasswd (Prometheus/Alertmanager will be unprotected)")
+        warn("  openssl not available - skipping htpasswd (Prometheus/Alertmanager will be unprotected)")
         return
     hashed = r.stdout.strip()
     write_file(MONITORING_HTPASSWD, f"{user}:{hashed}\n", mode="640")
@@ -1113,7 +1113,7 @@ def install_monitoring(entities, domain=None, nginx_port=None):
     pass_file = Path(ENV_DIR) / "redis_pass"
     redis_pass = pass_file.read_text().strip() if pass_file.exists() else ""
 
-    # .env — credentials + dynamic URLs (safe to re-run; preserves existing passwords)
+    # .env - credentials + dynamic URLs (safe to re-run; preserves existing passwords)
     _write_monitoring_env(domain, redis_pass)
 
     # htpasswd for nginx basic auth on Prometheus and Alertmanager
@@ -1144,7 +1144,7 @@ def install_monitoring(entities, domain=None, nginx_port=None):
         if r.returncode == 0:
             ok("  Grafana admin password synced")
         else:
-            warn("  Could not sync Grafana password — run manually if needed: mcp-admin monitoring reset-grafana-password")
+            warn("  Could not sync Grafana password - run manually if needed: mcp-admin monitoring reset-grafana-password")
 
     # Systemd unit to start monitoring on boot
     unit = (
@@ -1175,10 +1175,10 @@ def install_monitoring(entities, domain=None, nginx_port=None):
         info("Monitoring UIs (via nginx):")
     elif nginx_port:
         base = f"http://{_ip}:{nginx_port}"
-        info("Monitoring UIs (via nginx — accessible from any browser on the network):")
+        info("Monitoring UIs (via nginx - accessible from any browser on the network):")
     else:
         base = None
-        info("Monitoring UIs (direct ports — accessible from any browser on the network):")
+        info("Monitoring UIs (direct ports - accessible from any browser on the network):")
 
     if base:
         print(f"  Grafana       : {base}/grafana/")
@@ -1200,7 +1200,7 @@ def _monitoring_nginx_block():
     """Return nginx location blocks for the monitoring UIs."""
     return (
         "\n    # Monitoring UIs (installed by --monitoring)\n"
-        # Grafana WebSocket (live streaming) — must come before the general /grafana/ block
+        # Grafana WebSocket (live streaming) - must come before the general /grafana/ block
         "    location /grafana/api/live/ {\n"
         "        proxy_pass http://127.0.0.1:3001/grafana/api/live/;\n"
         "        proxy_http_version 1.1;\n"
@@ -1319,12 +1319,12 @@ def install_audit():
     # ── better-sqlite3 native module ─────────────────────────────────────────
     # npm ci installs it as an optional dependency. If the native binary was not
     # built (no pre-built binary for this Node version + no build tools), we
-    # install build-essential and compile it now — same pattern as install_redis().
+    # install build-essential and compile it now - same pattern as install_redis().
     native_addon = Path(SERVER_DIR) / "node_modules" / "better-sqlite3" / "build" / "Release" / "better_sqlite3.node"
     if native_addon.exists():
         ok("better-sqlite3: present")
     else:
-        info("better-sqlite3 native module not found — installing build tools and compiling ...")
+        info("better-sqlite3 native module not found - installing build tools and compiling ...")
         if run(["dpkg", "-l", "build-essential"], check=False, capture=True).returncode != 0:
             run(["apt-get", "update", "-qq"])
             run(["apt-get", "install", "-y", "build-essential", "python3-dev"])
@@ -1373,21 +1373,21 @@ def install_audit():
     alert_script = f"{SERVER_DIR}/scripts/audit-alert.py"
     audit_block = (
         f"\n{marker_start}\n"
-        f"# Notorious user alerts — every 15 minutes, fires to Alertmanager\n"
+        f"# Notorious user alerts - every 15 minutes, fires to Alertmanager\n"
         f"*/15 * * * * /usr/bin/python3 {alert_script} >> {log_file} 2>&1\n"
-        f"# Daily activity report — 7:00 AM UTC\n"
+        f"# Daily activity report - 7:00 AM UTC\n"
         f"0 7 * * * /usr/local/bin/mcp-admin report --period daily >> {log_file} 2>&1\n"
-        f"# Weekly activity report — Monday 7:30 AM UTC\n"
+        f"# Weekly activity report - Monday 7:30 AM UTC\n"
         f"30 7 * * 1 /usr/local/bin/mcp-admin report --period weekly >> {log_file} 2>&1\n"
-        f"# Monthly activity report — 1st of month 8:00 AM UTC\n"
+        f"# Monthly activity report - 1st of month 8:00 AM UTC\n"
         f"0 8 1 * * /usr/local/bin/mcp-admin report --period monthly >> {log_file} 2>&1\n"
-        f"# Audit DB retention — delete records older than 730 days, nightly 3:00 AM UTC\n"
+        f"# Audit DB retention - delete records older than 730 days, nightly 3:00 AM UTC\n"
         f"0 3 * * * /usr/bin/python3 -c \""
         f"import sqlite3; db=sqlite3.connect('/var/log/suitecrm-mcp/audit.db'); "
         f"db.execute(\\\"DELETE FROM audit_log WHERE ts < datetime('now','-730 days')\\\"); "
         f"db.execute('VACUUM'); db.commit(); db.close()"
         f"\" >> {log_file} 2>&1\n"
-        f"# Audit DB backup — weekly snapshot, Sundays 2:00 AM UTC, keep 8 weeks\n"
+        f"# Audit DB backup - weekly snapshot, Sundays 2:00 AM UTC, keep 8 weeks\n"
         f"0 2 * * 0 cp /var/log/suitecrm-mcp/audit.db /var/backups/suitecrm-mcp/audit-$(date +\\%Y-\\%m-\\%d).db "
         f"&& find /var/backups/suitecrm-mcp/ -name 'audit-*.db' -mtime +56 -delete >> {log_file} 2>&1\n"
         f"{marker_end}\n"
@@ -1397,7 +1397,7 @@ def install_audit():
     if proc.returncode == 0:
         ok("Audit cron jobs installed")
     else:
-        warn("Could not install audit cron jobs — set them up manually")
+        warn("Could not install audit cron jobs - set them up manually")
 
     ok("Audit directories and permissions configured")
 
@@ -1543,7 +1543,7 @@ def install_entity(code, data, is_multi, oauth_cfg=None):
         f"PrivateTmp=yes\n"
         f"ProtectSystem=strict\n"
         f"ProtectHome=yes\n"
-        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server\n\n"
+        f"ReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server /var/log/suitecrm-mcp\n\n"
         f"[Install]\n"
         f"WantedBy=multi-user.target\n"
     )
@@ -1764,9 +1764,16 @@ def apply_update_hardening(codes, is_multi):
                 unit = unit.replace(
                     "SyslogIdentifier=",
                     "NoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\n"
-                    "ProtectHome=yes\nReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server\n"
+                    "ProtectHome=yes\nReadWritePaths=/etc/suitecrm-mcp /opt/suitecrm-mcp-server /var/log/suitecrm-mcp\n"
                     "SyslogIdentifier=",
                 )
+                changed = True
+            elif "ReadWritePaths=" in unit and "/var/log/suitecrm-mcp" not in unit:
+                # Unit already hardened but missing /var/log/suitecrm-mcp; also fix old
+                # /opt/suitecrm-mcp path that predates the -server rename
+                import re as _re
+                unit = _re.sub(r'/opt/suitecrm-mcp(?!-server)', '/opt/suitecrm-mcp-server', unit)
+                unit = _re.sub(r'(ReadWritePaths=.*)', r'\1 /var/log/suitecrm-mcp', unit)
                 changed = True
             # Migrate stale ExecStart paths from old install location
             if "/opt/suitecrm-mcp/index.mjs" in unit:
@@ -1990,7 +1997,7 @@ def main():
     parser.add_argument("--monitoring", action="store_true",
                         help="Install Prometheus/Grafana/Loki monitoring stack via Docker")
     parser.add_argument("--monitoring-only", dest="monitoring_only", action="store_true",
-                        help="Reinstall/update monitoring stack only — skips all CRM service steps")
+                        help="Reinstall/update monitoring stack only - skips all CRM service steps")
     parser.add_argument("--setup-crm-host", dest="setup_crm_host", metavar="CODE",
                         help="Deploy provision script to CRM VM for entity CODE")
     args = parser.parse_args()

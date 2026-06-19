@@ -1,6 +1,6 @@
 {
   "uid": "suitecrm-mcp-user-activity",
-  "title": "SuiteCRM MCP — User Activity",
+  "title": "SuiteCRM MCP - User Activity",
   "tags": ["suitecrm", "audit", "users"],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -241,7 +241,7 @@
           "datasource": { "type": "loki", "uid": "Loki" },
           "expr": "sum by (email, tool) (count_over_time({job=\"suitecrm-mcp\", entity=~\"$entity\", audit=\"true\"} | json | msg=\"tool_done\" [$__range]))",
           "instant": true,
-          "legendFormat": "{{email}} — {{tool}}"
+          "legendFormat": "{{email}} - {{tool}}"
         }
       ],
       "transformations": [
@@ -445,14 +445,14 @@
 
     {
       "id": 40,
-      "title": "User Detail — Filtered View",
+      "title": "User Detail - Filtered View",
       "type": "row",
       "collapsed": false,
       "gridPos": { "x": 0, "y": 59, "w": 24, "h": 1 }
     },
     {
       "id": 41,
-      "title": "Calls Over Time — $user_filter",
+      "title": "Calls Over Time - $user_filter",
       "type": "timeseries",
       "gridPos": { "x": 0, "y": 60, "w": 12, "h": 8 },
       "datasource": { "type": "loki", "uid": "Loki" },
@@ -471,7 +471,7 @@
     },
     {
       "id": 42,
-      "title": "Tool Breakdown — $user_filter",
+      "title": "Tool Breakdown - $user_filter",
       "type": "barchart",
       "gridPos": { "x": 12, "y": 60, "w": 12, "h": 8 },
       "datasource": { "type": "loki", "uid": "Loki" },
@@ -494,7 +494,7 @@
     },
     {
       "id": 43,
-      "title": "Audit Log — $user_filter",
+      "title": "Audit Log - $user_filter",
       "type": "logs",
       "gridPos": { "x": 0, "y": 68, "w": 24, "h": 10 },
       "datasource": { "type": "loki", "uid": "Loki" },

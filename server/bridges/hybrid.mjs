@@ -2,7 +2,7 @@
  * Hybrid CRM Bridge
  * Implements a prioritized dual-API strategy (SuiteCRM 8 GraphQL + v4_1 REST fallback).
  * Ensures zero feature regression by failing back to LegacyBridge.
- * NOTE: This file is identical to 0-apiv8/server/bridges/hybrid.mjs — no changes needed.
+ * NOTE: This file is identical to 0-apiv8/server/bridges/hybrid.mjs - no changes needed.
  */
 export class HybridBridge {
   constructor(v8Bridge, v4Bridge, options = {}) {

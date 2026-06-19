@@ -126,7 +126,7 @@
     },
 
     { "id": 13, "type": "stat", "title": "Zombie sid2sub Keys",
-      "description": "crm:sid2sub:* entries not pointed to by any sub2sid — should be 0 or minimal",
+      "description": "crm:sid2sub:* entries not pointed to by any sub2sid - should be 0 or minimal",
       "gridPos": { "x": 8, "y": 5, "w": 4, "h": 4 },
       "fieldConfig": {
         "defaults": {
@@ -141,7 +141,7 @@
     },
 
     { "id": 14, "type": "stat", "title": "sub→sid Mappings",
-      "description": "crm:sub2sid:* — active user-to-connection pointers. One per online user.",
+      "description": "crm:sub2sid:* - active user-to-connection pointers. One per online user.",
       "gridPos": { "x": 12, "y": 5, "w": 4, "h": 4 },
       "fieldConfig": { "defaults": { "color": {"mode":"fixed","fixedColor":"purple"} } },
       "options": { "reduceOptions": {"calcs":["lastNotNull"]}, "colorMode": "value", "graphMode": "area" },

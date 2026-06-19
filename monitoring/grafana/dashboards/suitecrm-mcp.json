@@ -153,7 +153,7 @@
           "value": ".*"
         },
         "hide": 0,
-        "description": "Email or sub \u2014 regex, leave as .* for all users"
+        "description": "Email or sub - regex, leave as .* for all users"
       }
     ]
   },

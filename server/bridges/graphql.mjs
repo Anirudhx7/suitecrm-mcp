@@ -53,7 +53,7 @@ export class GraphQLBridge {
   }
 
   async searchRecords(v8Session, { module, query='', fields=[], max_results=20, offset=0 }) {
-    // SQL WHERE filters not supported by GraphQL v8 — throw to trigger HybridBridge fallback
+    // SQL WHERE filters not supported by GraphQL v8 - throw to trigger HybridBridge fallback
     if (query && query.trim()) throw new Error('GraphQL bridge does not support SQL query filters; falling back to legacy API');
     // SuiteCRM 8.8.1: recordList query; records/meta are Iterable scalars (no sub-selection)
     const gql = `query GetRecords($module: String!, $limit: Int, $offset: Int) { recordList(module: $module, limit: $limit, offset: $offset) { records meta } }`;
@@ -97,7 +97,7 @@ export class GraphQLBridge {
   }
 
   async countRecords(v8Session, { module, query='' }) {
-    // SQL WHERE filters not supported by GraphQL v8 — throw to trigger HybridBridge fallback
+    // SQL WHERE filters not supported by GraphQL v8 - throw to trigger HybridBridge fallback
     if (query && query.trim()) throw new Error('GraphQL bridge does not support SQL query filters; falling back to legacy API');
     const gql = `query CountRecords($module: String!) { recordList(module: $module, limit: 1) { meta } }`;
     const data = await this.rawCall(v8Session, gql, { module });

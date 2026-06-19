@@ -694,6 +694,7 @@
         <a href="#admin-session-issues" class="sub">Session issues</a>
         <a href="#admin-ops" class="sub">Ops commands</a>
         <a href="#admin-emergency" class="sub">Emergency</a>
+        <a href="#admin-report" class="sub">Activity reports</a>
       </nav>
     </div>
     <div class="sidebar-group">
@@ -1104,7 +1105,7 @@ WHERE deleted=0;"</pre>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">javascript</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre>exports.onExecutePostLogin = async (event, api) => {
-  // Must match AUTH0_AUDIENCE — the API identifier you set in Step 3
+  // Must match AUTH0_AUDIENCE - the API identifier you set in Step 3
   const ns = 'https://mcp.yourcompany.com/';
 
   const sam = event.user.upn
@@ -1119,7 +1120,7 @@ WHERE deleted=0;"</pre>
   api.idToken.setCustomClaim(ns + 'groups', groups);
 };</pre>
       </div>
-      <div class="callout callout-info">Replace <code>https://mcp.yourcompany.com/</code> with the <strong>Auth0 API identifier</strong> you set in Step 3 — this is the same value as <code>AUTH0_AUDIENCE</code> in your gateway <code>.env</code>. The namespace must match exactly or the gateway will not find the claims.</div>
+      <div class="callout callout-info">Replace <code>https://mcp.yourcompany.com/</code> with the <strong>Auth0 API identifier</strong> you set in Step 3 - this is the same value as <code>AUTH0_AUDIENCE</code> in your gateway <code>.env</code>. The namespace must match exactly or the gateway will not find the claims.</div>
       <ol start="5">
         <li>Go to <strong>Actions &gt; Triggers &gt; post-login</strong></li>
         <li>Drag your new action from the right panel into the flow and click <strong>Apply</strong></li>
@@ -1714,6 +1715,46 @@ sudo python3 install.py --add --config entities.json --skip-oauth</pre>
         <pre>sudo python3 install.py --config entities.json --domain mcp.yourcompany.com --email you@example.com --skip-oauth</pre>
       </div>
 
+      <hr class="sub-divider" />
+      <h3 id="admin-report">Activity reports</h3>
+      <p>Generate an HTML activity report covering all tool calls across all users. Data is pulled from both Loki (full history) and the local SQLite audit database, merged automatically so neither source hides the other.</p>
+      <div class="table-wrap">
+        <table class="docs-table">
+          <thead><tr><th>Command</th><th>When to use it</th></tr></thead>
+          <tbody>
+            <tr><td><code>mcp-admin report</code></td><td>Daily summary for all users (default period: past 24 hours).</td></tr>
+            <tr><td><code>mcp-admin report --period weekly</code></td><td>Past 7 days.</td></tr>
+            <tr><td><code>mcp-admin report --period monthly</code></td><td>Past 30 days.</td></tr>
+            <tr><td><code>mcp-admin report --user alice@example.com</code></td><td>Per-user detail: successful calls, dry runs, and errors with module, record ID, and field breakdown.</td></tr>
+            <tr><td><code>mcp-admin report --serve</code></td><td>Publish the latest report at <code>/report</code> via nginx. URL is derived from <code>GATEWAY_PUBLIC_URL</code>.</td></tr>
+            <tr><td><code>mcp-admin report --date 2026-06-15</code></td><td>Report for the week ending a specific date instead of today.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">bash</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
+        <pre><span class="cm"># Daily summary (default)</span>
+mcp-admin report
+
+<span class="cm"># Weekly summary</span>
+mcp-admin report --period weekly
+
+<span class="cm"># Monthly summary</span>
+mcp-admin report --period monthly
+
+<span class="cm"># Per-user detail report</span>
+mcp-admin report --user alice@example.com
+
+<span class="cm"># Serve the report at /report via nginx</span>
+mcp-admin report --serve
+
+<span class="cm"># Per-user report anchored to a specific date</span>
+mcp-admin report --user alice@example.com --date 2026-06-15</pre>
+      </div>
+      <div class="callout callout-info">
+        <strong>Data sources:</strong> Loki holds the full call history. SQLite holds calls from when the audit database was enabled. <code>mcp-admin report</code> merges both automatically - Loki fills the historical gap, SQLite covers the current period. The report header shows which source was used. Non-PII fields (status, stage, type, dates) appear with their actual values; sensitive fields (names, emails, search queries) remain redacted.
+      </div>
+
     </section>
 
 <section class="doc-section" id="observability">
@@ -2113,7 +2154,7 @@ SHOW GRANTS FOR 'mcp_acl_reader'@'&lt;connecting_ip&gt;';   # verify</pre>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">nginx</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre><span class="cm"># /etc/nginx/sites-available/suitecrm-mcp</span>
-<span class="cm"># Single-entity config — certbot will add SSL directives automatically.</span>
+<span class="cm"># Single-entity config - certbot will add SSL directives automatically.</span>
 server {
     listen 80;
     server_name mcp.example.com;    <span class="cm"># replace with your domain</span>
@@ -2122,7 +2163,7 @@ server {
     access_log /var/log/nginx/suitecrm-mcp.access.log;
     error_log  /var/log/nginx/suitecrm-mcp.error.log;
 
-    <span class="cm"># SSE endpoint — long-lived connection, access_log off reduces noise</span>
+    <span class="cm"># SSE endpoint - long-lived connection, access_log off reduces noise</span>
     location = /messages {
         access_log off;
         proxy_pass http://127.0.0.1:3101/messages;
@@ -2162,7 +2203,7 @@ nginx -t &amp;&amp; systemctl reload nginx</pre>
       <div class="code-block">
         <div class="code-header"><span class="code-lang">nginx</span><button class="copy-btn" onclick="copyBlock(this)">Copy</button></div>
         <pre><span class="cm"># /etc/nginx/sites-available/suitecrm-mcp</span>
-<span class="cm"># Generated by install.py — edit to match your entity codes and ports.</span>
+<span class="cm"># Generated by install.py - edit to match your entity codes and ports.</span>
 server {
     listen 8080;           <span class="cm"># change to: listen 80; server_name mcp.example.com; when using a domain</span>
     server_name _;
@@ -2171,13 +2212,13 @@ server {
     access_log /var/log/nginx/suitecrm-mcp.access.log;
     error_log  /var/log/nginx/suitecrm-mcp.error.log;
 
-    <span class="cm"># Health check — returns {"gateway":"ok","entities":N}</span>
+    <span class="cm"># Health check - returns {"gateway":"ok","entities":N}</span>
     location /health {
         default_type application/json;
         return 200 '{"gateway":"ok","entities":2}';
     }
 
-    <span class="cm"># OAuth2 login and callback — handled by the auth service (port 3100)</span>
+    <span class="cm"># OAuth2 login and callback - handled by the auth service (port 3100)</span>
     location /auth/ {
         proxy_pass http://127.0.0.1:3100/auth/;
         proxy_http_version 1.1;
@@ -2193,7 +2234,7 @@ server {
         return 302 /auth/login;
     }
 
-    <span class="cm"># Entity: crm1 — SSE endpoint (access_log off reduces noise from long-lived connections)</span>
+    <span class="cm"># Entity: crm1 - SSE endpoint (access_log off reduces noise from long-lived connections)</span>
     location = /crm1/messages {
         access_log off;
         proxy_pass http://127.0.0.1:3101/messages;
@@ -2205,7 +2246,7 @@ server {
         proxy_cache off;
         proxy_read_timeout 3600s;
     }
-    <span class="cm"># Entity: crm1 — all other routes</span>
+    <span class="cm"># Entity: crm1 - all other routes</span>
     location /crm1/ {
         proxy_pass http://127.0.0.1:3101/;
         proxy_http_version 1.1;
@@ -2217,7 +2258,7 @@ server {
         proxy_read_timeout 3600s;
     }
 
-    <span class="cm"># Entity: crm2 — SSE endpoint</span>
+    <span class="cm"># Entity: crm2 - SSE endpoint</span>
     location = /crm2/messages {
         access_log off;
         proxy_pass http://127.0.0.1:3102/messages;
@@ -2229,7 +2270,7 @@ server {
         proxy_cache off;
         proxy_read_timeout 3600s;
     }
-    <span class="cm"># Entity: crm2 — all other routes</span>
+    <span class="cm"># Entity: crm2 - all other routes</span>
     location /crm2/ {
         proxy_pass http://127.0.0.1:3102/;
         proxy_http_version 1.1;

@@ -449,7 +449,7 @@ function pollBridgeSession(nonce) {{
           saveToken(data.api_key);
           activeNonce  = null;
           clientSecret = null;
-          process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received — connecting\\n`);
+          process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received - connecting\\n`);
           backoffIdx = 0; nextRetryAt = 0;
           connect();
           return;

@@ -2314,8 +2314,9 @@
           </div>
           <div class="feature-card fade-up delay-4">
             <h3>Redacted Audit Logs</h3>
-            <p>All tool calls are logged with user sub, entity, and tool name. Sensitive fields - tokens, passwords,
-              search strings - are redacted before writing.</p>
+            <p>All tool calls are logged with user sub, entity, and tool name. Sensitive fields (names, emails, search
+              queries) are always redacted. Non-PII fields (status, stage, type, dates) log actual values so reports
+              remain informative.</p>
           </div>
           <div class="feature-card fade-up delay-5">
             <h3>Per-Entity Access Control</h3>
@@ -2445,13 +2446,14 @@
               <li><code>health</code>, <code>health-deep</code>, <code>entities</code>, and <code>stats</code> make deployment checks quick.</li>
               <li><code>restart crm1</code> or <code>restart --all</code> refreshes gateway instances after changes.</li>
               <li><code>flush --yes-i-am-sure</code> kills all sessions when credentials are compromised.</li>
+              <li><code>report</code> and <code>report --user X</code> generate HTML activity reports from Loki and SQLite with per-user drill-down.</li>
             </ul>
           </div>
         </div>
         <div class="admin-terminal fade-up delay-4"><span class="t-prompt">$ </span>mcp-admin list<br><span
             class="t-prompt">$ </span>mcp-admin whoami --email alice@example.com<br><span class="t-prompt">$
           </span>mcp-admin test --email alice@example.com --entity crm1<br><span class="t-prompt">$ </span>mcp-admin
-          health-deep</div>
+          health-deep<br><span class="t-prompt">$ </span>mcp-admin report --user alice@example.com</div>
       </div>
     </section>
 
@@ -2547,10 +2549,10 @@
               aria-hidden="false">
               <p class="step-note" style="margin-bottom:12px;font-weight:600;color:var(--text-primary);">The entire
                 setup is just 3 steps:</p>
-              <div class="prereq-callout" style="margin-bottom:12px;padding:10px 14px;"><strong>Step 1 — Install
+              <div class="prereq-callout" style="margin-bottom:12px;padding:10px 14px;"><strong>Step 1 - Install
                   Node.js:</strong> Download from <a href="https://nodejs.org/" target="_blank"
                   style="color:var(--accent);">nodejs.org</a> (if not already installed)</div>
-              <div class="prereq-callout" style="margin-bottom:12px;padding:10px 14px;"><strong>Step 2 — Edit
+              <div class="prereq-callout" style="margin-bottom:12px;padding:10px 14px;"><strong>Step 2 - Edit
                   claude_desktop_config.json:</strong> Add your API key from Step 02 </div>
               <div class="qs-code-wrap">
                 <div class="terminal" style="max-width:100%;margin-bottom:0;">
@@ -2584,7 +2586,7 @@
                 </div>
                 <button type="button" class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
               </div>
-              <div class="prereq-callout" style="margin-bottom:16px;padding:10px 14px;"><strong>Step 3 — Restart Claude
+              <div class="prereq-callout" style="margin-bottom:16px;padding:10px 14px;"><strong>Step 3 - Restart Claude
                   Desktop:</strong> Fully quit &rarr; reopen. Done.</div>
               <a href="docs.html#connect-desktop" class="qs-full-link">Full guide <svg width="14" height="14"
                   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
@@ -2628,7 +2630,7 @@
             <div class="qs-panel" id="qs-panel-openclaw" role="tabpanel" aria-labelledby="qs-tab-openclaw"
               aria-hidden="true">
               <p class="step-note" style="margin-bottom:12px;font-weight:600;color:var(--text-primary);">The entire setup is just 3 steps:</p>
-              <div class="prereq-callout" style="margin-bottom:12px;padding:10px 14px;"><strong>Step 1 — Install bridge:</strong> Run the installer on the OpenClaw machine</div>
+              <div class="prereq-callout" style="margin-bottom:12px;padding:10px 14px;"><strong>Step 1 - Install bridge:</strong> Run the installer on the OpenClaw machine</div>
               <div class="qs-code-wrap" style="margin-bottom:12px;">
                 <div class="terminal" style="max-width:100%;margin-bottom:0;">
                   <div class="terminal-header">
@@ -2644,8 +2646,8 @@
                 </div>
                 <button type="button" class="qs-copy-btn" onclick="copyQS(this)">Copy</button>
               </div>
-              <div class="prereq-callout" style="margin-bottom:12px;padding:10px 14px;"><strong>Step 2 — Restart OpenClaw:</strong> <code style="background:transparent;padding:0;color:inherit;">sudo systemctl restart openclaw-USERNAME</code></div>
-              <div class="prereq-callout" style="margin-bottom:16px;padding:10px 14px;"><strong>Step 3 — Make a tool call:</strong> Auth is lazy. Ask your agent to fetch CRM data — it will give you a one-time login link. Log in once and you're all set.</div>
+              <div class="prereq-callout" style="margin-bottom:12px;padding:10px 14px;"><strong>Step 2 - Restart OpenClaw:</strong> <code style="background:transparent;padding:0;color:inherit;">sudo systemctl restart openclaw-USERNAME</code></div>
+              <div class="prereq-callout" style="margin-bottom:16px;padding:10px 14px;"><strong>Step 3 - Make a tool call:</strong> Auth is lazy. Ask your agent to fetch CRM data - it will give you a one-time login link. Log in once and you're all set.</div>
               <a href="docs.html#connect-openclaw" class="qs-full-link">Full guide <svg width="14" height="14"
                   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
                   stroke-linejoin="round">

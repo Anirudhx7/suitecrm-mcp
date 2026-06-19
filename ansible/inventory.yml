@@ -1,39 +1,39 @@
 ---
 # ============================================================
-# inventory.yml — SuiteCRM MCP Gateway deployment inventory
+# inventory.yml - SuiteCRM MCP Gateway deployment inventory
 # ============================================================
 #
 # Required on gateway host:
-#   ansible_host             — IP or hostname of the gateway server
-#   gateway_domain           — public FQDN (e.g. mcp.yourcompany.com)
-#   gateway_email            — Let's Encrypt contact email
-#   oauth_issuer             — OIDC issuer URL
-#   oauth_client_id          — Auth0 / Azure AD application client ID
-#   oauth_client_secret      — Auth0 / Azure AD application client secret (use vault)
-#   oauth_audience           — custom API audience identifier
+#   ansible_host             - IP or hostname of the gateway server
+#   gateway_domain           - public FQDN (e.g. mcp.yourcompany.com)
+#   gateway_email            - Let's Encrypt contact email
+#   oauth_issuer             - OIDC issuer URL
+#   oauth_client_id          - Auth0 / Azure AD application client ID
+#   oauth_client_secret      - Auth0 / Azure AD application client secret (use vault)
+#   oauth_audience           - custom API audience identifier
 #
 # Optional on gateway host:
-#   skip_certbot             — set to true to skip HTTPS/certbot (default: false)
+#   skip_certbot             - set to true to skip HTTPS/certbot (default: false)
 #
 # Required per CRM VM:
-#   ansible_host             — IP or hostname of the CRM VM
-#   entity_code              — short code used everywhere (e.g. crm1)
-#   label                    — human-readable name shown in gateway UI
-#   port                     — MCP gateway port for this entity (3101, 3102, ...)
-#   group                    — OIDC group name that gates access to this entity
+#   ansible_host             - IP or hostname of the CRM VM
+#   entity_code              - short code used everywhere (e.g. crm1)
+#   label                    - human-readable name shown in gateway UI
+#   port                     - MCP gateway port for this entity (3101, 3102, ...)
+#   group                    - OIDC group name that gates access to this entity
 #
 # Optional per CRM VM:
-#   api_path                 — REST API path if non-standard
+#   api_path                 - REST API path if non-standard
 #                              default: /legacy/service/v4_1/rest.php
-#   acl_enabled              — create mcp_acl_reader MySQL user for ACL enforcement
+#   acl_enabled              - create mcp_acl_reader MySQL user for ACL enforcement
 #                              (default: false)
-#   acl_root_user            — MySQL root/admin user for creating ACL user
+#   acl_root_user            - MySQL root/admin user for creating ACL user
 #                              (default: root)
-#   acl_root_pass            — MySQL root/admin password (use vault — never plain text)
-#   acl_db_pass              — password for mcp_acl_reader user (auto-generated if unset)
+#   acl_root_pass            - MySQL root/admin password (use vault - never plain text)
+#   acl_db_pass              - password for mcp_acl_reader user (auto-generated if unset)
 #
 # The CRM endpoint URL is auto-discovered from the VM's config.php.
-# Store secrets in Ansible Vault — never commit plain text credentials.
+# Store secrets in Ansible Vault - never commit plain text credentials.
 # ============================================================
 
 all:

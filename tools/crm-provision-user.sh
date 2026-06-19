@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# crm-provision-user — Non-interactive SuiteCRM API user provisioner
+# crm-provision-user - Non-interactive SuiteCRM API user provisioner
 # ============================================================
 # Runs on each CRM VM. Called via SSH by the MCP gateway.
 # Auto-locates SuiteCRM config.php anywhere on the filesystem.
@@ -27,7 +27,7 @@ fail() { echo -e "${RED}[FAIL]${NC} $1" >&2; exit 1; }
 # If not set, we run the reliable find command to discover it now
 # and tell the admin to persist it.
 if [ -z "${SUITECRM_CONFIG:-}" ]; then
-    warn "SUITECRM_CONFIG not set — searching filesystem..."
+    warn "SUITECRM_CONFIG not set - searching filesystem..."
     SUITECRM_CONFIG=$(find /         \( -path /proc -o -path /sys -o -path /dev \) -prune -o         -name "config.php" -readable -print 2>/dev/null         | xargs grep -l "dbconfig" 2>/dev/null         | head -1)
 
     [ -z "$SUITECRM_CONFIG" ] && fail 'Could not find SuiteCRM config.php.
@@ -142,10 +142,10 @@ if [ "${1:-}" != "--csv" ]; then
     [ $# -lt 2 ] && fail "Usage: crm-provision-user <username> <password>"
     RESULT=$(process_user "$1" "$2")
     case "$RESULT" in
-        OK)           ok "$1 — password set and login verified"; exit 0 ;;
-        NO_USER)      fail "$1 — not found in SuiteCRM database" ;;
-        DB_FAIL:*)    fail "$1 — DB error: ${RESULT#DB_FAIL:}" ;;
-        LOGIN_FAIL:*) warn "$1 — password set in DB (API verify failed — may be normal if CRM not reachable internally)"; exit 0 ;;
+        OK)           ok "$1 - password set and login verified"; exit 0 ;;
+        NO_USER)      fail "$1 - not found in SuiteCRM database" ;;
+        DB_FAIL:*)    fail "$1 - DB error: ${RESULT#DB_FAIL:}" ;;
+        LOGIN_FAIL:*) warn "$1 - password set in DB (API verify failed - may be normal if CRM not reachable internally)"; exit 0 ;;
     esac
 fi
 
@@ -166,7 +166,7 @@ while IFS=',' read -r RAW_USER RAW_PASS; do
         [[ "$LOWER" =~ ^(username|user|user_name)$ ]] && { info "Skipping header"; continue; }
     fi
 
-    [ -z "$API_PASS" ] && { warn "$CRM_USER — skipped (no password)"; SKIP=$((SKIP+1)); continue; }
+    [ -z "$API_PASS" ] && { warn "$CRM_USER - skipped (no password)"; SKIP=$((SKIP+1)); continue; }
 
     printf "  %-30s ... " "$CRM_USER"
     RESULT=$(process_user "$CRM_USER" "$API_PASS")

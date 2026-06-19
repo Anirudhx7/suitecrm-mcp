@@ -5,7 +5,7 @@
 # fixes OAuth2 token lifetime to 30 days, and creates the mcp_acl_reader
 # service user.
 #
-# Run once directly — no install needed:
+# Run once directly - no install needed:
 #   chmod +x mcp_acl_setup.sh && sudo ./mcp_acl_setup.sh
 #
 # Options:
@@ -68,7 +68,7 @@ done
 # Dependency checks
 # --------------------------------------------------------------------------- #
 for cmd in php mysql; do
-  command -v "$cmd" &>/dev/null || die "'$cmd' not found — please install it first."
+  command -v "$cmd" &>/dev/null || die "'$cmd' not found - please install it first."
 done
 
 # --------------------------------------------------------------------------- #
@@ -108,7 +108,7 @@ score_config() {
 }
 
 # --------------------------------------------------------------------------- #
-# STEP 1 — Locate config.php
+# STEP 1 - Locate config.php
 # --------------------------------------------------------------------------- #
 find_best_config() {
   # Fast-path: check common SuiteCRM install locations first.
@@ -155,7 +155,7 @@ find_best_config() {
   fi
 
   # Slow-path: full filesystem scan as fallback
-  warn "No config found in common paths — falling back to full filesystem scan (may take ~30 s) …"
+  warn "No config found in common paths - falling back to full filesystem scan (may take ~30 s) …"
   warn "Tip: pass -c /path/to/legacy/config.php to skip auto-detect."
 
   local CANDIDATES=()
@@ -171,7 +171,7 @@ find_best_config() {
 
   verbose "Full scan candidates: ${#CANDIDATES[@]}"
 
-  # Prefer paths containing 'legacy/' — that's where SuiteCRM 8.x puts config.php
+  # Prefer paths containing 'legacy/' - that's where SuiteCRM 8.x puts config.php
   local SORTED=()
   for f in "${CANDIDATES[@]}"; do
     [[ "$f" == */legacy/config.php ]] && SORTED=("$f" "${SORTED[@]}") || SORTED+=("$f")
@@ -197,7 +197,7 @@ find_best_config() {
 }
 
 # --------------------------------------------------------------------------- #
-# STEP 2 — Extract DB credentials from config.php
+# STEP 2 - Extract DB credentials from config.php
 # --------------------------------------------------------------------------- #
 extract_credentials() {
   local config="$1"
@@ -220,17 +220,17 @@ extract_credentials() {
 
   # If host is 'localhost' and socket errors occur, fall back to 127.0.0.1
   if ! mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT 1" &>/dev/null 2>&1; then
-    verbose "TCP connect to '$DB_HOST' failed — retrying with 127.0.0.1"
+    verbose "TCP connect to '$DB_HOST' failed - retrying with 127.0.0.1"
     DB_HOST="127.0.0.1"
     mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT 1" &>/dev/null \
-      || die "Cannot connect to database even via 127.0.0.1 — check credentials."
+      || die "Cannot connect to database even via 127.0.0.1 - check credentials."
   fi
 
   export DB_HOST DB_USER DB_PASS DB_NAME
 }
 
 # --------------------------------------------------------------------------- #
-# STEP 3 — Fix OAuth2 token lifetime
+# STEP 3 - Fix OAuth2 token lifetime
 # --------------------------------------------------------------------------- #
 fix_token_lifetime() {
   info "Checking current OAuth2 token lifetime …"
@@ -241,7 +241,7 @@ fix_token_lifetime() {
   info "Current lifetime: $CURRENT"
 
   if [[ "$CURRENT" == "30 day" ]]; then
-    ok "Token lifetime is already 30 days — no change needed."
+    ok "Token lifetime is already 30 days - no change needed."
     return
   fi
 
@@ -259,7 +259,7 @@ fix_token_lifetime() {
 }
 
 # --------------------------------------------------------------------------- #
-# STEP 4 — Create mcp_acl_reader service user
+# STEP 4 - Create mcp_acl_reader service user
 # --------------------------------------------------------------------------- #
 create_service_user() {
   info "Checking if mcp_acl_reader already exists …"
@@ -269,7 +269,7 @@ create_service_user() {
     2>/dev/null || echo "0")
 
   if [[ "$EXISTS" -gt 0 ]]; then
-    ok "mcp_acl_reader already exists — skipping INSERT."
+    ok "mcp_acl_reader already exists - skipping INSERT."
   else
     info "Creating mcp_acl_reader …"
     run_sql "$DB_HOST" "$DB_USER" "$DB_PASS" "$DB_NAME" \
@@ -300,7 +300,7 @@ echo -e "${BOLD}║        SuiteCRM mcp_acl_setup.sh         ║${RESET}"
 echo -e "${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-[[ "$DRY_RUN" == "1" ]] && warn "DRY-RUN mode — no changes will be made."
+[[ "$DRY_RUN" == "1" ]] && warn "DRY-RUN mode - no changes will be made."
 
 # --- Locate config ---
 if [[ -n "$FORCE_CONFIG" ]]; then
@@ -323,7 +323,7 @@ if [[ "$DO_USER" == "1" && -z "$MCP_PASS" ]]; then
     read -rsp "$(echo -e "${BOLD}Enter password for mcp_acl_reader:${RESET} ")" MCP_PASS; echo
     read -rsp "$(echo -e "${BOLD}Confirm password:${RESET} ")" MCP_PASS2; echo
     [[ "$MCP_PASS" == "$MCP_PASS2" ]] && break
-    warn "Passwords do not match — try again."
+    warn "Passwords do not match - try again."
   done
   [[ -n "$MCP_PASS" ]] || die "Password cannot be empty."
 fi

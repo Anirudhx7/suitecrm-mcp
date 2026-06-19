@@ -1,5 +1,5 @@
 /**
- * redis.mjs — Singleton Redis client for SuiteCRM MCP Gateway
+ * redis.mjs - Singleton Redis client for SuiteCRM MCP Gateway
  * Uses ioredis. Connects via REDIS_URL env var.
  * All other modules should import { redis } from './redis.mjs'.
  */

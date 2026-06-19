@@ -82,6 +82,7 @@ Built for production environments where data integrity and privacy are non-negot
 - **Stateless & Scalable** - auth sessions and profiles cached in Redis, enabling zero-downtime restarts and horizontal scaling behind a load balancer with sticky session routing (SSE connections are per-process; the `/messages` endpoint must reach the same process that owns the SSE transport)
 - **Unified installer** - one script handles single CRM (no nginx) or N CRMs behind nginx, with interactive OAuth setup
 - **Entity-prefixed tools** - run multiple CRM instances side-by-side without name collisions
+- **Admin reporting** - `mcp-admin report` generates browsable HTML activity reports from Loki and SQLite, with per-user drill-down showing call history, dry runs, and errors with module and field detail
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -160,7 +161,7 @@ flowchart TB
 
 Users log in once via Auth0 or Azure AD; the gateway issues a personal API key. MCP clients attach it as `Authorization: Bearer <key>` on every request. CRM credentials never leave the gateway. Multiple CRM instances are supported - each gets its own port and tool namespace (`suitecrm_crm1_*`, `suitecrm_crm2_*`).
 
-**Smart Hybrid Routing:** The gateway automatically routes basic CRUD operations and record fetching through the blazing-fast SuiteCRM 8 GraphQL API. If an AI requests a complex search requiring raw SQL filters (which GraphQL does not support), the gateway intercepts it and transparently fails over to the legacy v4.1 REST API—ensuring absolute 100% feature parity with no manual intervention.
+**Smart Hybrid Routing:** The gateway automatically routes basic CRUD operations and record fetching through the blazing-fast SuiteCRM 8 GraphQL API. If an AI requests a complex search requiring raw SQL filters (which GraphQL does not support), the gateway intercepts it and transparently fails over to the legacy v4.1 REST API-ensuring absolute 100% feature parity with no manual intervention.
 
 **Stateless Persistence:** By moving auth sessions and user profiles from local memory/files to Redis, the gateway is completely stateless. This allows for horizontal scaling (running multiple gateway instances behind a load balancer), global rate limiting, and seamless restarts without dropping active AI connections. When running multiple instances behind a load balancer, sticky session routing is required: SSE transports and their `/messages` endpoint must land on the same process.
 
@@ -176,9 +177,11 @@ Ships with a complete observability stack in `docker-compose.yml` - one command 
 |-----------|-------------|
 | **Prometheus** | 17 metrics: request rate, latency histograms per entity, active sessions, CRM error codes, circuit breaker state, rate-limit hits, auth counters |
 | **Grafana** | 33-panel entity dashboard (system health, user/session tables, CRM backend, security, tool breakdown) + fleet overview dashboard for multi-entity. Query structured logs and metrics side-by-side in Grafana Explore. |
-| **Loki** | Structured JSON log ingestion via Promtail - search and filter logs by user, entity, or request ID directly in Grafana Explore using LogQL, queryable alongside metrics, sensitive fields auto-redacted |
+| **Loki** | Structured JSON log ingestion via Promtail - search and filter logs by user, entity, or request ID directly in Grafana Explore using LogQL, queryable alongside metrics. Non-PII fields (status, stage, type, dates) log actual values; sensitive fields (names, emails, search queries) are always redacted. |
 
 Alerting rules included for: circuit breaker open, high auth failure rate, latency SLO breach, session expiry storms.
+
+`mcp-admin report` generates an HTML activity report from both sources - Loki supplies historical calls, SQLite covers the current period, and the two are merged automatically. Default period is daily; `--period weekly` and `--period monthly` are also supported. `--serve` publishes the report at `/report` via nginx. `--user <email>` drills down to a single user's calls, dry runs, and errors with module and field detail.
 
 <p align="right"><a href="#top">↑ back to top</a></p>
 
@@ -729,7 +732,7 @@ This is a SuiteCRM REST API limitation, not specific to this gateway.
 - **CRM passwords never leave the gateway.** Client machines (Claude Desktop, Claude Code, OpenClaw) hold only an opaque API key. CRM credentials are stored in Redis under the `crm:profiles` hash on the gateway (access-controlled by Redis auth and network binding).
 - **Keep `AUTH0_CLIENT_SECRET` secret.** It is stored in `/etc/suitecrm-mcp/auth.env` (mode 600) and only read by the auth service.
 - Env files are written with mode `600` and the env directory with `700`
-- `entities.json` is in `.gitignore` — never commit it (it contains CRM endpoints and group names)
+- `entities.json` is in `.gitignore` - never commit it (it contains CRM endpoints and group names)
 
 See [SECURITY.md](SECURITY.md) for full details on controls and known limitations.
 

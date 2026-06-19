@@ -44,7 +44,7 @@ async function migrate() {
 
   const all = await redis.hgetall('crm:profiles');
   if (!all || Object.keys(all).length === 0) {
-    console.log('crm:profiles is empty — nothing to migrate.');
+    console.log('crm:profiles is empty - nothing to migrate.');
     await redis.quit();
     return;
   }
@@ -71,7 +71,7 @@ async function migrate() {
         skipped++;
         continue;
       }
-      // Email key but sub missing — try to backfill from active sessions
+      // Email key but sub missing - try to backfill from active sessions
       const sub = await findSubFromSessions(field);
       if (sub) {
         profile.sub = sub;
@@ -85,7 +85,7 @@ async function migrate() {
       continue;
     }
 
-    // ── sub-keyed entry — migrate to email key ────────────────────────────────
+    // ── sub-keyed entry - migrate to email key ────────────────────────────────
     const email = profile?.email;
     if (!email || !email.includes('@')) {
       console.error(`  SKIP  [no email in profile] field="${field}"`);
@@ -95,11 +95,11 @@ async function migrate() {
 
     // Collision guard: if an email-keyed profile already exists (from a prior
     // run, a live login, or another sub mapping to the same email), do NOT
-    // overwrite it — it may hold newer credentials. Drop the stale sub key only
+    // overwrite it - it may hold newer credentials. Drop the stale sub key only
     // after confirming the email entry is present. hexists catches both the
     // initial snapshot and entries created earlier in this same run.
     if (await redis.hexists('crm:profiles', email)) {
-      console.error(`  SKIP  [collision: email key "${email}" already present — keeping it] sub-field="${field}"`);
+      console.error(`  SKIP  [collision: email key "${email}" already present - keeping it] sub-field="${field}"`);
       errors++;
       continue;
     }

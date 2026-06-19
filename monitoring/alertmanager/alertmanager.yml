@@ -27,7 +27,7 @@ receivers:
   #     - to: 'you@yourdomain.com'
   #       send_resolved: true
   #       headers:
-  #         Subject: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }} — {{ .GroupLabels.entity }}'
+  #         Subject: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }} - {{ .GroupLabels.entity }}'
   #       html: |
   #         <b>{{ .GroupLabels.alertname }}</b><br>
   #         <b>Entity:</b> {{ .GroupLabels.entity }}<br>

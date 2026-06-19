@@ -95,7 +95,7 @@ const API_KEY_RE = /^[0-9a-f]{64}$/;
 function qs(v) { return typeof v === 'string' ? v : ''; }
 
 // ---------------------------------------------------------------------------
-// Redis session helpers — replaces sessions.json read/write
+// Redis session helpers - replaces sessions.json read/write
 // ---------------------------------------------------------------------------
 const SK = (k) => `auth:session:${k}`;
 
@@ -179,7 +179,7 @@ async function exchangeCode(code) {
   if (!res.ok) {
     const body = await res.text();
     logger.error({ status: res.status, body: body.slice(0, 200) }, 'token_exchange_failed');
-    throw new Error('Authentication failed — please try again');
+    throw new Error('Authentication failed - please try again');
   }
   return res.json();
 }
@@ -225,12 +225,12 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
   });
 
   if (toProvision.length > 0) {
-    // Run all SSH provisioning calls in parallel — avoids serial 10s-per-entity stacking
+    // Run all SSH provisioning calls in parallel - avoids serial 10s-per-entity stacking
     const results = await Promise.allSettled(toProvision.map(async ([code]) => {
       const crmPass = randomBytes(16).toString('hex');
       const host    = crmHosts[code];
       if (!host?.ssh_host || !host?.ssh_user || !host?.command) {
-        throw new Error(`Incomplete SSH config for entity ${code} in crm-hosts.json — ssh_host, ssh_user, and command are all required`);
+        throw new Error(`Incomplete SSH config for entity ${code} in crm-hosts.json - ssh_host, ssh_user, and command are all required`);
       }
       await execFileAsync('ssh', [
         '-i',  host.ssh_key || '/etc/suitecrm-mcp/crm-ssh-key',
@@ -242,7 +242,7 @@ async function provisionCrmAccounts(sub, email, sam, userGroups) {
         host.command,
         crmUser,
         crmPass,
-      ], { timeout: 20000 }); // hard cap — kills SSH if remote command hangs past 20s
+      ], { timeout: 20000 }); // hard cap - kills SSH if remote command hangs past 20s
       logger.info({ crmUser, entity: code }, 'crm_user_provisioned');
       return { code, crmPass };
     }));
@@ -374,7 +374,7 @@ app.get('/auth/callback', loginLimiter, async (req, res) => {
     if (!email || !email.includes('@')) {
       logger.warn({ sub: sub.slice(-8) }, 'login_rejected_no_email');
       metricLogins.inc({ result: 'failure' });
-      return res.status(403).send('Authentication token is missing an email or samaccountname claim — cannot provision an identity.');
+      return res.status(403).send('Authentication token is missing an email or samaccountname claim - cannot provision an identity.');
     }
 
     const linuxUser  = email.split('@')[0].toLowerCase();
@@ -666,7 +666,7 @@ var _cdHint = {};
 
   _ccRawText = rawParts.filter(l=>l!=='').join('\\n');
 
-  // Claude Desktop JSON — platform-specific
+  // Claude Desktop JSON - platform-specific
   function buildCdJson(os){
     return {mcpServers:Object.fromEntries(GW_ENTITIES.map(({code})=>{
       const url  = code==='default' ? GW_BASE+'/sse' : GW_BASE+'/'+code+'/sse';
@@ -807,7 +807,7 @@ app.get('/auth/bridge/poll/:nonce', bridgePollLimiter, async (req, res) => {
     if (!existing) {
       if (!session.sub) {
         logger.error({ nonce: nonce.slice(0, 16) }, 'bridge_session_missing_sub');
-        return res.status(500).json({ error: 'Session data incomplete — please re-authenticate' });
+        return res.status(500).json({ error: 'Session data incomplete - please re-authenticate' });
       }
       await setSession(session.apiKey, {
         sub:       session.sub,

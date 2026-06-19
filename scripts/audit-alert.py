@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SuiteCRM MCP Gateway — Notorious User Alert Script
+SuiteCRM MCP Gateway - Notorious User Alert Script
 Runs every 15 minutes via cron. Queries the SQLite audit DB for the past hour,
 identifies users exceeding abuse thresholds, and fires alerts to Alertmanager.
 Alertmanager handles dedup, grouping, silencing, and email delivery.
@@ -35,7 +35,7 @@ AUDIT_DB       = '/var/log/suitecrm-mcp/audit.db'
 ALERTMANAGER   = 'http://localhost:9093'
 WINDOW_MINUTES = 60   # look-back window for rate calculations
 # Alerts auto-expire after this many seconds if not re-fired (must be > cron interval)
-ALERT_TTL_SEC  = 1200  # 20 minutes — safe for 15-min cron
+ALERT_TTL_SEC  = 1200  # 20 minutes - safe for 15-min cron
 
 
 def now_utc():
@@ -272,7 +272,7 @@ def main():
     if fired:
         names = ', '.join(sorted({a['labels']['alertname'] for a in alerts}))
         users = ', '.join(sorted({a['labels']['user'] for a in alerts}))
-        print(f'[ALERT] {fired} alert(s) fired — {names} — users: {users}')
+        print(f'[ALERT] {fired} alert(s) fired - {names} - users: {users}')
     else:
         print(f'[OK] {len(user_stats)} user(s) checked, no thresholds exceeded')
 

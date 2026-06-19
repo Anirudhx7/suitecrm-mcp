@@ -1,5 +1,5 @@
 /**
- * Persistent audit log — SQLite backend.
+ * Persistent audit log - SQLite backend.
  *
  * Safe for concurrent use by multiple gateway processes:
  *   - WAL mode: multiple readers + one writer at a time, no corruption.
@@ -8,7 +8,7 @@
  *
  * Fail-safe: if better-sqlite3 is not installed, audit writes are silently
  * skipped and a one-time warning is printed to stderr. The gateway continues
- * running normally — audit is non-fatal.
+ * running normally - audit is non-fatal.
  *
  * DB file: /var/log/suitecrm-mcp/audit.db
  */
@@ -32,7 +32,7 @@ function getDatabase() {
   try {
     _Database = _require('better-sqlite3');
   } catch (e) {
-    process.stderr.write(`[audit-db] WARNING: better-sqlite3 not available — audit logging disabled. Run: npm install better-sqlite3\n  (${e.message})\n`);
+    process.stderr.write(`[audit-db] WARNING: better-sqlite3 not available - audit logging disabled. Run: npm install better-sqlite3\n  (${e.message})\n`);
   }
   return _Database;
 }
@@ -85,7 +85,7 @@ const _insert = (() => {
   let stmt = null;
   return (record) => {
     const db = getDb();
-    if (!db) return; // better-sqlite3 not available — skip silently
+    if (!db) return; // better-sqlite3 not available - skip silently
     if (!stmt) {
       stmt = db.prepare(`
         INSERT INTO audit_log (ts, email, entity, tool, module, msg, status, duration_ms, result_count, req_id, err)
@@ -95,14 +95,14 @@ const _insert = (() => {
     try {
       stmt.run(record);
     } catch (e) {
-      // Non-fatal — log to stderr but never crash the gateway.
+      // Non-fatal - log to stderr but never crash the gateway.
       process.stderr.write(`[audit-db] INSERT failed: ${e.message}\n`);
     }
   };
 })();
 
 /**
- * Write one audit event. Synchronous but takes ~0.1 ms — safe to call from
+ * Write one audit event. Synchronous but takes ~0.1 ms - safe to call from
  * inside an async request handler without meaningful event-loop impact.
  * No-ops silently if better-sqlite3 is not installed.
  */

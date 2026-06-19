@@ -7,12 +7,12 @@
     "source": "github"
   },
   "websiteUrl": "https://anirudh.social/suitecrm-mcp/",
-  "version": "5.4.0",
+  "version": "5.5.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "suitecrm-mcp-gateway",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "transport": {
         "type": "sse",
         "url": "http://127.0.0.1:{PORT}/sse",

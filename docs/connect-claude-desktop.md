@@ -37,10 +37,10 @@ construct it manually.
 
 *The entire setup is just 2 steps:*
 
-### *Step 1 — Install Node.js*
+### *Step 1 - Install Node.js*
 Download from [nodejs.org](https://nodejs.org/) (if not already installed)
 
-### *Step 2 — Edit `%APPDATA%\Claude\claude_desktop_config.json`* 
+### *Step 2 - Edit `%APPDATA%\Claude\claude_desktop_config.json`* 
 
 Add the following to your config file, replacing `<token>` with your API key, and using your gateway URL:
 
@@ -61,7 +61,7 @@ Add the following to your config file, replacing `<token>` with your API key, an
 
 *Note for macOS users: Replace `"command": "cmd", "args": ["/C", "npx"...]` with `"command": "npx", "args": ["mcp-remote"...]`*
 
-### *Step 3 — Restart Claude Desktop*
+### *Step 3 - Restart Claude Desktop*
 Fully quit → reopen. Done.
 
 ## ▶️ Apply changes

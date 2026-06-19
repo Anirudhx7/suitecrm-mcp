@@ -1,5 +1,5 @@
 /**
- * SuiteCRM MCP Gateway — Redis-Persisted Edition (index.mjs)
+ * SuiteCRM MCP Gateway - Redis-Persisted Edition (index.mjs)
  * Hybrid v8/v4.1 bridge + Redis for sessions, profiles, and rate limiting.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -56,7 +56,7 @@ const CB_THRESHOLD        = parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD || '5
 const CB_RESET_MS         = parseInt(process.env.CIRCUIT_BREAKER_RESET_MS || '60000', 10);
 const CB_INFRA_THRESHOLD  = parseInt(process.env.CB_INFRA_THRESHOLD || '10', 10);
 const CB_PROBE_INTERVAL_MS = parseInt(process.env.CB_PROBE_INTERVAL_MS || '30000', 10);
-const CRM_SESSION_TTL_SEC = 30 * 24 * 3600; // 30 days — matches SuiteCRM OAuth token and gateway session lifetime
+const CRM_SESSION_TTL_SEC = 30 * 24 * 3600; // 30 days - matches SuiteCRM OAuth token and gateway session lifetime
 
 const NETWORK_ERRS = new Set(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','ECONNABORTED']);
 const CRM_HOSTS_FILE = '/etc/suitecrm-mcp/crm-hosts.json';
@@ -190,7 +190,7 @@ new Gauge({
 });
 
 // ---------------------------------------------------------------------------
-// Transport map (must stay in-process — SSE streams cannot live in Redis)
+// Transport map (must stay in-process - SSE streams cannot live in Redis)
 // ---------------------------------------------------------------------------
 const transports  = new Map(); // sid -> SSEServerTransport
 const connCreds   = new Map(); // sid -> { user, pass }
@@ -230,7 +230,7 @@ async function getSidByEmail(email)  { return redis.get(`crm:email2sid:${email}`
 async function setEmailSidMapping(email, sid) {
   await Promise.all([
     redis.setex(`crm:email2sid:${email}`, 86400, sid),
-    redis.setex(`crm:sid2email:${sid}`, 3600, email),  // 1h — timing-race zombies expire quickly
+    redis.setex(`crm:sid2email:${sid}`, 3600, email),  // 1h - timing-race zombies expire quickly
   ]);
 }
 async function delEmailSidMapping(email, sid) {
@@ -410,7 +410,7 @@ async function autoProvisionUser(email) {
   ];
   logger.info({ entity: CODE, ssh_host: host.ssh_host, crm_user: username, email }, 'auto_provision_start');
   const { stderr } = await execFileAsync('ssh', sshArgs, { timeout: 30000 }).catch(err => {
-    throw new Error(`SSH provision failed: ${err.message}${err.stderr ? ` — ${err.stderr.trim().slice(0, 200)}` : ''}`);
+    throw new Error(`SSH provision failed: ${err.message}${err.stderr ? ` - ${err.stderr.trim().slice(0, 200)}` : ''}`);
   });
   if (stderr) logger.warn({ entity: CODE, crm_user: username, stderr: stderr.slice(0, 200) }, 'auto_provision_stderr');
   logger.info({ entity: CODE, crm_user: username }, 'auto_provision_success');
@@ -430,7 +430,7 @@ async function autoProvisionUser(email) {
 }
 
 // ---------------------------------------------------------------------------
-// Middlewares (all async — Redis I/O)
+// Middlewares (all async - Redis I/O)
 // ---------------------------------------------------------------------------
 async function jwtMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
@@ -501,12 +501,12 @@ async function groupAccessMiddleware(req, res, next) {
 // ---------------------------------------------------------------------------
 // Session Lifecycle
 // ---------------------------------------------------------------------------
-const crmLoginInflight = new Map(); // email -> Promise — prevents parallel logins creating duplicate SuiteCRM tokens
+const crmLoginInflight = new Map(); // email -> Promise - prevents parallel logins creating duplicate SuiteCRM tokens
 
 async function ensureCrmSession(sid) {
   // connAuth is authoritative for live connections; Redis is fallback for edge cases
   const email = connAuth.get(sid)?.email ?? await getEmailBySid(sid);
-  if (!email) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} — connection may have been evicted`);
+  if (!email) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} - connection may have been evicted`);
   const cached = await getCrmSession(email);
   if (cached) {
     // Proactively refresh the v8 access token if it expires within 10 minutes,
@@ -525,7 +525,7 @@ async function ensureCrmSession(sid) {
           })
           .catch(async err => {
             logger.warn({ err: err.message }, 'v8_token_refresh_failed');
-            // Refresh failed — delete so next call does a full re-login
+            // Refresh failed - delete so next call does a full re-login
             await delCrmSession(email);
             throw err;
           })
@@ -569,7 +569,7 @@ async function resilientCall(sid, method, params) {
     if (isExpired) {
       metricSessionRenewals.inc({ entity: PREFIX });
       const email = connAuth.get(sid)?.email ?? await getEmailBySid(sid);
-      if (!email) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} — connection may have been evicted`);
+      if (!email) throw new Error(`Cannot resolve user for session ${sid.slice(0, 8)} - connection may have been evicted`);
       // Try refreshing the v8 access token before falling back to a full re-login
       // (which would create a new SuiteCRM OAuth token entry)
       const cached = await getCrmSession(email);
@@ -656,7 +656,7 @@ async function getRecordActivities(sid,args){ validateModule(args.module); valid
 async function serverInfo(sid)             { const creds=connCreds.get(sid)||{}; const sessions=await ensureCrmSession(sid).catch(()=>({})); const email=connAuth.get(sid)?.email??await getEmailBySid(sid)??sid; return { prefix:PREFIX, port:PORT, entity:CODE, endpoint:ENDPOINT, api_strategy:API_STRATEGY==='8'?'Modern (v8 + v4 Fallback)':'Legacy (v4.1)', crm_user:creds.user||'?', auth:'gateway-session', required_group:REQUIRED_GROUP, v8_session:!!sessions.v8, v4_session:!!sessions.v4, session_active:!!(await getCrmSession(email)), active_connections:transports.size, circuit_breaker:circuitBreaker.state.toLowerCase(), persistence:'redis' }; }
 
 // ---------------------------------------------------------------------------
-// Dry-run handler — returns a preview object without touching the CRM
+// Dry-run handler - returns a preview object without touching the CRM
 // ---------------------------------------------------------------------------
 async function handleDryRun(sid, name, args) {
   const short = name.replace(`${PREFIX}_`, '');
@@ -702,7 +702,7 @@ const TOOLS = [
   { name:`${PREFIX}_get`, description:'Get a single record by UUID', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'array',items:{type:'string'}}}}},
   { name:`${PREFIX}_create`, description:'Create a new record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','fields'],properties:{module:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_update`, description:'Update an existing record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id','fields'],properties:{module:{type:'string'},id:{type:'string'},fields:{type:'object',additionalProperties:{type:'string'}},dry_run:{type:'boolean'}}}},
-//  { name:`${PREFIX}_delete`, description:'Soft-delete a record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},dry_run:{type:'boolean'}}}},
+  { name:`${PREFIX}_delete`, description:'Soft-delete a record. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id'],properties:{module:{type:'string'},id:{type:'string'},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_count`, description:'Count records matching an optional SQL WHERE clause', inputSchema:{type:'object',required:['module'],properties:{module:{type:'string'},query:{type:'string'}}}},
   { name:`${PREFIX}_get_relationships`, description:'Get related records via a named link field', inputSchema:{type:'object',required:['module','id','link_field'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_fields:{type:'array',items:{type:'string'}},max_results:{type:'number'},offset:{type:'number'}}}},
   { name:`${PREFIX}_link_records`, description:'Create a relationship between records. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','id','link_field','related_ids'],properties:{module:{type:'string'},id:{type:'string'},link_field:{type:'string'},related_ids:{type:'array',items:{type:'string'}},dry_run:{type:'boolean'}}}},
@@ -711,7 +711,7 @@ const TOOLS = [
   { name:`${PREFIX}_list_modules`, description:'List all available CRM modules', inputSchema:{type:'object',properties:{}}},
   { name:`${PREFIX}_server_info`, description:'Get server status, API strategy, persistence info', inputSchema:{type:'object',properties:{}}},
   { name:`${PREFIX}_get_many`, description:'Fetch multiple records by ID list in one call', inputSchema:{type:'object',required:['module','ids'],properties:{module:{type:'string'},ids:{type:'array',items:{type:'string'},maxItems:100},fields:{type:'array',items:{type:'string'}}}}},
-//  { name:`${PREFIX}_bulk_upsert`, description:'Create or update multiple records. Include "id" in fields to update, omit to create. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','records'],properties:{module:{type:'string'},records:{type:'array',items:{type:'object',additionalProperties:{type:'string'}},maxItems:100},dry_run:{type:'boolean'}}}},
+  { name:`${PREFIX}_bulk_upsert`, description:'Create or update multiple records. Include "id" in fields to update, omit to create. Pass dry_run:true to preview without saving.', inputSchema:{type:'object',required:['module','records'],properties:{module:{type:'string'},records:{type:'array',items:{type:'object',additionalProperties:{type:'string'}},maxItems:100},dry_run:{type:'boolean'}}}},
   { name:`${PREFIX}_get_dropdown_values`, description:'List dropdown names or get key→label values for a specific dropdown', inputSchema:{type:'object',properties:{dropdown_name:{type:'string'}}}},
   { name:`${PREFIX}_get_recent`, description:'Get recently viewed records for the current user', inputSchema:{type:'object',properties:{modules:{type:'array',items:{type:'string'}},max_results:{type:'number'}}}},
   { name:`${PREFIX}_get_note_attachment`, description:'Download a file attachment from a Notes record', inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'}}}},
@@ -743,8 +743,8 @@ function createMcpServer(sid) {
     try {
       let result;
 
-      // ACL pre-check — queries SuiteCRM DB before forwarding to CRM.
-      // [action, moduleArgField, fixedModule] — null moduleArgField + fixedModule = hardcoded module.
+      // ACL pre-check - queries SuiteCRM DB before forwarding to CRM.
+      // [action, moduleArgField, fixedModule] - null moduleArgField + fixedModule = hardcoded module.
       // Tools with no module context (search_text, get_recent, get_upcoming_activities) are intentionally omitted.
       const aclChecks = {
         [`${PREFIX}_create`]:               [ACTION_MAP.create, 'module'],
@@ -781,7 +781,7 @@ function createMcpServer(sid) {
         }
       }
 
-      // Dry-run intercept — fires after ACL check, before CRM bridge
+      // Dry-run intercept - fires after ACL check, before CRM bridge
       if (args.dry_run === true) {
         const dryResult = await handleDryRun(sid, name, args);
         end(); metricToolCalls.inc({entity:PREFIX,tool:name,status:'success'});
@@ -795,7 +795,7 @@ function createMcpServer(sid) {
       else if (name===`${PREFIX}_get`)                   result=await getRecord(sid,args);
       else if (name===`${PREFIX}_create`)                result=await createRecord(sid,args);
       else if (name===`${PREFIX}_update`)                result=await updateRecord(sid,args);
-      else if (name===`${PREFIX}_delete`)                throw new McpError(ErrorCode.MethodNotFound, `Tool "${name}" is disabled`); 
+      else if (name===`${PREFIX}_delete`)                result=await deleteRecord(sid,args);
       else if (name===`${PREFIX}_count`)                 result=await countRecords(sid,args);
       else if (name===`${PREFIX}_get_relationships`)     result=await getRelationships(sid,args);
       else if (name===`${PREFIX}_link_records`)          result=await linkRecords(sid,args);
@@ -804,7 +804,7 @@ function createMcpServer(sid) {
       else if (name===`${PREFIX}_list_modules`)          result=await listModules(sid);
       else if (name===`${PREFIX}_server_info`)           result=await serverInfo(sid);
       else if (name===`${PREFIX}_get_many`)              result=await getMany(sid,args);
-      else if (name===`${PREFIX}_bulk_upsert`)           throw new McpError(ErrorCode.MethodNotFound, `Tool "${name}" is disabled`);
+      else if (name===`${PREFIX}_bulk_upsert`)           result=await bulkUpsert(sid,args);
       else if (name===`${PREFIX}_get_dropdown_values`)   result=await getDropdownValues(sid,args);
       else if (name===`${PREFIX}_get_recent`)            result=await getRecent(sid,args);
       else if (name===`${PREFIX}_get_note_attachment`)   result=await getNoteAttachment(sid,args);
@@ -873,10 +873,10 @@ app.get('/health/deep', deepHealthRL, async (_req,res) => {
     }
     if (v8Session) {
       if (crm.v8Healthy === false) {
-        checks.v8 = { status: 'error', message: 'v8 auth ok but API calls failing — CSRF or permission issue on CRM' };
+        checks.v8 = { status: 'error', message: 'v8 auth ok but API calls failing - CSRF or permission issue on CRM' };
         if (checks.v4?.status !== 'ok' && status === 'healthy') status = 'degraded';
       } else {
-        checks.v8 = { status: 'ok', latency_ms: Date.now() - v8Start, ...(crm.v8Healthy === null ? { note: 'auth_only — no tool calls yet' } : {}) };
+        checks.v8 = { status: 'ok', latency_ms: Date.now() - v8Start, ...(crm.v8Healthy === null ? { note: 'auth_only - no tool calls yet' } : {}) };
       }
     } else {
       checks.v8 = { status: 'unknown' };
@@ -937,7 +937,7 @@ app.get('/sse', sseRL, jwtMiddleware, profileMiddleware, groupAccessMiddleware, 
   }
   await Promise.all(staleRedisDeletes);
 
-  // If a concurrent reconnect evicted us during the async phase above, abort — the newer
+  // If a concurrent reconnect evicted us during the async phase above, abort - the newer
   // connection already owns this user's slot. Writing email2sid now would overwrite theirs.
   if (!transports.has(sid)) {
     connLogger.info('sse_aborted_evicted_during_setup');

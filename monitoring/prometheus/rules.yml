@@ -104,7 +104,7 @@ groups:
           severity: critical
         annotations:
           summary: "Redis is down"
-          description: "Redis has been unreachable for more than 1 minute. All MCP gateway sessions and auth tokens are unavailable — users cannot authenticate."
+          description: "Redis has been unreachable for more than 1 minute. All MCP gateway sessions and auth tokens are unavailable - users cannot authenticate."
 
       - alert: SuiteCRMRedisHighMemory
         expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85

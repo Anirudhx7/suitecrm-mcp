@@ -1,6 +1,6 @@
 {
   "name": "suitecrm-mcp-gateway",
-  "version": "5.4.0",
+  "version": "5.5.0",
   "mcpName": "io.github.Anirudhx7/suitecrm-mcp",
   "description": "SuiteCRM MCP Gateway - Hybrid v8/v4.1 bridge, Redis-persisted sessions, ACL enforcement",
   "keywords": [

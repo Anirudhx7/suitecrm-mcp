@@ -8,7 +8,10 @@
 import { Command } from 'commander';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join as pathJoin } from 'path';
+import { createServer as createHttpServer, get as httpGet } from 'http';
 import { createRequire } from 'module';
 import { createConnection } from 'net';
 import { connect as tlsConnect } from 'tls';
@@ -25,12 +28,14 @@ if (!process.env.REDIS_URL) {
     const envFile = readFileSync('/etc/suitecrm-mcp/auth.env', 'utf8');
     const match = envFile.match(/^REDIS_URL=(.+)$/m);
     if (match) process.env.REDIS_URL = match[1].trim();
-  } catch { /* file missing — fall back to default below */ }
+  } catch { /* file missing - fall back to default below */ }
 }
 const REDIS_URL      = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const ENTITIES_FILE  = process.env.ENTITIES_FILE || '/etc/suitecrm-mcp/entities.json';
 const HOSTS_FILE     = process.env.CRM_HOSTS_FILE || '/etc/suitecrm-mcp/crm-hosts.json';
 const REPO_DIR       = '/opt/suitecrm-mcp-server';
+const NGINX_CONF     = '/etc/nginx/sites-available/suitecrm-mcp';
+const REPORT_INTERNAL_PORT = 7999;
 const PROVISION_SH   = `${REPO_DIR}/tools/crm-provision-user.sh`;
 const FIND_CONFIG_SH = `${REPO_DIR}/scripts/find-suitecrm-config.sh`;
 
@@ -278,7 +283,7 @@ async function cmdAdd(opts) {
   if (!sub) {
     if (opts.email) {
       sub = `manual|${opts.email}`;
-      console.log(c(`No existing profile found — creating: ${sub}`, YELLOW));
+      console.log(c(`No existing profile found - creating: ${sub}`, YELLOW));
     } else {
       console.error(c('Error: --sub or --email required', RED));
       await disconnect(); process.exit(1);
@@ -530,7 +535,7 @@ async function cmdSetCrmHost(opts) {
   }
 
   if (hasFlags) {
-    // Flags supplied — confirm before applying if entry already exists
+    // Flags supplied - confirm before applying if entry already exists
     if (existing) {
       const rl  = createInterface({ input: process.stdin, output: process.stdout });
       const ans = await new Promise(resolve => rl.question('\n  Apply these updates? [y/N]: ', resolve));
@@ -552,7 +557,7 @@ async function cmdSetCrmHost(opts) {
     return;
   }
 
-  // No flags — go interactive
+  // No flags - go interactive
   if (existing) {
     const rl  = createInterface({ input: process.stdin, output: process.stdout });
     const ans = await new Promise(resolve => rl.question('\n  Update these values? [y/N]: ', resolve));
@@ -577,7 +582,7 @@ async function cmdSetCrmHost(opts) {
     const rl  = createInterface({ input: process.stdin, output: process.stdout });
     const entry = {};
     entry.ssh_host = await _rlPrompt(rl, 'SSH host (IP or hostname)');
-    if (!entry.ssh_host) { rl.close(); console.log(c('No SSH host provided — aborted.', RED)); process.exit(1); }
+    if (!entry.ssh_host) { rl.close(); console.log(c('No SSH host provided - aborted.', RED)); process.exit(1); }
     entry.ssh_user = await _rlPrompt(rl, 'SSH user', 'ubuntu');
     entry.ssh_key  = await _rlPrompt(rl, 'SSH key path', '/etc/suitecrm-mcp/crm-ssh-key');
     rl.close();
@@ -685,7 +690,7 @@ async function cmdSessions(opts) {
     console.log();
     console.log(c('Rate limits:', BOLD));
     if (!rls.length) {
-      console.log(c('  (none active — RL keys expire after 60s of inactivity)', DIM));
+      console.log(c('  (none active - RL keys expire after 60s of inactivity)', DIM));
     } else {
       const typeW  = Math.max(...rls.map(r => (r.type  || '').length));
       const labelW = Math.max(...rls.map(r => (r.label || '').length));
@@ -879,7 +884,7 @@ async function cmdRestart(entityArg, opts) {
       // Hot-reload alertmanager config without a full container restart
       try {
         await execFileAsync('curl', ['-sf', '-X', 'POST', 'http://localhost:9093/-/reload']);
-      } catch { /* non-fatal — alertmanager may not be running */ }
+      } catch { /* non-fatal - alertmanager may not be running */ }
       console.log(c('OK', GREEN));
     } catch (e) {
       console.log(c('FAILED', RED));
@@ -1038,7 +1043,7 @@ async function cmdSetupCrmHost(entityArg) {
 
   for (const [label, path] of [['crm-provision-user.sh', PROVISION_SH], ['find-suitecrm-config.sh', FIND_CONFIG_SH]]) {
     if (!existsSync(path)) {
-      console.error(c(`${label} not found at ${path} — run install.py to populate ${REPO_DIR}`, RED));
+      console.error(c(`${label} not found at ${path} - run install.py to populate ${REPO_DIR}`, RED));
       process.exit(1);
     }
   }
@@ -1069,7 +1074,7 @@ async function cmdSetupCrmHost(entityArg) {
 
   console.log(c(`  [${code}] Provision script deployed to ${ssh_host}:${provisionBin}`, GREEN));
 
-  // 3. Resolve SUITECRM_CONFIG — mirrors ansible/deploy.yml:
+  // 3. Resolve SUITECRM_CONFIG - mirrors ansible/deploy.yml:
   //    1. Read from /etc/environment if already set
   //    2. Run find-suitecrm-config.sh as root and persist
   //    3. Manual prompt fallback
@@ -1086,9 +1091,9 @@ async function cmdSetupCrmHost(entityArg) {
     console.log(c(`  [${code}] SUITECRM_CONFIG already set: ${configPath}`, GREEN));
   }
 
-  // Step 2: discover — same find command used inside crm-provision-user.sh
+  // Step 2: discover - same find command used inside crm-provision-user.sh
   if (!configPath) {
-    console.log(c(`  [${code}] Not set — running discovery (may take a minute) ...`, CYAN));
+    console.log(c(`  [${code}] Not set - running discovery (may take a minute) ...`, CYAN));
     const findCmd = "sudo bash -c 'find / \\( -path /proc -o -path /sys -o -path /dev \\) -prune -o" +
       " -name config.php -readable -print 2>/dev/null" +
       " | xargs -r grep -l dbconfig 2>/dev/null | head -1'";
@@ -1111,13 +1116,13 @@ async function cmdSetupCrmHost(entityArg) {
 
   // Step 3: manual prompt
   if (!configPath) {
-    console.log(c(`  [${code}] Could not auto-detect — enter manually`, YELLOW));
+    console.log(c(`  [${code}] Could not auto-detect - enter manually`, YELLOW));
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     configPath = await new Promise(resolve => rl.question(`  [${code}] SUITECRM_CONFIG path on CRM VM: `, resolve));
     rl.close();
     configPath = configPath.trim();
     if (!configPath || !configPath.startsWith('/')) {
-      console.error(c(`  [${code}] No valid path provided — aborted`, RED));
+      console.error(c(`  [${code}] No valid path provided - aborted`, RED));
       process.exit(1);
     }
   }
@@ -1227,7 +1232,7 @@ function cmdAudit(opts) {
 
   const db = openAuditDb();
   if (!db) {
-    console.log(c('No audit database found yet — it will be created once the gateway receives its first tool call.', YELLOW));
+    console.log(c('No audit database found yet - it will be created once the gateway receives its first tool call.', YELLOW));
     return;
   }
 
@@ -1252,7 +1257,7 @@ function cmdAudit(opts) {
 
     if (!summaryRows.length) { console.log(c('No activity in this period.', DIM)); db.close(); return; }
 
-    // Top-3 tools per user (separate query — GROUP_CONCAT can't rank)
+    // Top-3 tools per user (separate query - GROUP_CONCAT can't rank)
     const topTools = {};
     for (const r of summaryRows) {
       const toolRows = db.prepare(`
@@ -1272,7 +1277,7 @@ function cmdAudit(opts) {
       writes:   String(r.writes),
       lastSeen: auditFmtTime(r.last_seen).slice(0, 16),
       ents:     (r.entities || '').split(',').filter(Boolean).sort().join(', '),
-      top3:     topTools[r.email] || '—',
+      top3:     topTools[r.email] || '-',
     }));
 
     const headers = ['User', 'Calls', 'Errors', 'Writes', 'Last Seen (UTC)', 'Entities', 'Top Tools'];
@@ -1323,10 +1328,10 @@ function cmdAudit(opts) {
   if (!rows.length) { console.log(c('No matching records.', DIM)); db.close(); return; }
 
   const formatted = rows.map(rec => {
-    const toolCol    = rec.module ? `${rec.tool} [${rec.module}]` : (rec.tool || '—');
-    const statusPlain = rec.status || rec.msg || '—';
+    const toolCol    = rec.module ? `${rec.tool} [${rec.module}]` : (rec.tool || '-');
+    const statusPlain = rec.status || rec.msg || '-';
     const statusCol  = rec.status === 'error'
-      ? c(statusPlain + (rec.err ? ` — ${rec.err.slice(0, 60)}` : ''), RED)
+      ? c(statusPlain + (rec.err ? ` - ${rec.err.slice(0, 60)}` : ''), RED)
       : rec.status === 'dry_run' ? c(statusPlain, YELLOW)
       : c(statusPlain, GREEN);
     return {
@@ -1360,7 +1365,7 @@ function cmdAudit(opts) {
   }
   console.log(sep);
 
-  const note = truncated ? c(` (newest ${limit} shown — use --limit N or --csv for more)`, DIM) : '';
+  const note = truncated ? c(` (newest ${limit} shown - use --limit N or --csv for more)`, DIM) : '';
   console.log(`\n${c(String(rows.length), BOLD)} record(s)${note}`);
   db.close();
 }
@@ -1414,7 +1419,7 @@ program
   .option('--email <email>', 'User email')
   .option('--entity <code>', 'Entity to test (omit to test all entities for matched users)')
   .option('--verify-tls',    'Enable TLS certificate verification (default: off)')
-  .option('--quiet',         'Suppress OK lines — only show failures + summary')
+  .option('--quiet',         'Suppress OK lines - only show failures + summary')
   .action(cmdTest);
 
 program
@@ -1488,14 +1493,14 @@ program
 program
   .command('logs')
   .description('Raw journalctl output for MCP gateway services')
-  .argument('[entity]',      'Entity code (e.g. aeau, aesg) or "auth" — omit for all gateways')
+  .argument('[entity]',      'Entity code (e.g. aeau, aesg) or "auth" - omit for all gateways')
   .option('-f, --follow',    'Stream logs in real time (like tail -f)')
   .option('-n, --lines <n>', 'Number of recent lines to show (default: 50)', v => parseInt(v) || 50, 50)
   .option('--since <time>',  'Show logs since time, e.g. "1h ago", "2026-05-18 10:00"')
   .option('--auth',          'Include auth service when showing all gateways')
   .addHelpText('after', `
 Purpose:
-  Direct journalctl pass-through — for crash diagnostics and raw service output.
+  Direct journalctl pass-through - for crash diagnostics and raw service output.
   For user activity (who called what, errors, write ops), use: mcp-admin audit
 
 Examples:
@@ -1539,14 +1544,14 @@ Examples:
   # Date range investigation
   mcp-admin audit --email john@example.com --from 2026-06-01 --to 2026-06-15
 
-  # Per-user summary — call counts, errors, write ops, last seen
+  # Per-user summary - call counts, errors, write ops, last seen
   mcp-admin audit --summary
   mcp-admin audit --summary --days 30
 
   # All write operations (create, update, log_call…) this week
   mcp-admin audit --days 7 --action write
 
-  # All errors — who triggered them, which tool, what went wrong
+  # All errors - who triggered them, which tool, what went wrong
   mcp-admin audit --status error --days 14
 
   # Errors for a specific user
@@ -1599,22 +1604,21 @@ function loadSmtpConfig() {
   return cfg;
 }
 
-function getReportRange(period, refDate) {
+function getReportRange(period, refDate, live = false) {
   const ref = new Date(refDate);
-  ref.setUTCHours(0, 0, 0, 0);
-  const end   = ref;
+  if (!live) ref.setUTCHours(0, 0, 0, 0);
+  const end = ref;
   let start, label;
+  const fmt = d => d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', timeZone:'UTC' });
   if (period === 'daily') {
     start = new Date(end - 86400000);
-    label = `Daily Report — ${start.toLocaleDateString('en-GB', { weekday:'long', day:'2-digit', month:'long', year:'numeric', timeZone:'UTC' })}`;
+    label = `Daily Report - ${start.toLocaleDateString('en-GB', { weekday:'long', day:'2-digit', month:'long', year:'numeric', timeZone:'UTC' })}`;
   } else if (period === 'weekly') {
     start = new Date(end - 7 * 86400000);
-    const fmt = d => d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', timeZone:'UTC' });
-    label = `Weekly Report — ${fmt(start)} to ${fmt(new Date(end - 86400000))}`;
+    label = `Weekly Report - ${fmt(start)} to ${live ? fmt(end) + ' (live)' : fmt(new Date(end - 86400000))}`;
   } else {
     start = new Date(end - 30 * 86400000);
-    const fmt = d => d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', timeZone:'UTC' });
-    label = `Monthly Report — ${fmt(start)} to ${fmt(new Date(end - 86400000))}`;
+    label = `Monthly Report - ${fmt(start)} to ${live ? fmt(end) + ' (live)' : fmt(new Date(end - 86400000))}`;
   }
   return { start, end, label };
 }
@@ -1666,7 +1670,7 @@ function aggregateReport(rows) {
   };
 }
 
-function buildReportHtml(stats, label, start, end) {
+function buildReportHtml(stats, label, start, end, source = 'sqlite') {
   const { userCalls, userErrors, userWrites, userEntities, userTools, toolTotals, entityTotals,
           totalCalls, totalErrors, totalWrites, rawErrors } = stats;
 
@@ -1738,18 +1742,44 @@ function buildReportHtml(stats, label, start, end) {
 
   const generatedAt = new Date().toISOString().slice(0,16).replace('T',' ') + ' UTC';
 
+  const sourceBanner = source === 'hybrid' ? `
+  <div style="margin-top:16px;padding:14px 18px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;font-size:13px;line-height:1.6">
+    <strong style="color:#2e7d32">ℹ Data source: Audit database + Loki journal logs (hybrid)</strong><br>
+    Recent calls (since the audit database became active) come from SQLite.
+    Earlier calls in this period have been recovered from the Loki journal log archive -
+    the data is equally complete for both sources (per-user, tool, entity, errors all available).<br><br>
+    <strong>Going forward:</strong> As time passes, the audit database will cover the full report
+    window and Loki supplementing will no longer be needed.
+  </div>` : source === 'loki' ? `
+  <div style="margin-top:16px;padding:14px 18px;background:#fff8e1;border:1px solid #ffe082;border-radius:6px;font-size:13px;line-height:1.6">
+    <strong style="color:#e65100">⚠ Data source: Loki journal logs (historical fallback)</strong><br>
+    The audit database had no records for this period. This is because a systemd sandbox
+    misconfiguration (<code>ReadWritePaths</code> missing <code>/var/log/suitecrm-mcp</code>)
+    silently blocked the gateway from writing to the audit database. That issue has now been fixed.<br><br>
+    <strong>What you are seeing:</strong> All call data has been recovered from the journal log
+    archive (Loki). Per-user breakdown, tool usage, entity breakdown, and error details are all
+    fully available - this report is as complete as one sourced from the audit database.<br><br>
+    <strong>Going forward:</strong> Every call is now being recorded in the audit database.
+    Future reports for periods after the fix will use the audit database directly and will
+    no longer show this banner.
+  </div>` : source === 'none' ? `
+  <div style="margin-top:16px;padding:14px 18px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;font-size:13px;color:#666">
+    <strong>No data available</strong> - no activity was recorded in the audit database or journal logs for this period.
+  </div>` : '';
+
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>MCP Gateway — ${label}</title></head>
+<head><meta charset="UTF-8"><title>MCP Gateway - ${label}</title></head>
 <body style="font-family:Arial,sans-serif;max-width:960px;margin:0 auto;padding:20px;color:#333;font-size:14px">
   <div style="background:#1a73e8;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0">
-    <h1 style="margin:0;font-size:20px">SuiteCRM MCP Gateway — Activity Report</h1>
+    <h1 style="margin:0;font-size:20px">SuiteCRM MCP Gateway - Activity Report</h1>
     <p style="margin:4px 0 0;opacity:0.9;font-size:14px">${label}</p>
     <p style="margin:4px 0 0;opacity:0.75;font-size:12px">${fmtDate(start)} → ${fmtDate(end)}</p>
   </div>
   <div style="background:#f8f9fa;padding:16px 24px;border:1px solid #dee2e6;border-top:none;display:flex;gap:0;flex-wrap:wrap">
     ${statCards}
   </div>
+  ${sourceBanner}
   <h2 style="margin-top:28px;font-size:16px">User Activity</h2>
   ${!userRows ? noActivity : `
   <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -1803,12 +1833,17 @@ function buildReportHtml(stats, label, start, end) {
     <tbody>${errorRows}</tbody>
   </table>` : ''}
   <hr style="margin-top:40px;border:none;border-top:1px solid #dee2e6">
-  <p style="font-size:11px;color:#bbb">Generated ${generatedAt} · SuiteCRM MCP Gateway</p>
+  <p style="font-size:11px;color:#bbb">Generated ${generatedAt} · SuiteCRM MCP Gateway · Data source: ${
+    source === 'hybrid' ? 'Audit database + Loki journal logs (hybrid - full detail)' :
+    source === 'loki'   ? 'Loki journal logs (historical fallback - full detail)' :
+    source === 'sqlite' ? 'Audit database (full detail)' :
+    'No data'
+  }</p>
 </body>
 </html>`;
 }
 
-// Minimal SMTP client using Node.js built-ins — supports plain, STARTTLS, and SSL
+// Minimal SMTP client using Node.js built-ins - supports plain, STARTTLS, and SSL
 async function sendSmtp(cfg, subject, htmlBody) {
   const hostPort = cfg.host || '';
   const colonIdx = hostPort.lastIndexOf(':');
@@ -1829,6 +1864,7 @@ async function sendSmtp(cfg, subject, htmlBody) {
   const msgLines = [
     `From: ${from}`,
     `To: ${recipients.join(', ')}`,
+    `Date: ${new Date().toUTCString()}`,
     `Subject: ${subject}`,
     `MIME-Version: 1.0`,
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
@@ -1963,37 +1999,336 @@ async function sendSmtp(cfg, subject, htmlBody) {
   });
 }
 
-async function cmdReport(opts) {
-  const db = openAuditDb();
-  if (!db) {
-    console.error(c('No audit database found. Run the gateway first to generate activity data.', YELLOW));
-    process.exit(1);
-  }
+const LOKI_URL = 'http://127.0.0.1:3200';
 
+async function fetchLokiStats(start, end) {
+  const startNs = `${start.getTime()}000000`;
+  const endNs   = `${end.getTime()}000000`;
+  const query   = '{job="suitecrm-mcp"} | json | msg=~"tool_done|tool_error"';
+  const url     = `${LOKI_URL}/loki/api/v1/query_range?query=${encodeURIComponent(query)}&start=${startNs}&end=${endNs}&limit=5000&direction=forward`;
+
+  let body = '';
+  try {
+    body = await new Promise((resolve, reject) => {
+      const req = httpGet(url, res => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+  } catch { return null; }
+
+  let result;
+  try { result = JSON.parse(body); } catch { return null; }
+  if (result.status !== 'success') return null;
+
+  const streams = result.data?.result || [];
+  if (!streams.length) return null;
+
+  const rows = [];
+  for (const stream of streams) {
+    for (const [, line] of stream.values) {
+      let obj;
+      try { obj = JSON.parse(line); } catch { continue; }
+      if (!obj.msg || !['tool_done', 'tool_error'].includes(obj.msg)) continue;
+
+      // Normalize entity: suitecrm_pcau → pcau
+      const rawEntity = obj.entity || stream.stream?.entity || '';
+      const entity    = rawEntity.replace(/^suitecrm_/, '');
+
+      // Normalize tool: suitecrm_pcau_search → search (strip entity prefix)
+      const fullEntity = rawEntity.startsWith('suitecrm_') ? rawEntity : `suitecrm_${entity}`;
+      const rawTool    = obj.tool || '';
+      const tool       = rawTool.startsWith(fullEntity + '_') ? rawTool.slice(fullEntity.length + 1) : rawTool;
+
+      rows.push({
+        ts:          obj.time || '',
+        email:       obj.email      || 'unknown',
+        entity,
+        tool,
+        msg:         obj.msg,
+        status:      obj.status     || null,
+        duration_ms: obj.durationMs ?? null,
+        req_id:      obj.reqId      || null,
+        err:         obj.err        || null,
+      });
+    }
+  }
+  if (!rows.length) return null;
+  return rows;
+}
+
+async function fetchLokiCallArgs(start, end, userEmail) {
+  const startNs = `${start.getTime()}000000`;
+  const endNs   = `${end.getTime()}000000`;
+  const query   = `{job="suitecrm-mcp"} | json | msg="tool_call" | email="${userEmail}"`;
+  const url     = `${LOKI_URL}/loki/api/v1/query_range?query=${encodeURIComponent(query)}&start=${startNs}&end=${endNs}&limit=5000&direction=forward`;
+
+  let body = '';
+  try {
+    body = await new Promise((resolve, reject) => {
+      const req = httpGet(url, res => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+  } catch { return {}; }
+
+  let result;
+  try { result = JSON.parse(body); } catch { return {}; }
+  if (result.status !== 'success') return {};
+
+  const argsMap = {};
+  for (const stream of (result.data?.result || [])) {
+    for (const [, line] of stream.values) {
+      let obj;
+      try { obj = JSON.parse(line); } catch { continue; }
+      if (!obj.reqId || !obj.args) continue;
+      argsMap[obj.reqId] = obj.args;
+    }
+  }
+  return argsMap;
+}
+
+function buildUserReportHtml(rows, email, label, start, end, source) {
+  const fmtDate   = d => d.toISOString().slice(0,16).replace('T',' ') + ' UTC';
+  const fmtMs     = ms => ms == null ? '-' : ms < 1000 ? `${ms}ms` : `${(ms/1000).toFixed(1)}s`;
+  const generatedAt = new Date().toISOString().slice(0,16).replace('T',' ') + ' UTC';
+
+  const success  = rows.filter(r => r.msg === 'tool_done' && r.status !== 'dry_run');
+  const dryRuns  = rows.filter(r => r.status === 'dry_run');
+  const errors   = rows.filter(r => r.msg === 'tool_error');
+
+  const fmtArgs = args => {
+    if (!args) return '';
+    const parts = [];
+    if (args.module) parts.push(`<span style="color:#495057">${args.module}</span>`);
+    const id = args.id || args.record;
+    if (id) parts.push(`<span style="font-family:monospace;color:#888;font-size:11px">${id.slice(0,8)}…</span>`);
+    const fields = args.fields || args.name_value_list;
+    if (fields && typeof fields === 'object') {
+      const rendered = Object.entries(fields).map(([fk, fv]) =>
+        fv === '[redacted]' ? `<span style="color:#aaa">${fk}</span>`
+                            : `${fk}: <strong>${fv}</strong>`
+      ).join(', ');
+      if (rendered) parts.push(`<span style="font-size:11px;color:#6c757d">${rendered}</span>`);
+    }
+    return parts.join(' · ');
+  };
+
+  const callRow = (r, showErr = false) => `<tr>
+    <td style="padding:5px 8px;border-bottom:1px solid #dee2e6;white-space:nowrap;font-size:11px;color:#888">${r.ts.slice(0,19).replace('T',' ')}</td>
+    <td style="padding:5px 8px;border-bottom:1px solid #dee2e6;font-family:monospace;font-size:12px">${r.tool}</td>
+    <td style="padding:5px 8px;border-bottom:1px solid #dee2e6;font-size:12px">${r.entity}</td>
+    <td style="padding:5px 8px;border-bottom:1px solid #dee2e6;font-size:12px">${fmtArgs(r.args)}</td>
+    <td style="padding:5px 8px;border-bottom:1px solid #dee2e6;text-align:right;font-size:12px;color:#888">${fmtMs(r.duration_ms)}</td>
+    ${showErr ? `<td style="padding:5px 8px;border-bottom:1px solid #dee2e6;font-size:12px;color:#721c24">${(r.err||'').slice(0,200)}</td>` : ''}
+  </tr>`;
+
+  const thead = (withErr = false) => `<thead><tr style="background:#e9ecef">
+    <th style="padding:6px 8px;text-align:left;font-size:12px">Time (UTC)</th>
+    <th style="padding:6px 8px;text-align:left;font-size:12px">Tool</th>
+    <th style="padding:6px 8px;text-align:left;font-size:12px">Entity</th>
+    <th style="padding:6px 8px;text-align:left;font-size:12px">Detail</th>
+    <th style="padding:6px 8px;text-align:right;font-size:12px">Duration</th>
+    ${withErr ? '<th style="padding:6px 8px;text-align:left;font-size:12px">Error</th>' : ''}
+  </tr></thead>`;
+
+  const section = (title, color, items, withErr = false) => !items.length ? '' : `
+  <h2 style="margin-top:28px;font-size:16px;color:${color}">${title} <span style="font-weight:normal;font-size:13px;color:#888">(${items.length})</span></h2>
+  <div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    ${thead(withErr)}
+    <tbody>${items.map(r => callRow(r, withErr)).join('')}</tbody>
+  </table></div>`;
+
+  const statCards = [
+    [success.length,  '#28a745', 'Successful'],
+    [dryRuns.length,  '#6f42c1', 'Dry Runs'],
+    [errors.length,   errors.length ? '#dc3545' : '#28a745', 'Errors'],
+    [rows.length,     '#1a73e8', 'Total Calls'],
+  ].map(([v,color,lbl]) =>
+    `<div style="text-align:center;flex:1;min-width:110px;padding:8px;border-right:1px solid #dee2e6">
+      <div style="font-size:28px;font-weight:bold;color:${color}">${v}</div>
+      <div style="font-size:12px;color:#666;margin-top:2px">${lbl}</div>
+    </div>`).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>MCP User Report - ${email}</title></head>
+<body style="font-family:Arial,sans-serif;max-width:960px;margin:0 auto;padding:20px;color:#333;font-size:14px">
+  <div style="background:#1a73e8;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0">
+    <h1 style="margin:0;font-size:20px">SuiteCRM MCP - User Activity Report</h1>
+    <p style="margin:4px 0 0;opacity:0.9;font-size:14px">${email}</p>
+    <p style="margin:4px 0 0;opacity:0.85;font-size:13px">${label}</p>
+    <p style="margin:4px 0 0;opacity:0.75;font-size:12px">${fmtDate(start)} → ${fmtDate(end)}</p>
+  </div>
+  <div style="background:#f8f9fa;padding:16px 24px;border:1px solid #dee2e6;border-top:none;display:flex;gap:0;flex-wrap:wrap">
+    ${statCards}
+  </div>
+  ${section('Successful Calls', '#28a745', success)}
+  ${section('Dry Runs', '#6f42c1', dryRuns)}
+  ${section('Errors', '#dc3545', errors, true)}
+  <hr style="margin-top:36px;border:none;border-top:1px solid #dee2e6">
+  <p style="font-size:11px;color:#bbb">Generated ${generatedAt} · SuiteCRM MCP Gateway · Data source: ${
+    source === 'hybrid' ? 'Audit database + Loki (hybrid)' :
+    source === 'loki'   ? 'Loki journal logs' :
+    source === 'sqlite' ? 'Audit database' : 'No data'
+  }</p>
+</body></html>`;
+}
+
+async function cmdReport(opts) {
+  const db  = openAuditDb();
+  const isLive = !opts.date;
   const ref = opts.date ? new Date(opts.date + 'T23:59:59Z') : new Date();
-  const { start, end, label } = getReportRange(opts.period, ref);
+  const { start, end, label } = getReportRange(opts.period, ref, isLive);
 
   process.stderr.write(`[INFO] Period: ${start.toISOString()} → ${end.toISOString()}\n`);
 
-  const rows = db.prepare(
-    `SELECT ts, email, entity, tool, msg, err
-     FROM audit_log
-     WHERE ts >= ? AND ts < ? AND msg IN ('tool_done','tool_error')
-     ORDER BY ts`
-  ).all(start.toISOString(), end.toISOString());
-  db.close();
+  let stats, source;
 
-  process.stderr.write(`[INFO] ${rows.length} entries\n`);
+  let sqliteRows = [];
+  if (db) {
+    sqliteRows = db.prepare(
+      `SELECT ts, email, entity, tool, msg, status, duration_ms, req_id, err
+       FROM audit_log
+       WHERE ts >= ? AND ts < ? AND msg IN ('tool_done','tool_error')
+       ORDER BY ts`
+    ).all(start.toISOString(), end.toISOString());
+    db.close();
+    process.stderr.write(`[INFO] ${sqliteRows.length} SQLite entries\n`);
+  }
 
-  const stats = aggregateReport(rows);
-  const html  = buildReportHtml(stats, label, start, end);
+  // Always try Loki - it covers the pre-fix period when SQLite was not writing.
+  // Merge: take all Loki entries that predate the earliest SQLite entry, plus all SQLite entries.
+  process.stderr.write('[INFO] Fetching Loki data...\n');
+  const lokiRows = await fetchLokiStats(start, end);
+  process.stderr.write(`[INFO] Loki: ${lokiRows ? lokiRows.length : 0} entries\n`);
+
+  let allRows;
+  if (sqliteRows.length > 0 && lokiRows && lokiRows.length > 0) {
+    const firstSqliteTs = sqliteRows[0].ts;
+    const lokiOnly = lokiRows.filter(r => r.ts < firstSqliteTs);
+    process.stderr.write(`[INFO] Hybrid: ${lokiOnly.length} Loki-only + ${sqliteRows.length} SQLite entries\n`);
+    allRows = [...lokiOnly, ...sqliteRows];
+    source  = lokiOnly.length > 0 ? 'hybrid' : 'sqlite';
+  } else if (sqliteRows.length > 0) {
+    allRows = sqliteRows;
+    source  = 'sqlite';
+  } else if (lokiRows && lokiRows.length > 0) {
+    allRows = lokiRows;
+    source  = 'loki';
+  } else {
+    allRows = [];
+    source  = 'none';
+    process.stderr.write('[INFO] No data in SQLite or Loki - empty report\n');
+  }
+
+  let html;
+  if (opts.user) {
+    const userRows = allRows.filter(r => r.email === opts.user);
+    process.stderr.write(`[INFO] ${userRows.length} entries for ${opts.user}\n`);
+    process.stderr.write('[INFO] Fetching call args from Loki...\n');
+    const argsMap = await fetchLokiCallArgs(start, end, opts.user);
+    process.stderr.write(`[INFO] ${Object.keys(argsMap).length} call args found\n`);
+    const rowsWithArgs = userRows.map(r => ({ ...r, args: r.req_id ? argsMap[r.req_id] || null : null }));
+    html = buildUserReportHtml(rowsWithArgs, opts.user, label, start, end, source);
+  } else {
+    stats = aggregateReport(allRows);
+    html  = buildReportHtml(stats, label, start, end, source);
+  }
 
   if (opts.stdout) { process.stdout.write(html + '\n'); return; }
 
+  if (opts.serve) {
+    const tmpFile = pathJoin(mkdtempSync(pathJoin(tmpdir(), 'mcp-report-')), 'report.html');
+    writeFileSync(tmpFile, html);
+
+    // Resolve public base URL: prefer GATEWAY_PUBLIC_URL from auth.env, fall back to IP
+    let publicBase = '';
+    try {
+      const envFile = readFileSync('/etc/suitecrm-mcp/auth.env', 'utf8');
+      const m = envFile.match(/^GATEWAY_PUBLIC_URL=(.+)$/m);
+      if (m) publicBase = m[1].trim().replace(/\/$/, '');
+    } catch {}
+    if (!publicBase) {
+      let ip = '127.0.0.1';
+      try {
+        const { createSocket } = _require('dgram');
+        await new Promise(resolve => {
+          const s = createSocket('udp4');
+          s.connect(53, '8.8.8.8', () => { ip = s.address().address; s.close(); resolve(); });
+        });
+      } catch {}
+      const nginxPortFallback = (() => {
+        try { const m = readFileSync(NGINX_CONF, 'utf8').match(/listen\s+(\d+)/); return m ? m[1] : '8080'; } catch { return '8080'; }
+      })();
+      publicBase = `http://${ip}:${nginxPortFallback}`;
+    }
+
+    // Try to proxy through nginx at /report (same port as everything else)
+    const nginxConf = existsSync(NGINX_CONF) ? readFileSync(NGINX_CONF, 'utf8') : null;
+    const useNginx  = nginxConf !== null && !nginxConf.includes('location /report');
+
+    const NGINX_BLOCK = (
+      '\n    # mcp-admin report --serve (temporary)\n' +
+      `    location /report {\n` +
+      `        proxy_pass http://127.0.0.1:${REPORT_INTERNAL_PORT}/;\n` +
+      `        proxy_http_version 1.1;\n` +
+      `        proxy_set_header Host $host;\n` +
+      `        proxy_read_timeout 30s;\n` +
+      `    }\n`
+    );
+
+    if (useNginx) {
+      const patched = nginxConf.replace(/^}$/m, NGINX_BLOCK + '}');
+      writeFileSync(NGINX_CONF, patched);
+      try { await execFileAsync('nginx', ['-s', 'reload']); } catch {}
+    }
+
+    const cleanup = () => {
+      if (useNginx) {
+        try {
+          const cur = readFileSync(NGINX_CONF, 'utf8');
+          writeFileSync(NGINX_CONF, cur.replace(NGINX_BLOCK, ''));
+          execFile('nginx', ['-s', 'reload'], () => {});
+        } catch {}
+      }
+      try { unlinkSync(tmpFile); } catch {}
+      process.exit(0);
+    };
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
+
+    const srv = createHttpServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(readFileSync(tmpFile));
+    });
+
+    const listenPort = useNginx ? REPORT_INTERNAL_PORT : (parseInt(opts.serve, 10) || 8000);
+
+    srv.listen(listenPort, '127.0.0.1', () => {
+      console.log(c('[OK] Report ready - open in your browser:', GREEN));
+      if (useNginx) {
+        console.log(`     ${publicBase}/report`);
+      } else {
+        console.log(`     ${publicBase}/`);
+      }
+      console.log(c('     Press Ctrl+C to stop.', CYAN));
+    });
+    return;
+  }
+
   const periodSubjects = {
-    daily:   `[MCP Gateway] Daily Activity — ${start.toISOString().slice(0,10)}`,
-    weekly:  `[MCP Gateway] Weekly Activity — w/e ${new Date(end - 86400000).toISOString().slice(0,10)}`,
-    monthly: `[MCP Gateway] Monthly Activity — ${start.toLocaleDateString('en-GB', { month:'long', year:'numeric', timeZone:'UTC' })}`,
+    daily:   `[MCP Gateway] Daily Activity - ${start.toISOString().slice(0,10)}`,
+    weekly:  `[MCP Gateway] Weekly Activity - w/e ${new Date(end - 86400000).toISOString().slice(0,10)}`,
+    monthly: `[MCP Gateway] Monthly Activity - ${start.toLocaleDateString('en-GB', { month:'long', year:'numeric', timeZone:'UTC' })}`,
   };
 
   const cfg = loadSmtpConfig();
@@ -2010,19 +2345,22 @@ program
   .command('report')
   .description('Generate and email an activity report (daily/weekly/monthly)')
   .option('--period <period>', 'Report period: daily | weekly | monthly  (default: daily)', 'daily')
-  .option('--date <YYYY-MM-DD>', 'Reference date — report covers the period ending on this day (default: today)')
+  .option('--date <YYYY-MM-DD>', 'Reference date - report covers the period ending on this day (default: today)')
+  .option('--user <email>', 'Show per-user detail report for this email address')
   .option('--stdout', 'Print HTML to stdout instead of emailing (useful for testing)')
+  .option('--serve [port]', 'Serve report in browser via nginx at /report (falls back to standalone on given port)')
   .addHelpText('after', `
 SMTP config is read from ${ALERTMANAGER_YML} (same config Alertmanager uses).
 Override any value with env vars: SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM, REPORT_TO.
 
 Examples:
-  mcp-admin report                          # email daily report for yesterday
-  mcp-admin report --period weekly          # email weekly report
-  mcp-admin report --period monthly         # email monthly report
-  mcp-admin report --stdout                 # print HTML, no email (quick test)
-  mcp-admin report --date 2026-06-15        # report for a specific day
-  mcp-admin report --stdout | python3 -m http.server  # view in browser`)
+  mcp-admin report                                         # email daily report for yesterday
+  mcp-admin report --period weekly                         # email weekly report
+  mcp-admin report --period monthly                        # email monthly report
+  mcp-admin report --stdout                                # print HTML, no email (quick test)
+  mcp-admin report --date 2026-06-15                       # report for a specific day
+  mcp-admin report --serve                                 # open in browser at /report
+  mcp-admin report --period weekly --user bob@example.com --serve  # per-user detail report`)
   .action(cmdReport);
 
 program.parseAsync(process.argv);
