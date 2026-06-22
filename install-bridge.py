@@ -204,6 +204,64 @@ def prompt_choice(prompt, allow_empty=False):
             return value
 
 
+def prompt_gateway_url():
+    print()
+    info("No --gateway provided.")
+    while True:
+        raw = prompt_choice("Enter gateway base URL (e.g. https://mcp.yourcompany.com): ")
+        try:
+            return validate_gateway_url(raw)
+        except SystemExit:
+            warn("Invalid URL - must be https://host with no path. Try again.")
+
+
+def prompt_entities():
+    print()
+    info("No entity info provided.")
+    while True:
+        mode = prompt_choice("Install mode - enter 'single' or 'multi': ").lower()
+        if mode in ("single", "multi"):
+            break
+        warn("Please enter 'single' or 'multi'.")
+
+    if mode == "multi":
+        while True:
+            path = prompt_choice("Path to entities.json: ")
+            if Path(path).exists():
+                break
+            warn(f"File not found: {path!r}")
+        with open(path) as f:
+            try:
+                data = json.load(f)
+            except Exception as e:
+                error(f"Could not parse {path}: {e}")
+        entities = {}
+        for code, val in data.items():
+            validate_code(code)
+            label = val.get("label", code) if isinstance(val, dict) else str(val)
+            validate_label(label)
+            entities[code] = label
+        if not entities:
+            error("entities.json is empty")
+        return entities, True
+
+    while True:
+        code = prompt_choice("Entity code (letters, digits, hyphens, underscores): ")
+        try:
+            validate_code(code)
+            break
+        except SystemExit:
+            warn("Invalid code. Try again.")
+    while True:
+        label = prompt_choice(f"Entity label (human-readable name) [{code}]: ", allow_empty=True) or code
+        try:
+            validate_label(label)
+            break
+        except SystemExit:
+            warn("Invalid label. Try again.")
+    return {code: label}, False
+
+
 def prompt_for_users(candidates):
     if len(candidates) == 1:
         return candidates
@@ -449,7 +507,7 @@ function pollBridgeSession(nonce) {{
           saveToken(data.api_key);
           activeNonce  = null;
           clientSecret = null;
-          process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received - connecting\\n`);
+          process.stderr.write(`[SuiteCRM ${{ENTITY_CODE}}] Token received — connecting\\n`);
           backoffIdx = 0; nextRetryAt = 0;
           connect();
           return;
@@ -822,8 +880,8 @@ def main():
         description="SuiteCRM MCP Bridge Installer for OpenClaw",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--gateway",  required=True,
-                        help="Gateway base URL, e.g. https://mcp.yourcompany.com (no path)")
+    parser.add_argument("--gateway",
+                        help="Gateway base URL, e.g. https://mcp.yourcompany.com (no path); prompted if omitted")
     parser.add_argument("--entities", metavar="FILE",
                         help="Path to entities.json (multi-entity mode)")
     parser.add_argument("--code",     help="Entity code for single-entity mode")
@@ -840,9 +898,13 @@ def main():
 
     if os.geteuid() != 0: error("Run as root (sudo)")
 
-    gateway_url = validate_gateway_url(args.gateway)
-    entities    = load_entities(args)
-    is_multi    = bool(args.entities)
+    gateway_url = validate_gateway_url(args.gateway) if args.gateway else prompt_gateway_url()
+
+    if args.entities or args.code:
+        entities = load_entities(args)
+        is_multi = bool(args.entities)
+    else:
+        entities, is_multi = prompt_entities()
     attach_spec = resolve_attach_arg(args.attach)
 
     if args.remove:
