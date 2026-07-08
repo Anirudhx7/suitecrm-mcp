@@ -8,7 +8,7 @@ connect OpenClaw to a remote suitecrm-mcp gateway via SSE.
 Compatible with suitecrm-mcp gateway v3.0+.
 
 Auth flow (no CLI required on the OpenClaw machine):
-  1. Bridge plugin starts and checks ~/.suitecrm-mcp/gateway.token.
+  1. Bridge plugin starts and checks ~/.openclaw/extensions/gateway.token.
   2. If no token, it prints the auth URL and polls the gateway in the background.
   3. User visits the auth URL in a browser, logs in via the identity provider.
   4. Gateway delivers a token to the poll endpoint; bridge saves it and connects.
@@ -401,7 +401,7 @@ def _make_bridge_js(code, label, gateway_url, is_multi):
  * Compatible with suitecrm-mcp gateway v3.0+
  *
  * Auth flow (lazy, nonce-based):
- *   1. Token is read from ~/.suitecrm-mcp/gateway.token when a tool is called.
+ *   1. Token is read from ~/.openclaw/extensions/gateway.token when a tool is called.
  *   2. If no token, requests a one-time login URL from the gateway and returns
  *      it as the tool response (visible in Teams chat). Auth is NOT triggered
  *      at startup or while idle.
@@ -422,8 +422,8 @@ const SSE_URL          = '{sse_url}';
 const BRIDGE_START_URL = '{gateway_url}/auth/bridge/start';
 const BRIDGE_POLL_BASE = '{gateway_url}/auth/bridge/poll/';
 const LINUX_USER       = userInfo().username;
-const TOKEN_FILE       = join(homedir(), '.suitecrm-mcp', 'gateway.token');
-const TOKEN_DIR        = join(homedir(), '.suitecrm-mcp');
+const TOKEN_FILE       = join(homedir(), '.openclaw', 'extensions', 'gateway.token');
+const TOKEN_DIR        = join(homedir(), '.openclaw', 'extensions');
 const TOOL_NAMES       = {tool_names};
 
 const BACKOFF_MS = [5_000, 15_000, 30_000, 60_000];
@@ -803,17 +803,11 @@ def _patch_openclaw_config(username, openclaw_dir, entities, agent_selection, is
 def install_for_user(username, entities, gateway_url, is_multi, agent_selection):
     home         = f"/home/{username}"
     openclaw_dir = f"{home}/.openclaw"
-    token_dir    = f"{home}/.suitecrm-mcp"
 
     if not os.path.isdir(home):
         warn(f"Home directory not found for {username} -- skipping"); return
     if not os.path.isdir(openclaw_dir):
         warn(f"OpenClaw not installed for {username} (no {openclaw_dir}) -- skipping"); return
-
-    # Token directory: bridge reads/writes ~/.suitecrm-mcp/gateway.token
-    os.makedirs(token_dir, exist_ok=True)
-    run(["chown", f"{username}:{username}", token_dir])
-    run(["chmod", "700", token_dir])
 
     for code, label in entities.items():
         _install_bridge_plugin(username, openclaw_dir, code, label, gateway_url, is_multi)
@@ -825,7 +819,7 @@ def install_for_user(username, entities, gateway_url, is_multi, agent_selection)
 def remove_for_user(username, entities, is_multi):
     home         = f"/home/{username}"
     openclaw_dir = f"{home}/.openclaw"
-    token_dir    = f"{home}/.suitecrm-mcp"
+    token_dir    = f"{home}/.openclaw/extensions"
 
     info(f"Removing bridge from {username}...")
     for code in entities:
