@@ -30,7 +30,7 @@ import { writeAuditEvent } from './audit-db.mjs';
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const REQUIRED = ['SUITECRM_ENDPOINT', 'SUITECRM_PREFIX', 'PORT', 'AUTH0_DOMAIN', 'AUTH0_AUDIENCE'];
+const REQUIRED = ['SUITECRM_ENDPOINT', 'SUITECRM_PREFIX', 'PORT'];
 const missing = REQUIRED.filter(k => !process.env[k]);
 if (missing.length) { console.error(`Missing required env vars: ${missing.join(', ')}`); process.exit(1); }
 
@@ -43,11 +43,10 @@ const PREFIX         = process.env.SUITECRM_PREFIX.trim();
 const logger = pino({ base: { entity: PREFIX, strategy: process.env.SUITECRM_API_VERSION || '4' }, timestamp: pino.stdTimeFunctions.isoTime }, process.stderr);
 const PORT           = parseInt(process.env.PORT, 10);
 const CODE           = (process.env.SUITECRM_CODE || '').trim();
-const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN.trim();
-const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE.trim();
+const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE ? process.env.AUTH0_AUDIENCE.trim() : '';
 const REQUIRED_GROUP = (process.env.REQUIRED_GROUP || '').trim();
-const NS             = AUTH0_AUDIENCE + '/';
-const GROUPS_CLAIM   = process.env.OAUTH_GROUPS_CLAIM || (NS + 'groups');
+const NS             = AUTH0_AUDIENCE ? AUTH0_AUDIENCE + '/' : '';
+const GROUPS_CLAIM   = process.env.OAUTH_GROUPS_CLAIM || (AUTH0_AUDIENCE ? NS + 'groups' : 'groups');
 const TLS_OK         = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
 const METRICS_PORT   = parseInt(process.env.METRICS_PORT || '9090', 10);
 const METRICS_BIND   = (process.env.METRICS_BIND || '127.0.0.1').trim();
@@ -445,7 +444,7 @@ async function jwtMiddleware(req, res, next) {
         writeAuditEvent({ ts: new Date().toISOString(), email: 'unknown', entity: CODE, tool: '', module: null, msg: 'auth_failed', err: `session_expired: ${session.sub}`, reqId: null });
         return res.status(401).json({ error: 'Session expired' });
       }
-      req.auth = { sub: session.sub, email: session.email, [`${NS}samaccountname`]: session.email, [GROUPS_CLAIM]: session.groups || [] };
+      req.auth = { sub: session.sub, email: session.email, [GROUPS_CLAIM]: session.groups || [] };
       return next();
     }
   } catch (err) { return next(err); }

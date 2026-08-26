@@ -39,21 +39,70 @@ function parseCookies(req) {
 
 const execFileAsync = promisify(execFile);
 
-const REQUIRED_AUTH = ['AUTH0_DOMAIN','AUTH0_CLIENT_ID','AUTH0_CLIENT_SECRET','AUTH0_AUDIENCE','GATEWAY_PUBLIC_URL'];
-const missingAuth = REQUIRED_AUTH.filter(k => !process.env[k]);
-if (missingAuth.length) { pino().error({ vars: missingAuth }, 'missing_required_env_vars'); process.exit(1); }
-
-const AUTH0_DOMAIN        = process.env.AUTH0_DOMAIN;
-const AUTH0_CLIENT_ID     = process.env.AUTH0_CLIENT_ID;
-const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
-const AUTH0_AUDIENCE      = process.env.AUTH0_AUDIENCE;
+// ── GATEWAY_PUBLIC_URL must be set before building CALLBACK_URL ──────────────
+if (!process.env.GATEWAY_PUBLIC_URL) {
+  pino().error({ msg: 'GATEWAY_PUBLIC_URL is required' });
+  process.exit(1);
+}
 const GATEWAY_URL         = process.env.GATEWAY_PUBLIC_URL;
 const CALLBACK_URL        = `${GATEWAY_URL}/auth/callback`;
 const CRM_HOSTS_FILE      = process.env.CRM_HOSTS_FILE || '/etc/suitecrm-mcp/crm-hosts.json';
 const SESSION_TTL_MS      = parseInt(process.env.SESSION_TTL_DAYS || '30') * 24 * 60 * 60 * 1000;
 const SESSION_TTL_DAYS    = parseInt(process.env.SESSION_TTL_DAYS || '30');
 const BRIDGE_SESSION_TTL_MS = 15 * 60 * 1000;
-const NS = AUTH0_AUDIENCE + '/';
+
+// ── OIDC / Auth0 provider configuration ─────────────────────────────────────
+const hasOIDC  = process.env.OIDC_ISSUER_URL && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET;
+const hasAuth0 = process.env.AUTH0_DOMAIN   && process.env.AUTH0_CLIENT_ID && process.env.AUTH0_CLIENT_SECRET && process.env.AUTH0_AUDIENCE;
+
+if (!hasOIDC && !hasAuth0) {
+  pino().error({ msg: 'Either OIDC_ISSUER_URL+OIDC_CLIENT_ID+OIDC_CLIENT_SECRET or AUTH0_* environment variables must be set' });
+  process.exit(1);
+}
+
+let CLIENT_ID, CLIENT_SECRET, NS, OAUTH_EMAIL_CLAIM, OAUTH_GROUPS_CLAIM, OIDC_CONF, SCOPES;
+let AUTH0_DOMAIN = '';
+
+if (hasOIDC) {
+  // Generic OIDC mode — discover endpoints from the provider
+  CLIENT_ID     = process.env.OIDC_CLIENT_ID;
+  CLIENT_SECRET = process.env.OIDC_CLIENT_SECRET;
+  NS            = '';
+  OAUTH_EMAIL_CLAIM  = process.env.OAUTH_EMAIL_CLAIM  || 'email';
+  OAUTH_GROUPS_CLAIM = process.env.OAUTH_GROUPS_CLAIM || 'groups';
+  SCOPES        = 'openid profile email groups';
+
+  const issuer = process.env.OIDC_ISSUER_URL.replace(/\/+$/, '');
+  if (!global.OIDC_DISCOVERY_PROMISE) {
+    global.OIDC_DISCOVERY_PROMISE = fetch(`${issuer}/.well-known/openid-configuration`).then(r => {
+      if (!r.ok) throw new Error(`OIDC discovery failed: ${r.status}`);
+      return r.json();
+    });
+  }
+  OIDC_CONF = await global.OIDC_DISCOVERY_PROMISE;
+} else {
+  // Auth0 backward-compatible mode — hardcoded endpoint paths
+  AUTH0_DOMAIN  = process.env.AUTH0_DOMAIN;
+  CLIENT_ID     = process.env.AUTH0_CLIENT_ID;
+  CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
+  const AUDIENCE = process.env.AUTH0_AUDIENCE;
+  NS            = AUDIENCE + '/';
+  OAUTH_EMAIL_CLAIM  = process.env.OAUTH_EMAIL_CLAIM  || (NS + 'samaccountname');
+  OAUTH_GROUPS_CLAIM = process.env.OAUTH_GROUPS_CLAIM || (NS + 'groups');
+  SCOPES        = 'openid profile email offline_access';
+  OIDC_CONF     = null;
+}
+
+/** Resolve an OIDC endpoint URL from discovery or Auth0 hardcoded paths. */
+function getEndpoint(key) {
+  if (OIDC_CONF) return OIDC_CONF[key];
+  const map = {
+    authorization_endpoint: `https://${AUTH0_DOMAIN}/authorize`,
+    token_endpoint:         `https://${AUTH0_DOMAIN}/oauth/token`,
+    userinfo_endpoint:      `https://${AUTH0_DOMAIN}/userinfo`,
+  };
+  return map[key];
+}
 
 const logger = pino({
   base: { service: 'suitecrm-mcp-auth' },
@@ -166,12 +215,12 @@ function loadEntities() {
 async function exchangeCode(code) {
   const body = new URLSearchParams({
     grant_type:    'authorization_code',
-    client_id:     AUTH0_CLIENT_ID,
-    client_secret: AUTH0_CLIENT_SECRET,
+    client_id:     CLIENT_ID,
+    client_secret: CLIENT_SECRET,
     code,
     redirect_uri:  CALLBACK_URL,
   });
-  const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
+  const res = await fetch(getEndpoint('token_endpoint'), {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body:    body.toString(),
@@ -191,15 +240,16 @@ function decodeJwtPayload(token) {
 
 async function verifyAndDecodeAccessToken(accessToken) {
   // Validate token server-side via Auth0 userinfo (rejects tampered/expired tokens)
-  const uiRes = await fetch(`https://${AUTH0_DOMAIN}/userinfo`, {
+  const uiRes = await fetch(getEndpoint('userinfo_endpoint'), {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!uiRes.ok) throw new Error(`Access token rejected by Auth0: ${uiRes.status}`);
+  if (!uiRes.ok) throw new Error(`Access token rejected: ${uiRes.status}`);
 
   const payload = decodeJwtPayload(accessToken);
   const now = Math.floor(Date.now() / 1000);
   if (payload.exp && payload.exp < now) throw new Error('Token expired');
-  if (payload.iss && payload.iss !== `https://${AUTH0_DOMAIN}/`) {
+  const expectedIssuer = OIDC_CONF ? OIDC_CONF.issuer : `https://${AUTH0_DOMAIN}/`;
+  if (payload.iss && payload.iss !== expectedIssuer) {
     throw new Error(`Issuer mismatch: got ${payload.iss}`);
   }
   return payload;
@@ -306,10 +356,10 @@ app.get('/auth/login', loginLimiter, (req, res) => {
   const nonce  = qs(req.query.nonce) || undefined;
   const params = new URLSearchParams({
     response_type: 'code',
-    client_id:     AUTH0_CLIENT_ID,
+    client_id:     CLIENT_ID,
     redirect_uri:  CALLBACK_URL,
-    scope:         'openid profile email offline_access',
-    audience:      AUTH0_AUDIENCE,
+    scope:         SCOPES,
+    ...(!hasOIDC ? { audience: process.env.AUTH0_AUDIENCE } : {}),
   });
   let state;
   if (nonce && NONCE_RE.test(nonce)) {
@@ -320,7 +370,7 @@ app.get('/auth/login', loginLimiter, (req, res) => {
     res.cookie('oa_state', state, { httpOnly: true, sameSite: 'lax', secure: GATEWAY_URL.startsWith('https://'), maxAge: 300000 });
   }
   params.set('state', state);
-  res.redirect(`https://${AUTH0_DOMAIN}/authorize?${params}`);
+  res.redirect(getEndpoint('authorization_endpoint') + '?' + params.toString());
 });
 
 // GET /auth/callback -> exchange code, provision CRM, store token, show success UI
@@ -363,9 +413,9 @@ app.get('/auth/callback', loginLimiter, async (req, res) => {
     const payload = await verifyAndDecodeAccessToken(tokens.access_token);
 
     const sub        = payload.sub;
-    const sam        = payload[`${NS}samaccountname`] || '';
+    const sam        = payload[OAUTH_EMAIL_CLAIM] || '';
     const email      = sam.includes('@') ? sam : (payload.email || '');
-    const userGroups = payload[`${NS}groups`] || [];
+    const userGroups = payload[OAUTH_GROUPS_CLAIM] || [];
 
     // Email is now the primary identity key (profiles, sessions, sid mappings).
     // Auth0 sub always exists, but email/samaccountname may be absent in some
